@@ -444,15 +444,7 @@ function desktop.run()
         if event == "mouse_click" then
             K.mouse.x = p2
             K.mouse.y = p3
-            local mx, my = p2, p3
-            -- Double-click detection
-            local now = os.clock and os.clock() or 0
-            local isDouble = (now - lastClickTime < 0.4) and math.abs(mx - lastClickX) <= 2 and math.abs(my - lastClickY) <= 2
-            lastClickTime = now
-            lastClickX = mx
-            lastClickY = my
-
-            local action = desktop.handleClick(mx, my, p1)
+            local action = desktop.handleClick(p2, p3, p1)
             needsRedraw = true
 
             if action == "reboot" then
@@ -462,19 +454,14 @@ function desktop.run()
                 os.reboot()
             elseif action == "shutdown" then
                 running = false
-            elseif action == "desktop_click" then
-                -- Context menu or selection on desktop
-            elseif action then
-                -- Open apps (mouse action already handled in handleClick)
-                if action == "files" then
-                    desktop.runFileManager()
-                elseif action == "edit" then
-                    desktop.runEditor()
-                elseif action == "settings" then
-                    desktop.runSettings()
-                elseif action == "shell" then
-                    desktop.runShell()
-                end
+            elseif action == "files" then
+                desktop.runFileManager()
+            elseif action == "edit" then
+                desktop.runEditor()
+            elseif action == "settings" then
+                desktop.runSettings()
+            elseif action == "shell" then
+                desktop.runShell()
             end
 
         elseif event == "mouse_drag" then
@@ -485,13 +472,6 @@ function desktop.run()
 
         elseif event == "mouse_up" then
             desktop.handleMouseUp()
-            needsRedraw = true
-
-        elseif event == "mouse_scroll" then
-            -- Scroll in active window
-            if desktop.activeWin and desktop.activeWin.onScroll then
-                pcall(desktop.activeWin.onScroll, desktop.activeWin, p1)
-            end
             needsRedraw = true
 
         elseif event == "key" then
@@ -516,58 +496,6 @@ function desktop.run()
     K.clear()
     K.fillRect(0, 0, K.w, K.h, K.PAL.BLACK)
     K.drawPixelText(10, 10, "CCOS shutdown. Goodbye!", K.PAL.WHITE)
-end
-
-        local event = os.pullEvent()
-
-        if event[1] == "mouse_click" then
-            local action = desktop.handleClick(event[3], event[4], event[5])
-            needsRedraw = true
-
-            if action == "reboot" then
-                K.clear()
-                K.drawPixelText(10, 10, "Rebooting...", K.PAL.WHITE)
-                sleep(0.5)
-                os.reboot()
-            elseif action == "shutdown" then
-                running = false
-            elseif action == "files" then
-                desktop.runFileManager()
-            elseif action == "edit" then
-                desktop.runEditor()
-            elseif action == "settings" then
-                desktop.runSettings()
-            elseif action == "shell" then
-                desktop.runShell()
-            end
-
-        elseif event[1] == "mouse_drag" then
-            desktop.handleDrag(event[3], event[4])
-            needsRedraw = true
-
-        elseif event[1] == "mouse_up" then
-            desktop.handleMouseUp()
-            needsRedraw = true
-
-        elseif event[1] == "key" then
-            if event[2] == keys.q and desktop.startMenuOpen then
-                desktop.startMenuOpen = false
-                needsRedraw = true
-            else
-                desktop.handleKey(event[2], nil)
-            end
-
-        elseif event[1] == "char" then
-            desktop.handleKey(nil, event[2])
-
-        elseif event[1] == "timer" then
-            needsRedraw = true
-        end
-    end
-
-    K.clear()
-    K.fillRect(0, 0, K.w, K.h, K.PAL.BLACK)
-    K.drawPixelText(10, 10, "CCOS shutdown.", K.PAL.WHITE)
 end
 
 -- ============================================================
