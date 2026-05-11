@@ -16,6 +16,7 @@ local FILES = {
     "desktop.lua",      -- This is the FIXED version
     "api.lua",
     "kernel.lua",
+	"gui.lua",
 }
 
 local function clear()
