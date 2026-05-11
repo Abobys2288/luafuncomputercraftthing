@@ -1,10 +1,10 @@
 --[[
-    fastfetch for CC:Tweaked v2
+    fastfetch for CC:Tweaked v3
+    - black background, colored text (like real fastfetch)
+    - ASCII logo on the left, info on the right
     - adaptive terminal / monitor
     - safe pcall on every peripheral call
-    - color when available
     - watch mode with Q to quit
-    - compact aligned output
 ]]
 
 local C = {}
@@ -18,6 +18,11 @@ C.GREEN = 8192
 C.CYAN = 512
 C.BLUE = 2048
 C.ORANGE = 4
+C.PINK = 16384
+C.LIME = 8192
+C.PURPLE = 1024
+C.BROWN = 4096
+C.MAGENTA = 32
 
 local function pcallWrap(fn)
     local ok, res = pcall(fn)
@@ -68,65 +73,42 @@ local function resetColors(d)
     setColors(d, C.WHITE, C.BLACK)
 end
 
-local function writeCenter(d, y, text, w)
-    local x = math.floor((w - #text) / 2) + 1
-    if x < 1 then x = 1 end
-    d.setCursorPos(x, y)
-    d.write(text)
-end
+-- CC logo (like fastfetch distro logos)
+local LOGO = {
+    "         ######  ######  ",
+    "         #     # #     # ",
+    "         #     # #     # ",
+    "         #     # #     # ",
+    "         #     # #     # ",
+    "         #     # #     # ",
+    "         ######  ######  ",
+}
 
-local function writeLine(d, y, label, value, w)
-    local line = ""
-    if label and #label > 0 then
-        line = label .. ": " .. value
-    else
-        line = value
-    end
-    if #line > w then
-        line = line:sub(1, w)
-    end
-    d.setCursorPos(1, y)
-    d.clearLine()
-    d.write(line)
-end
-
-local function writeSeparator(d, y, w)
-    d.setCursorPos(1, y)
-    d.clearLine()
-    local sep = string.rep("-", w)
-    d.write(sep)
-end
+local LOGO_W = 25
+local LOGO_H = #LOGO
 
 local function collectInfo()
     local info = {}
 
-    -- OS
     info.os = "CC:Tweaked"
     local v = pcallWrap(os.version)
     if v then info.os = v end
 
-    -- Time
     local t = pcallWrap(os.time) or 0
     local h = math.floor(t)
     local m = math.floor((t - h) * 60)
     info.time = string.format("%02d:%02d", h, m)
 
-    -- Day
     info.day = pcallWrap(os.day) or 0
-
-    -- Computer ID
     info.id = pcallWrap(os.getComputerID) or "N/A"
 
-    -- Label
     local label = pcallWrap(os.getComputerLabel)
     info.label = label or "No Label"
 
-    -- Fuel
     info.fuel = safeTurtleCall("getFuelLevel") or 0
     info.fuelMax = safeTurtleCall("getFuelLimit") or 0
     info.isTurtle = turtle ~= nil
 
-    -- Peripherals
     info.peripherals = {}
     local pnames = pcallWrap(peripheral.getNames) or {}
     for _, name in ipairs(pnames) do
@@ -136,7 +118,6 @@ local function collectInfo()
         end
     end
 
-    -- Inventory
     info.invUsed = 0
     info.invTotal = 0
     info.invItems = {}
@@ -146,12 +127,11 @@ local function collectInfo()
             if detail then
                 info.invUsed = info.invUsed + 1
                 info.invTotal = info.invTotal + detail.count
-                table.insert(info.invItems, string.format("  [%d] %s x%d", i, detail.name, detail.count))
+                table.insert(info.invItems, string.format("[%d] %s x%d", i, detail.name, detail.count))
             end
         end
     end
 
-    -- Disk
     info.disks = {}
     for _, name in ipairs(pnames) do
         local ptype = pcallWrap(function() return peripheral.getType(name) end)
@@ -172,120 +152,148 @@ local function collectInfo()
         end
     end
 
-    -- Color support
     info.isColor = term.isColor and term.isColor() or false
 
     return info
 end
 
 local function draw(d, w, h, info)
+    -- Fill background black
+    if isColorDisplay(d) then
+        d.setBackgroundColor(C.BLACK)
+    end
     d.clear()
-    d.setCursorPos(1, 1)
 
     local y = 1
+    local infoX = LOGO_W + 3  -- start info after logo + gap
 
-    -- Header
-    if info.isColor then
-        setColors(d, C.WHITE, C.BLACK)
+    -- Draw logo (left side)
+    local logoColors = {C.CYAN, C.CYAN, C.CYAN, C.CYAN, C.CYAN, C.CYAN}
+    for i = 1, LOGO_H do
+        if y + i - 1 > h then break end
+        d.setCursorPos(1, y + i - 1)
+        if info.isColor then
+            setColors(d, logoColors[i] or C.CYAN, C.BLACK)
+        end
+        d.write(LOGO[i])
     end
-    writeCenter(d, y, "===========================", w)
-    y = y + 1
-    writeCenter(d, y, "   FASTFETCH CC:TWEAKED   ", w)
-    y = y + 1
-    writeCenter(d, y, "===========================", w)
-    y = y + 1
     resetColors(d)
 
-    y = y + 1
+    -- Draw info (right side, aligned with logo top)
+    local iy = y
 
-    -- System info
-    if info.isColor then setColors(d, C.YELLOW, C.BLACK) end
-    writeLine(d, y, "OS", info.os, w)
-    y = y + 1
-    writeLine(d, y, "ID", tostring(info.id), w)
-    y = y + 1
-    writeLine(d, y, "Label", info.label, w)
-    y = y + 1
-    writeLine(d, y, "Time", info.time, w)
-    y = y + 1
-    writeLine(d, y, "Day", tostring(info.day), w)
-    y = y + 1
-    writeLine(d, y, "Color", info.isColor and "Yes" or "No", w)
-    y = y + 1
+    -- Title
+    if info.isColor then setColors(d, C.CYAN, C.BLACK) end
+    d.setCursorPos(infoX, iy)
+    d.write(info.label .. "@CC")
     resetColors(d)
+    iy = iy + 1
 
-    -- Fuel
+    -- Separator
+    if info.isColor then setColors(d, C.GRAY, C.BLACK) end
+    d.setCursorPos(infoX, iy)
+    local sep = string.rep("-", math.min(w - infoX + 1, 40))
+    d.write(sep)
+    resetColors(d)
+    iy = iy + 1
+
+    -- System info lines
+    local function writeInfo(label, value, color)
+        if iy > h - 2 then return end
+        if info.isColor then setColors(d, color or C.WHITE, C.BLACK) end
+        d.setCursorPos(infoX, iy)
+        local line = label .. ": " .. value
+        if #line > w - infoX + 1 then
+            line = line:sub(1, w - infoX + 1)
+        end
+        d.write(line)
+        resetColors(d)
+        iy = iy + 1
+    end
+
+    writeInfo("OS", info.os, C.CYAN)
+    writeInfo("ID", tostring(info.id), C.CYAN)
+    writeInfo("Time", info.time, C.CYAN)
+    writeInfo("Day", tostring(info.day), C.CYAN)
+    writeInfo("Color", info.isColor and "Yes" or "No", C.CYAN)
+
     if info.isTurtle then
-        y = y + 1
-        if info.isColor then setColors(d, C.YELLOW, C.BLACK) end
-        writeLine(d, y, "Fuel", tostring(info.fuel), w)
-        y = y + 1
+        iy = iy + 1
+        writeInfo("Fuel", tostring(info.fuel), C.YELLOW)
         if info.fuelMax > 0 then
             local pct = math.floor((info.fuel / info.fuelMax) * 100)
-            local barLen = math.floor(w * 0.3)
+            local barLen = math.max(10, w - infoX - 10)
             local filled = math.floor(barLen * pct / 100)
-            local bar = "[" .. string.rep("=", filled) .. string.rep(" ", barLen - filled) .. "]"
-            writeLine(d, y, "Fuel Bar", bar .. " " .. pct .. "%", w)
-            y = y + 1
+            local bar = "[" .. string.rep("=", filled) .. string.rep("-", barLen - filled) .. "] " .. pct .. "%"
+            writeInfo("Fuel", bar, C.YELLOW)
         end
-        resetColors(d)
     end
 
     -- Peripherals
-    y = y + 1
-    if info.isColor then setColors(d, C.GREEN, C.BLACK) end
-    writeSeparator(d, y, w)
-    y = y + 1
-    writeLine(d, y, "Peripherals", "#" .. #info.peripherals, w)
-    y = y + 1
-    resetColors(d)
-    for _, p in ipairs(info.peripherals) do
-        writeLine(d, y, "  " .. p.name, p.type, w)
-        y = y + 1
-        if y >= h - 3 then break end
+    if #info.peripherals > 0 then
+        iy = iy + 1
+        if info.isColor then setColors(d, C.GRAY, C.BLACK) end
+        d.setCursorPos(infoX, iy)
+        d.write(sep)
+        resetColors(d)
+        iy = iy + 1
+        writeInfo("Peripherals", "#" .. #info.peripherals, C.GREEN)
+        for _, p in ipairs(info.peripherals) do
+            if iy > h - 3 then break end
+            writeInfo("  " .. p.name, p.type, C.GREEN)
+        end
     end
 
     -- Inventory
-    if info.isTurtle then
-        y = y + 1
-        if info.isColor then setColors(d, C.GREEN, C.BLACK) end
-        writeSeparator(d, y, w)
-        y = y + 1
-        writeLine(d, y, "Inventory", info.invUsed .. "/16 slots, " .. info.invTotal .. " items", w)
-        y = y + 1
+    if info.isTurtle and #info.invItems > 0 then
+        iy = iy + 1
+        if info.isColor then setColors(d, C.GRAY, C.BLACK) end
+        d.setCursorPos(infoX, iy)
+        d.write(sep)
         resetColors(d)
+        iy = iy + 1
+        writeInfo("Inventory", info.invUsed .. "/16, " .. info.invTotal .. " items", C.GREEN)
         for _, s in ipairs(info.invItems) do
-            writeLine(d, y, "", s, w)
-            y = y + 1
-            if y >= h - 3 then break end
+            if iy > h - 3 then break end
+            writeInfo("", s, C.GREEN)
         end
     end
 
     -- Disks
     if #info.disks > 0 then
-        y = y + 1
-        if info.isColor then setColors(d, C.GREEN, C.BLACK) end
-        writeSeparator(d, y, w)
-        y = y + 1
-        writeLine(d, y, "Disks", "#" .. #info.disks, w)
-        y = y + 1
+        iy = iy + 1
+        if info.isColor then setColors(d, C.GRAY, C.BLACK) end
+        d.setCursorPos(infoX, iy)
+        d.write(sep)
         resetColors(d)
+        iy = iy + 1
+        writeInfo("Disks", "#" .. #info.disks, C.GREEN)
         for _, disk in ipairs(info.disks) do
-            writeLine(d, y, "  " .. disk.side, disk.label .. " (ID: " .. tostring(disk.id) .. ")", w)
-            y = y + 1
-            if y >= h - 3 then break end
+            if iy > h - 3 then break end
+            writeInfo("  " .. disk.side, disk.label .. " (ID:" .. tostring(disk.id) .. ")", C.GREEN)
         end
     end
 
     -- Footer
-    y = h - 1
     if info.isColor then setColors(d, C.GRAY, C.BLACK) end
-    writeCenter(d, y, "Press Q to exit | R to refresh", w)
+    d.setCursorPos(1, h)
+    d.clearLine()
+    local footer = "Press Q to exit | R to refresh"
+    d.setCursorPos(math.max(1, math.floor((w - #footer) / 2) + 1), h)
+    d.write(footer)
     resetColors(d)
 end
 
 local function main()
     local d, w, h = getDisplay()
+
+    -- If screen too small for logo+info side by side, hide logo
+    if w < LOGO_W + 30 then
+        LOGO = {}
+        LOGO_W = 0
+        LOGO_H = 0
+    end
+
     local running = true
     local refresh = true
 
@@ -308,6 +316,9 @@ local function main()
         end
     end
 
+    if isColorDisplay(d) then
+        d.setBackgroundColor(C.BLACK)
+    end
     d.clear()
     d.setCursorPos(1, 1)
     resetColors(d)
