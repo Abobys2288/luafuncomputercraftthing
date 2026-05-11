@@ -7,7 +7,6 @@ local W,H=39,15
 local FPS=10.0
 local BPR=5
 local N=2175
-local DATA
 
 local function getDisplay()
     local best=term
@@ -23,13 +22,13 @@ local function getDisplay()
     return best,bW,bH
 end
 
-local function draw(d,fidx)
+local function draw(d,fidx,data)
     local off=(fidx-1)*BPR*H+1
     for y=1,H do
         local text,fg,bg={},{},{}
         local x=1
         for i=1,BPR do
-            local b=string.byte(DATA,off)
+            local b=string.byte(data,off)
             off=off+1
             if not b then break end
             for bit=0,7 do
@@ -1414,15 +1413,16 @@ DATA_PARTS[#DATA_PARTS+1]=string.char(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 DATA_PARTS[#DATA_PARTS+1]=string.char(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
 DATA_PARTS[#DATA_PARTS+1]=string.char(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
 DATA_PARTS[#DATA_PARTS+1]=string.char(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
-DATA = table.concat(DATA_PARTS)
-DATA_PARTS = nil
-
 local function main()
+    local DATA = table.concat(DATA_PARTS)
+    DATA_PARTS = nil
+
     local d,w,h=getDisplay()
     d.clear()
     print("Bad Apple!! CC:Tweaked")
     print("Display: "..w.."x"..h)
-    print("Press any key...")
+    print("Press any key to start")
+    print("Press Q to stop")
     os.pullEvent("key")
     d.clear()
     local i=1
@@ -1430,10 +1430,10 @@ local function main()
     while i<=N do
         local e,p=os.pullEvent()
         if e=="timer"then
-            draw(d,i)
+            draw(d,i,DATA)
             i=i+1
             if i<=N then t=os.startTimer(1/FPS)end
-        elseif e=="key"then break end
+        elseif e=="key" and p==keys.q then break end
     end
     d.clear()d.setCursorPos(1,1)print("Done!")
 end
