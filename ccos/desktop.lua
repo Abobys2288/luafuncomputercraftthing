@@ -145,7 +145,6 @@ end
 
 function D.click(mx,my)
     local by=R.h-D.taskbarH
-
     -- 1. Start menu (if open)
     if D.startMenuOpen then
         local mw,mh=140,96
@@ -163,12 +162,10 @@ function D.click(mx,my)
         end
         D.startMenuOpen=false
     end
-
     -- 2. Start button
     if mx>=2 and mx<56 and my>=by+2 and my<by+18 then
         D.startMenuOpen=not D.startMenuOpen D.redraw() return nil
     end
-
     -- 3. Taskbar
     if my>=by then
         local bx=60
@@ -184,7 +181,6 @@ function D.click(mx,my)
         end
         return nil
     end
-
     -- 4. Windows (CONSUME ALL CLICKS)
     local w=D.winAt(mx,my)
     if w then
@@ -206,10 +202,10 @@ function D.click(mx,my)
             return nil
         end
         if mx>=w.cx+w.cw-8 and my>=w.cy+w.ch-8 and not w.maximized then w.resizing=true return nil end
+        -- Forward click to window
         if w.onClick then pcall(w.onClick,w,mx-w.cx-3,my-w.cy-18) end
         return nil
     end
-
     -- 5. Desktop icons
     local ic={{"Files","files"},{"Editor","edit"},{"Settings","settings"},{"Shell","shell"}}
     local iw,ih=48,42
@@ -219,7 +215,25 @@ function D.click(mx,my)
         local ix=8+col*(iw+10) local iy=8+row*(ih+8)
         if mx>=ix-2 and mx<ix+iw+2 and my>=iy-2 and my<iy+ih+2 then return c[2] end
     end
+    return nil
+end
 
+-- Double click tracking
+local lastClickTime=0
+local lastClickWin=nil
+
+function D.handleMouseClick(mx,my,button)
+    local now=os.clock and os.clock() or 0
+    local isDouble=(now-lastClickTime<0.4)
+    lastClickTime=now
+    local w=D.winAt(mx,my)
+    lastClickWin=w
+    local action=D.click(mx,my)
+    if action then return action end
+    -- Double click on window
+    if isDouble and w and w.onDoubleClick then
+        pcall(w.onDoubleClick,w,mx-w.cx-3,my-w.cy-18)
+    end
     return nil
 end
 
@@ -228,14 +242,12 @@ function D.drag(mx,my)
     local nx=mx-D.dragOX local ny=my-D.dragOY
     if ny<1 then ny=1 end
     local by=R.h-D.taskbarH if ny+w.ch>by+1 then ny=by-w.ch+2 end
+    -- Erase old outline: just draw bg rect over it
     if D.lastDrag then
-        local r=D.lastDrag R.fillRect(r.x,r.y,r.w,r.h,K.DESKTOP)
-        for _,v in ipairs(D.windows) do
-            if v.id~=w.id and v.visible and not v.minimized then
-                if not (v.cx+v.cw<r.x or v.cx>r.x+r.w or v.cy+v.ch<r.y or v.cy>r.y+r.h) then D.drawWin(v) end
-            end
-        end
+        local r=D.lastDrag
+        R.fillRect(r.x,r.y,r.w,r.h,K.DESKTOP)
     end
+    -- Draw new outline (fast, just 4 lines)
     R.drawDragOutline(nx,ny,w.cw,w.ch)
     D.lastDrag={x=nx,y=ny,w=w.cw,h=w.ch}
 end
@@ -252,7 +264,18 @@ function D.drop()
 end
 
 function D.key(key,char)
-    if D.activeWin and D.activeWin.onKey then pcall(D.activeWin.onKey,D.activeWin,key,char) end
+    if D.activeWin and D.activeWin.onKey then
+        pcall(D.activeWin.onKey,D.activeWin,key,char)
+        -- Redraw active window content after key event
+        if D.activeWin.onDraw then
+            local w=D.activeWin
+            local x,y,ww,hh=w.cx,w.cy,w.cw,w.ch
+            local by=R.h-D.taskbarH
+            if y+hh>by then hh=math.max(20,by-y) end
+            R.fillRect(x+2,y+17,ww-4,hh-19,K.GRAY)
+            pcall(w.onDraw,w,x+3,y+18,ww-6,hh-21)
+        end
+    end
 end
 
 function D.run()
@@ -263,7 +286,7 @@ function D.run()
         local e,a,b,c,d=os.pullEvent()
         if e=="mouse_click" then
             D.mouse.x=b D.mouse.y=c
-            local act=D.click(b,c)
+            local act=D.handleMouseClick(b,c,d)
             if act=="reboot" then R.clear() R.drawText(10,10,"Rebooting...",K.WHITE) sleep(0.5) os.reboot()
             elseif act=="shutdown" then running=false
             elseif act=="files" then D.appFM()
@@ -307,53 +330,87 @@ function D.appFM()
         sel=math.max(1,math.min(sel,#items))
     end
     ref()
-    local w=D.createWindow("File Manager",30,25,220,130)
+    local w=D.createWindow("File Manager",20,15,240,150)
+    -- Button row
+    local btnY=17
     w.onDraw=function(w,cx,cy,cw,ch)
-        local lh=math.floor((ch-12)/8)
+        -- Buttons
+        R.drawButton(cx,cy,36,14,false) R.drawText(cx+2,cy+3,"New",K.BLACK)
+        R.drawButton(cx+38,cy,50,14,false) R.drawText(cx+40,cy+3,"NewDir",K.BLACK)
+        R.drawButton(cx+90,cy,36,14,false) R.drawText(cx+92,cy+3,"Del",K.BLACK)
+        -- File list
+        local lh=math.floor((ch-20)/8)
         for i=1,lh do
             local idx=scroll+i local it=items[idx]
             if not it then break end
-            local iy=cy+(i-1)*8
-            local h=D.mouse.x>=cx and D.mouse.x<cx+cw and D.mouse.y>=iy-1 and D.mouse.y<iy+8
-            if idx==sel or h then R.fillRect(cx,iy-1,cw,9,K.DBLUE) R.drawText(cx+2,iy,it,K.WHITE)
-            else R.drawText(cx+2,iy,it,K.BLACK) end
+            local iy=cy+16+(i-1)*8
+            local hover=D.mouse.x>=cx+2 and D.mouse.x<cx+cw-2 and D.mouse.y>=iy-1 and D.mouse.y<iy+8
+            if idx==sel or hover then R.fillRect(cx+2,iy-1,cw-4,9,K.DBLUE) R.drawText(cx+4,iy,it,K.WHITE)
+            else R.drawText(cx+4,iy,it,K.BLACK) end
         end
         R.drawText(cx+2,cy+ch-10," "..path,K.BLACK)
     end
-    w.onKey=function(w,k,ch)
-        if k==keys.up and sel>1 then sel=sel-1 if sel<=scroll then scroll=scroll-1 end
-        elseif k==keys.down and sel<#items then
-            sel=sel+1 local lh=math.floor((w.ch-12)/8)
-            if sel>scroll+lh then scroll=scroll+1 end
-        elseif k==keys.enter then
-            local it=items[sel]
-            if it then
-                if it==".." then path=gd(path) sel=1 scroll=0 ref()
-                elseif it:sub(1,1)=="/" then
-                    local np=path=="/" and it or (path..it)
-                    if fs.isDir(np) then path=np sel=1 scroll=0 ref() end
-                else D.appEdit(path=="/" and ("/"..it) or (path.."/"..it)) end
-            end
-        elseif k==keys.backspace then path=gd(path) sel=1 scroll=0 ref()
-        elseif k==keys.f5 then ref()
-        elseif k==keys.escape or k==keys.q then D.destroyWindow(w) end
-    end
     w.onClick=function(w,mx,my)
-        local lh=math.floor((w.ch-12)/8)
+        local cx,cy=w.cx,w.cy
+        -- Button clicks
+        if my>=cy and my<cy+14 then
+            if mx>=cx and mx<cx+36 then -- New file
+                local name="newfile.txt"
+                local fp=path=="/" and ("/"..name) or (path.."/"..name)
+                local f=fs.open(fp,"w") if f then f.close() end ref() D.redraw()
+            elseif mx>=cx+38 and mx<cx+88 then -- New dir
+                local name="newdir"
+                local fp=path=="/" and ("/"..name) or (path.."/"..name)
+                fs.makeDir(fp) ref() D.redraw()
+            elseif mx>=cx+90 and mx<cx+126 then -- Delete
+                local it=items[sel] if it and it~=".." then
+                    local fp=path=="/" and ("/"..it) or (path.."/"..it)
+                    if fs.exists(fp) then fs.delete(fp) end ref() D.redraw()
+                end
+            end
+            return
+        end
+        -- File list click (select)
+        local lh=math.floor((w.ch-20)/8)
         for i=1,lh do
-            local idx=scroll+i local iy=18+(i-1)*8
+            local idx=scroll+i local iy=cy+16+(i-1)*8
+            if my>=iy-1 and my<iy+8 then sel=idx return end
+        end
+    end
+    w.onDoubleClick=function(w,mx,my)
+        -- Double click to open
+        local cx,cy=w.cx,w.cy
+        local lh=math.floor((w.ch-20)/8)
+        for i=1,lh do
+            local idx=scroll+i local iy=cy+16+(i-1)*8
             if my>=iy-1 and my<iy+8 then
-                sel=idx local it=items[idx]
+                local it=items[idx]
                 if it then
-                    if it==".." then path=gd(path) sel=1 scroll=0 ref()
+                    if it==".." then path=gd(path) sel=1 scroll=0 ref() D.redraw()
                     elseif it:sub(1,1)=="/" then
                         local np=path=="/" and it or (path..it)
-                        if fs.isDir(np) then path=np sel=1 scroll=0 ref() end
-                    else D.appEdit(path=="/" and ("/"..it) or (path.."/"..it)) end
+                        if fs.isDir(np) then path=np sel=1 scroll=0 ref() D.redraw() end
+                    else
+                        D.appEdit(path=="/" and ("/"..it) or (path.."/"..it))
+                    end
                 end
                 return
             end
         end
+    end
+    w.onKey=function(w,k,ch)
+        if k==keys.up and sel>1 then sel=sel-1 if sel<=scroll then scroll=scroll-1 end
+        elseif k==keys.down and sel<#items then sel=sel+1 local lh=math.floor((w.ch-20)/8) if sel>scroll+lh then scroll=scroll+1 end
+        elseif k==keys.enter then
+            local it=items[sel]
+            if it then
+                if it==".." then path=gd(path) sel=1 scroll=0 ref() D.redraw()
+                elseif it:sub(1,1)=="/" then local np=path=="/" and it or (path..it) if fs.isDir(np) then path=np sel=1 scroll=0 ref() D.redraw() end
+                else D.appEdit(path=="/" and ("/"..it) or (path.."/"..it)) end
+            end
+        elseif k==keys.backspace then path=gd(path) sel=1 scroll=0 ref() D.redraw()
+        elseif k==keys.f5 then ref() D.redraw()
+        elseif k==keys.escape or k==keys.q then D.destroyWindow(w) end
     end
 end
 
@@ -363,20 +420,55 @@ function D.appEdit(fp)
     if content then for l in content:gmatch("[^\n]*") do lines[#lines+1]=l end end
     if #lines==0 then lines[1]="" end
     local cL,cC,sY=1,1,0 local mod=false
-    local w=D.createWindow("Edit: "..gfn(fp),40,20,250,140)
+    local w=D.createWindow("Edit: "..gfn(fp),30,18,250,140)
     w.onDraw=function(w,cx,cy,cw,ch)
-        local eh=math.floor((ch-16)/8)
-        for i=1,eh do R.drawText(cx+2,cy+(i-1)*8,lines[sY+i] or "",K.BLACK) end
+        -- Button row
+        R.drawButton(cx,cy,32,14,false) R.drawText(cx+2,cy+3,"Save",K.BLACK)
+        R.drawButton(cx+34,cy,32,14,false) R.drawText(cx+36,cy+3,"Open",K.BLACK)
+        R.drawButton(cx+68,cy,32,14,false) R.drawText(cx+70,cy+3,"New",K.BLACK)
+        R.drawButton(cx+102,cy,36,14,false) R.drawText(cx+104,cy+3,"Close",K.BLACK)
+        -- Text area
+        local eh=math.floor((ch-22)/8)
+        for i=1,eh do R.drawText(cx+2,cy+16+(i-1)*8,lines[sY+i] or "",K.BLACK) end
         if cL>sY and cL<=sY+eh then
-            local cy2=cy+(cL-sY-1)*8 local cx2=cx+(cC-1)*6
+            local cy2=cy+16+(cL-sY-1)*8 local cx2=cx+(cC-1)*6
             if cx2>=cx and cx2<cx+cw then
                 R.fillRect(cx2,cy2,6,8,K.DBLUE)
                 local c2=(lines[cL] or ""):sub(cC,cC)
                 R.drawText(cx2,cy2,c2=="" and " " or c2,K.WHITE)
             end
         end
-        R.fillRect(cx,cy+ch-12,cw,10,K.GRAY)
-        R.drawText(cx+2,cy+ch-10,"Ln "..cL..(mod and "*" or ""),K.BLACK)
+        R.drawText(cx+2,cy+ch-10,gfn(fp)..(mod and " *" or ""),K.BLACK)
+    end
+    w.onClick=function(w,mx,my)
+        if my>=w.cy+1 and my<w.cy+15 then
+            if mx>=w.cx and mx<w.cx+32 then -- Save
+                local f=fs.open(fp,"w") if f then f.write(table.concat(lines,"\n")) f.close() mod=false end D.redraw()
+            elseif mx>=w.cx+34 and mx<w.cx+66 then -- Open
+                D.appEdit(nil) -- Will prompt for path
+            elseif mx>=w.cx+68 and mx<w.cx+100 then -- New
+                lines={""} cL,cC,sY=1,1,0 mod=false fp="/untitled.txt"
+                D.activeWin.title="Edit: untitled.txt" D.redraw()
+            elseif mx>=w.cx+102 and mx<w.cx+138 then -- Close
+                if mod then local f=fs.open(fp,"w") if f then f.write(table.concat(lines,"\n")) f.close() end end
+                D.destroyWindow(w)
+            end
+        end
+    end
+        end
+        R.fillRect(cx,cy+ch-10,cw,8,K.GRAY)
+        R.drawText(cx+2,cy+ch-8,"Ln "..cL..(mod and "*" or ""),K.BLACK)
+    end
+    w.onClick=function(w,mx,my)
+        if my>=w.cy+1 and my<w.cy+15 then
+            if mx>=w.cx and mx<w.cx+30 then -- Save
+                local f=fs.open(fp,"w") if f then f.write(table.concat(lines,"\n")) f.close() mod=false end
+                D.redraw()
+            elseif mx>=w.cx+32 and mx<w.cx+62 then -- Close
+                if mod then local f=fs.open(fp,"w") if f then f.write(table.concat(lines,"\n")) f.close() end end
+                D.destroyWindow(w)
+            end
+        end
     end
     w.onKey=function(w,k,ch)
         if ch then
