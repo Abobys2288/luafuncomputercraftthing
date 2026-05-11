@@ -236,21 +236,15 @@ def generate_lua_string_encoded(frames, output_path, fps, target_w, target_h):
     # Но ]=] тоже может встретиться. Используем больше =: [==[...]==]
     # В бинарных данных ]===] крайне маловероятно, но на всякий случай проверим
 
-    raw_bytes = bytes(all_bytes)
-
-    # Проверяем наличие ]===] в данных
-    delimiter = b"]===]"
-    if delimiter in raw_bytes:
-        # Редко, но если есть — используем string.char метод
-        CHUNK = 8000
-        parts = []
-        for i in range(0, len(all_bytes), CHUNK):
-            chunk = all_bytes[i:i+CHUNK]
-            nums = ",".join(str(b) for b in chunk)
-            parts.append("string.char(" + nums + ")")
-        data_lua = "..".join(parts)
-    else:
-        data_lua = '[==[' + raw_bytes.decode('latin-1') + ']==]'
+    # Кодируем байты в строку Lua через string.char
+    # Это надёжно в Lua 5.1(CC:Tweaked)
+    CHUNK = 4000  # максимум, что помещается в конкатенацию
+    parts = []
+    for i in range(0, len(all_bytes), CHUNK):
+        chunk = all_bytes[i:i+CHUNK]
+        nums = ",".join(str(b) for b in chunk)
+        parts.append("string.char(" + nums + ")")
+    data_lua = "..".join(parts)
 
     lines = []
     lines.append("--[[")
