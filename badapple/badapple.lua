@@ -34,14 +34,16 @@ local function draw(d,f)
             for c=1,#str do
                 if x>W then break end
                 local b=string.byte(str,c)
-                for bit=7,0,-1 do
-                    if (b>>bit)&1==1 then
+                -- Process 8 bits in the byte
+                for bit=0,7 do
+                    if x>W then break end
+                    local mask=128>>bit
+                    if (b & mask) ~= 0 then
                         t[#t+1]=" "f[#f+1]="f"g[#g+1]="0"
                     else
                         t[#t+1]=" "f[#f+1]="0"g[#g+1]="f"
                     end
                     x=x+1
-                    if x>W then break end
                 end
             end
         end
