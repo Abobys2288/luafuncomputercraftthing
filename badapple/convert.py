@@ -236,22 +236,16 @@ def generate_lua_string_encoded(frames, output_path, fps, target_w, target_h):
     # Но ]=] тоже может встретиться. Используем больше =: [==[...]==]
     # В бинарных данных ]===] крайне маловероятно, но на всякий случай проверим
 
-    # Кодируем байты в плоский массив строк для совместимости
-    # Каждый элемент = string.char(b1,b2,b3) до 100 байт
-    CHUNK = 100
+    # Кодируем байты в одну Lua-строку через конкатенацию string.char
+    # Важно: короткие чанки, чтобы CC:Tweaked нормально парсил файл.
+    CHUNK = 1000
     parts = []
     for i in range(0, len(all_bytes), CHUNK):
         chunk = all_bytes[i:i+CHUNK]
         nums = ",".join(str(b) for b in chunk)
         parts.append("string.char(" + nums + ")")
-    
-    # Собираем плоский массив
-    data_lua = "{"
-    for i, part in enumerate(parts):
-        if i > 0:
-            data_lua = data_lua + ","
-        data_lua = data_lua + part
-    data_lua = data_lua + "}"
+
+    data_lua = "..".join(parts)
 
     lines = []
     lines.append("--[[")
@@ -280,33 +274,33 @@ def generate_lua_string_encoded(frames, output_path, fps, target_w, target_h):
     lines.append("end")
     lines.append("")
 
-    lines.append("local function draw(d,f)")
-    lines.append("    local off=(f-1)*BPR*H+1")
+    lines.append("local function draw(d,fidx)")
+    lines.append("    local off=(fidx-1)*BPR*H+1")
     lines.append("    for y=1,H do")
-    lines.append("        local t,f,g={},{},{}")
+    lines.append("        local text,fg,bg={},{},{}")
     lines.append("        local x=1")
     lines.append("        for i=1,BPR do")
-    lines.append("            local str=DATA[off]")
+    lines.append("            local b=string.byte(DATA,off)")
     lines.append("            off=off+1")
-    lines.append("            if str==\"\" then break end")
-    lines.append("            for c=1,#str do")
+    lines.append("            if not b then break end")
+    lines.append("            for bit=0,7 do")
     lines.append("                if x>W then break end")
-    lines.append("                local b=string.byte(str,c)")
-    lines.append("                -- Process 8 bits in the byte")
-    lines.append("                for bit=0,7 do")
-    lines.append("                    if x>W then break end")
-    lines.append("                    local mask=128>>bit")
-    lines.append("                    if (b & mask) ~= 0 then")
-    lines.append("                        t[#t+1]=\" \"f[#f+1]=\"f\"g[#g+1]=\"0\"")
-    lines.append("                    else")
-    lines.append("                        t[#t+1]=\" \"f[#f+1]=\"0\"g[#g+1]=\"f\"")
-    lines.append("                    end")
-    lines.append("                    x=x+1")
+    lines.append("                local mask=2^(7-bit)")
+    lines.append("                local white=(math.floor(b/mask)%2)==1")
+    lines.append("                if white then")
+    lines.append("                    text[#text+1]=\" \"")
+    lines.append("                    fg[#fg+1]=\"f\"")
+    lines.append("                    bg[#bg+1]=\"0\"")
+    lines.append("                else")
+    lines.append("                    text[#text+1]=\" \"")
+    lines.append("                    fg[#fg+1]=\"0\"")
+    lines.append("                    bg[#bg+1]=\"f\"")
     lines.append("                end")
+    lines.append("                x=x+1")
     lines.append("            end")
     lines.append("        end")
     lines.append("        d.setCursorPos(1,y)")
-    lines.append("        d.blit(table.concat(t),table.concat(f),table.concat(g))")
+    lines.append("        d.blit(table.concat(text),table.concat(fg),table.concat(bg))")
     lines.append("    end")
     lines.append("end")
     lines.append("")
