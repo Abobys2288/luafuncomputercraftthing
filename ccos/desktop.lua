@@ -111,7 +111,7 @@ function desktop.show()
     local function writeInfo(label, value, color)
         d.setCursorPos(infoX, infoY)
         gui.setColors(color or gui.C.WHITE, gui.C.BLACK)
-        d.write(label .. ": " .. value)
+        d.write(label .. ": " .. tostring(value))
         gui.resetColors()
         infoY = infoY + 1
     end
