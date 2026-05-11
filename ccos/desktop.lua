@@ -271,6 +271,10 @@ function desktop.handleClick(mx, my, button)
 
     if mx >= desktop.startBtn.x + 1 and mx < desktop.startBtn.x + desktop.startBtn.w + 1 and
        my >= desktop.startBtn.y and my < desktop.startBtn.y + desktop.startBtn.h then
+        if desktop.startMenuOpen then
+            desktop.startMenuOpen = false
+            return nil
+        end
         desktop.startMenuOpen = not desktop.startMenuOpen
         return nil
     end
@@ -448,7 +452,7 @@ function desktop.run()
             lastClickX = mx
             lastClickY = my
 
-            local action = desktop.handleClick(mx, my, p4)
+            local action = desktop.handleClick(mx, my, p1)
             needsRedraw = true
 
             if action == "reboot" then
@@ -486,7 +490,7 @@ function desktop.run()
         elseif event == "mouse_scroll" then
             -- Scroll in active window
             if desktop.activeWin and desktop.activeWin.onScroll then
-                pcall(desktop.activeWin.onScroll, desktop.activeWin, p2)
+                pcall(desktop.activeWin.onScroll, desktop.activeWin, p1)
             end
             needsRedraw = true
 
@@ -659,9 +663,29 @@ function desktop.runFileManager()
                 refresh()
             elseif key == keys.f5 then
                 refresh()
+            elseif key == keys.escape or key == keys.q then
+                desktop.destroyWindow(w)
             end
         end
     )
+
+    -- Modal loop
+    while win.visible do
+        desktop.drawDesktop()
+        desktop.drawWindow(win)
+        local event = os.pullEvent()
+        if event[1] == "mouse_click" then
+            desktop.handleClick(event[3], event[4], event[5])
+        elseif event[1] == "mouse_drag" then
+            desktop.handleDrag(event[3], event[4])
+        elseif event[1] == "mouse_up" then
+            desktop.handleMouseUp()
+        elseif event[1] == "char" then
+            desktop.handleKey(nil, event[2])
+        elseif event[1] == "key" then
+            desktop.handleKey(event[2], nil)
+        end
+    end
 end
 
 function desktop.runEditor(filePath)
@@ -771,6 +795,24 @@ function desktop.runEditor(filePath)
             end
         end
     )
+
+    -- Modal loop
+    while win.visible do
+        desktop.drawDesktop()
+        desktop.drawWindow(win)
+        local event = os.pullEvent()
+        if event[1] == "mouse_click" then
+            desktop.handleClick(event[3], event[4], event[5])
+        elseif event[1] == "mouse_drag" then
+            desktop.handleDrag(event[3], event[4])
+        elseif event[1] == "mouse_up" then
+            desktop.handleMouseUp()
+        elseif event[1] == "char" then
+            desktop.handleKey(nil, event[2])
+        elseif event[1] == "key" then
+            desktop.handleKey(event[2], nil)
+        end
+    end
 end
 
 function desktop.runSettings()
@@ -792,6 +834,24 @@ function desktop.runSettings()
             end
         end
     )
+
+    -- Modal loop
+    while win.visible do
+        desktop.drawDesktop()
+        desktop.drawWindow(win)
+        local event = os.pullEvent()
+        if event[1] == "mouse_click" then
+            desktop.handleClick(event[3], event[4], event[5])
+        elseif event[1] == "mouse_drag" then
+            desktop.handleDrag(event[3], event[4])
+        elseif event[1] == "mouse_up" then
+            desktop.handleMouseUp()
+        elseif event[1] == "char" then
+            desktop.handleKey(nil, event[2])
+        elseif event[1] == "key" then
+            desktop.handleKey(event[2], nil)
+        end
+    end
 end
 
 function desktop.runShell()
@@ -847,6 +907,24 @@ function desktop.runShell()
             end
         end
     )
+
+    -- Modal loop
+    while win.visible do
+        desktop.drawDesktop()
+        desktop.drawWindow(win)
+        local event = os.pullEvent()
+        if event[1] == "mouse_click" then
+            desktop.handleClick(event[3], event[4], event[5])
+        elseif event[1] == "mouse_drag" then
+            desktop.handleDrag(event[3], event[4])
+        elseif event[1] == "mouse_up" then
+            desktop.handleMouseUp()
+        elseif event[1] == "char" then
+            desktop.handleKey(nil, event[2])
+        elseif event[1] == "key" then
+            desktop.handleKey(event[2], nil)
+        end
+    end
 end
 
 return desktop
