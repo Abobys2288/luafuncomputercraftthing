@@ -455,21 +455,6 @@ function D.appEdit(fp)
             end
         end
     end
-        end
-        R.fillRect(cx,cy+ch-10,cw,8,K.GRAY)
-        R.drawText(cx+2,cy+ch-8,"Ln "..cL..(mod and "*" or ""),K.BLACK)
-    end
-    w.onClick=function(w,mx,my)
-        if my>=w.cy+1 and my<w.cy+15 then
-            if mx>=w.cx and mx<w.cx+30 then -- Save
-                local f=fs.open(fp,"w") if f then f.write(table.concat(lines,"\n")) f.close() mod=false end
-                D.redraw()
-            elseif mx>=w.cx+32 and mx<w.cx+62 then -- Close
-                if mod then local f=fs.open(fp,"w") if f then f.write(table.concat(lines,"\n")) f.close() end end
-                D.destroyWindow(w)
-            end
-        end
-    end
     w.onKey=function(w,k,ch)
         if ch then
             local l=lines[cL] or "" lines[cL]=l:sub(1,cC-1)..ch..l:sub(cC) cC=cC+1 mod=true
