@@ -12,6 +12,7 @@ end
 
 local ok, err = pcall(function()
     _G.ccos_render = loadModule("render")
+    _G.gui = loadModule("gui")
     _G.ccos_api = loadModule("api")
     _G.desktop = loadModule("desktop")
 end)

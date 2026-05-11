@@ -12,6 +12,7 @@
 ]]
 
 local R = _G.ccos_render
+local gui = _G.gui or {}
 local D = {} ; _G._desktop = D
 
 local K = {
@@ -479,7 +480,8 @@ function D.appEdit(fp)
 
     w.onDraw = function(win, cx, cy, cw, ch)
         R.drawButton(cx, cy, 36, 14, false) R.drawText(cx+2, cy+3, "Save", K.BLACK)
-        R.drawButton(cx+38, cy, 36, 14, false) R.drawText(cx+40, cy+3, "Close", K.BLACK)
+        R.drawButton(cx+38, cy, 40, 14, false) R.drawText(cx+40, cy+3, "Open", K.BLACK)
+        R.drawButton(cx+80, cy, 48, 14, false) R.drawText(cx+82, cy+3, "Close", K.BLACK)
 
         local eh = math.floor((ch-24)/8)
         for i=1,eh do
@@ -501,9 +503,25 @@ function D.appEdit(fp)
     w.onClick = function(win, mx, my)
         if my >= win.cy+1 and my < win.cy+15 then
             if mx >= win.cx and mx < win.cx+36 then
+                -- Save
                 writeFile(fp, table.concat(lines, "\n"))
                 mod = false D.markDirty()
-            elseif mx >= win.cx+38 and mx < win.cx+74 then
+            elseif mx >= win.cx+38 and mx < win.cx+78 then
+                -- Open
+                local newPath = gui.inputBox("Open File", "Enter path:", fp)
+                if newPath and fs.exists(newPath) then
+                    fp = newPath
+                    lines = {}
+                    local c = readFile(fp)
+                    if c then for l in c:gmatch("[^\n]*") do table.insert(lines, l) end end
+                    if #lines==0 then lines={""} end
+                    cl,cc,sy = 1,1,0
+                    mod = false
+                    win.title = "Edit: "..getFileName(fp)
+                    D.markDirty()
+                end
+            elseif mx >= win.cx+80 and mx < win.cx+128 then
+                -- Close
                 if mod then writeFile(fp, table.concat(lines, "\n")) end
                 D.destroyWindow(win)
             end
