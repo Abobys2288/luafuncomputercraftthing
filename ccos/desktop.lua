@@ -1,35 +1,42 @@
 --[[
-    CCOS Desktop — Windows 95 style v5
-    ===================================
-    Fixed: click blocking, Ctrl+S/Q, file manager mouse, minimize, shell, render optimize
+    CCOS Desktop — Window Manager & Event Loop
+    ============================================
+    Pure logic: window management, mouse handling, event routing.
+    Rendering is in render.lua, API in api.lua.
 ]]
 
-local K = _G.kernel
-
+local R = require("ccos.render")
 local desktop = {}
+
+desktop.R = R
 desktop.windows = {}
 desktop.activeWin = nil
 desktop.taskbarH = 20
 desktop.startMenuOpen = false
-desktop.startBtn = {x=0, y=0, w=54, h=16}
 desktop.clock = ""
 desktop.nextWinId = 1
 desktop.dirty = true
-desktop.bgCached = false  -- true after first full draw
+desktop.dragWin = nil  -- window being dragged
+desktop.dragOX = 0     -- offset from window origin
+desktop.dragOY = 0
+desktop.lastDragRect = nil  -- last drag outline position for cleanup
+desktop.mouse = {x=0, y=0}
+
+-- Make desktop accessible from api.lua
+_G._desktop = desktop
 
 -- ============================================================
 -- WINDOW MANAGEMENT
 -- ============================================================
-function desktop.createWindow(title, cx, cy, cw, ch, onDraw, onKey, onClose)
-    local id = desktop.nextWinId
-    desktop.nextWinId = desktop.nextWinId + 1
+function desktop.createWindow(title, cx, cy, cw, ch)
+    local id = desktop.nextWinId; desktop.nextWinId = desktop.nextWinId + 1
     local win = {
         id=id, title=title or "Window",
         cx=cx or 30, cy=cy or 20, cw=cw or 200, ch=ch or 120,
-        minW=80, minH=60,
-        onDraw=onDraw, onKey=onKey, onClose=onClose,
+        minW=80, minH=50,
         visible=true, maximized=false, minimized=false, prevState=nil,
-        dragging=false, dragOffX=0, dragOffY=0, resizing=false,
+        resizing=false,
+        onDraw=nil, onKey=nil, onClick=nil,
     }
     table.insert(desktop.windows, win)
     desktop.activeWin = win
@@ -44,7 +51,6 @@ function desktop.destroyWindow(win)
     if desktop.activeWin and desktop.activeWin.id==win.id then
         desktop.activeWin = desktop.windows[#desktop.windows]
     end
-    if win.onClose then pcall(win.onClose) end
     desktop.dirty = true
 end
 
@@ -53,16 +59,14 @@ function desktop.bringToFront(win)
         if w.id==win.id then
             table.remove(desktop.windows,i)
             table.insert(desktop.windows,win)
-            desktop.activeWin = win
-            desktop.dirty = true
-            return
+            desktop.activeWin=win; desktop.dirty=true; return
         end
     end
 end
 
-function desktop.getWindowAt(mx, my)
+function desktop.getWindowAt(mx,my)
     for i=#desktop.windows,1,-1 do
-        local w = desktop.windows[i]
+        local w=desktop.windows[i]
         if w.visible and not w.minimized and mx>=w.cx and mx<w.cx+w.cw and my>=w.cy and my<w.cy+w.ch then
             return w
         end
@@ -71,177 +75,117 @@ function desktop.getWindowAt(mx, my)
 end
 
 -- ============================================================
--- DRAWING HELPERS
+-- RENDER: DESKTOP
 -- ============================================================
-local function drawW95Raised(x,y,w,h)
-    if not K.hasGraphics then return end
-    K.drawLine(x,y,x+w-1,y,K.PAL.LIGHT_GRAY)
-    K.drawLine(x,y,x,y+h-1,K.PAL.LIGHT_GRAY)
-    K.drawLine(x+w-1,y,x+w-1,y+h-1,K.PAL.DARK_GRAY)
-    K.drawLine(x,y+h-1,x+w-1,y+h-1,K.PAL.DARK_GRAY)
-end
+local SYM = R.PAL  -- shortcut
 
-local function drawW95Sunken(x,y,w,h)
-    if not K.hasGraphics then return end
-    K.drawLine(x,y,x+w-1,y,K.PAL.DARK_GRAY)
-    K.drawLine(x,y,x,y+h-1,K.PAL.DARK_GRAY)
-    K.drawLine(x+w-1,y,x+w-1,y+h-1,K.PAL.LIGHT_GRAY)
-    K.drawLine(x,y+h-1,x+w-1,y+h-1,K.PAL.LIGHT_GRAY)
-end
-
-local function drawButton(x,y,w,h,pressed)
-    if not K.hasGraphics then return end
-    K.fillRect(x+2,y+2,w-4,h-4,K.PAL.GRAY)
-    if pressed then
-        K.drawLine(x,y,x+w-1,y,K.PAL.DARK_GRAY)
-        K.drawLine(x,y,x,y+h-1,K.PAL.DARK_GRAY)
-        K.drawLine(x+w-1,y,x+w-1,y+h-1,K.PAL.LIGHT_GRAY)
-        K.drawLine(x,y+h-1,x+w-1,y+h-1,K.PAL.LIGHT_GRAY)
-    else
-        drawW95Raised(x,y,w,h)
-    end
-end
-
--- ============================================================
--- DRAW SINGLE WINDOW
--- ============================================================
-function desktop.drawWindow(win)
-    if not win.visible or win.minimized then return end
-    local x,y,w,h = win.cx,win.cy,win.cw,win.ch
-    local by = K.h - desktop.taskbarH
-    if y+h > by then h = math.max(20, by-y) end
-
-    K.fillRect(x,y,w,h,K.PAL.LIGHT_BG)
-    local active = (desktop.activeWin and desktop.activeWin.id==win.id)
-    K.fillRect(x,y,w,16, active and K.PAL.W95_TITLE_BLUE or K.PAL.GRAY)
-    K.drawPixelText(x+4,y+4, win.title, active and K.PAL.WHITE or K.PAL.GRAY)
-
-    -- Close [X]
-    drawButton(x+w-18,y+1,16,14,false)
-    K.drawPixelText(x+w-13,y+4,"X",K.PAL.BLACK)
-    -- Max []
-    drawButton(x+w-36,y+1,16,14,false)
-    K.drawRect(x+w-32,y+4,8,8,K.PAL.BLACK)
-    -- Min [-]
-    drawButton(x+w-54,y+1,16,14,false)
-    K.fillRect(x+w-49,y+6,6,2,K.PAL.BLACK)
-
-    drawW95Raised(x,y,w,h)
-    K.fillRect(x+2,y+17,w-4,h-19,K.PAL.LIGHT_BG)
-
-    if win.onDraw then pcall(win.onDraw, win, x+3, y+18, w-6, h-21) end
-end
-
--- ============================================================
--- DRAW TASKBAR
--- ============================================================
-function desktop.drawTaskbar()
-    local by = K.h - desktop.taskbarH
-    K.fillRect(0,by,K.w,desktop.taskbarH,K.PAL.GRAY)
-    K.drawLine(0,by,K.w-1,by,K.PAL.WHITE)
-
-    desktop.startBtn.x=2; desktop.startBtn.y=by+2
-    drawButton(2,by+2,54,16,desktop.startMenuOpen)
-    K.drawPixelText(6,by+6,"Start",K.PAL.BLACK)
-
-    -- Window buttons in taskbar (including minimized)
-    local btnX = 60
-    for _,win in ipairs(desktop.windows) do
-        local bw = math.min(100, K.w-btnX-55)
-        if bw < 25 then break end
-        local ia = (desktop.activeWin and desktop.activeWin.id==win.id)
-        drawButton(btnX,by+3,bw,14,ia)
-        local tt = #win.title > 12 and win.title:sub(1,10)..".." or win.title
-        if win.minimized then tt = "("..tt..")" end
-        K.drawPixelText(btnX+4,by+6,tt,ia and K.PAL.WHITE or K.PAL.BLACK)
-        btnX = btnX + bw + 2
-    end
-
-    drawW95Sunken(K.w-48,by+3,44,14)
-    K.drawPixelText(K.w-44,by+6,desktop.clock,K.PAL.BLACK)
-end
-
--- ============================================================
--- DRAW START MENU
--- ============================================================
-function desktop.drawStartMenu()
-    if not desktop.startMenuOpen then return end
-    local mx,my = 2, desktop.startBtn.y-100
-    if my < 1 then my = 1 end
-    K.fillRect(mx,my,140,96,K.PAL.GRAY)
-    drawW95Raised(mx,my,140,96)
-    K.fillRect(mx+2,my+2,20,92,K.PAL.DARK_BLUE)
-    K.drawPixelText(mx+3,my+30,"CC",K.PAL.WHITE)
-    local items={{"File Manager","files"},{"Text Editor","edit"},{"Settings","settings"},{"Shell","shell"},{"Reboot","reboot"},{"Shutdown","shutdown"}}
-    local iy=my+4
-    for _,item in ipairs(items) do
-        local hover = K.mouse.x>=mx+24 and K.mouse.x<mx+136 and K.mouse.y>=iy and K.mouse.y<iy+12
-        if hover then K.fillRect(mx+24,iy,112,12,K.PAL.DARK_BLUE) end
-        K.drawPixelText(mx+28,iy+2,item[1],hover and K.PAL.WHITE or K.PAL.BLACK)
-        iy=iy+14
-    end
-end
-
--- ============================================================
--- DRAW DESKTOP (full)
--- ============================================================
 function desktop.drawDesktop()
-    K.clear()
-    local by = K.h - desktop.taskbarH
-    K.fillRect(0,0,K.w,by,K.PAL.W95_DESKTOP)
+    R.clear()
+    local by = R.h - desktop.taskbarH
 
-    -- Icons in grid
-    local icons={{"Files","files"},{"Editor","edit"},{"Settings","settings"},{"Shell","shell"}}
-    local iw,ih=48,40
-    local cols=math.max(1,math.floor((K.w-10)/(iw+10)))
-    for i,icon in ipairs(icons) do
+    -- Background
+    R.fillRect(0, 0, R.w, by, SYM.W95_DESKTOP)
+
+    -- Desktop icons in grid
+    local icons = {{"Files","files"},{"Editor","edit"},{"Settings","settings"},{"Shell","shell"}}
+    local iw, ih = 48, 42
+    local cols = math.max(1, math.floor((R.w-10)/(iw+10)))
+    for i, icon in ipairs(icons) do
         local col=(i-1)%cols; local row=math.floor((i-1)/cols)
         local ix=8+col*(iw+10); local iy=8+row*(ih+8)
         if iy+ih>by-4 then break end
-        if K.mouse.x>=ix-2 and K.mouse.x<ix+iw+2 and K.mouse.y>=iy-2 and K.mouse.y<iy+ih+2 then
-            K.fillRect(ix-2,iy-2,iw+4,ih+4,K.PAL.DARK_BLUE)
-        end
-        K.fillRect(ix,iy,iw,24,K.PAL.LIGHT_GRAY)
-        drawW95Sunken(ix,iy,iw,24)
-        K.drawPixelText(ix+16,iy+7,icon[1]:sub(1,1),K.PAL.DARK_BLUE)
-        K.drawPixelText(ix,iy+28,icon[1],K.PAL.WHITE)
+        local hover = desktop.mouse.x>=ix-2 and desktop.mouse.x<ix+iw+2 and desktop.mouse.y>=iy-2 and desktop.mouse.y<iy+ih+2
+        if hover then R.fillRect(ix-2,iy-2,iw+4,ih+4,SYM.DARK_BLUE) end
+        R.fillRect(ix,iy,iw,24,SYM.LIGHT_GRAY)
+        R.drawW95Sunken(ix,iy,iw,24)
+        R.drawText(ix+16,iy+7,icon[1]:sub(1,1),SYM.DARK_BLUE)
+        R.drawText(ix,iy+28,icon[1],SYM.WHITE)
     end
 
+    -- Windows
     for _,win in ipairs(desktop.windows) do
         if win.visible and not win.minimized then desktop.drawWindow(win) end
     end
-    desktop.drawTaskbar()
-    desktop.drawStartMenu()
-    desktop.dirty = false
-    desktop.bgCached = true
+
+    -- Taskbar
+    R.fillRect(0,by,R.w,desktop.taskbarH,SYM.GRAY)
+    R.drawLine(0,by,R.w-1,by,SYM.WHITE)
+
+    -- Start button
+    R.drawButton(2,by+2,54,16,desktop.startMenuOpen)
+    R.drawText(6,by+6,"Start",SYM.BLACK)
+
+    -- Window buttons in taskbar
+    local btnX=60
+    for _,win in ipairs(desktop.windows) do
+        local bw=math.min(100,R.w-btnX-55)
+        if bw<25 then break end
+        local ia=(desktop.activeWin and desktop.activeWin.id==win.id)
+        R.drawButton(btnX,by+3,bw,14,ia)
+        local tt=#win.title>12 and win.title:sub(1,10)..".." or win.title
+        if win.minimized then tt="("..tt..")" end
+        R.drawText(btnX+4,by+6,tt,ia and SYM.WHITE or SYM.BLACK)
+        btnX=btnX+bw+2
+    end
+
+    -- Clock
+    R.drawW95Sunken(R.w-48,by+3,44,14)
+    R.drawText(R.w-44,by+6,desktop.clock,SYM.BLACK)
+
+    -- Start menu
+    if desktop.startMenuOpen then
+        local my=by-100; if my<1 then my=1 end
+        R.fillRect(2,my,140,96,SYM.GRAY)
+        R.drawW95Raised(2,my,140,96)
+        R.fillRect(4,my+2,20,92,SYM.DARK_BLUE)
+        R.drawText(5,my+30,"CC",SYM.WHITE)
+        local items={{"File Manager","files"},{"Text Editor","edit"},{"Settings","settings"},{"Shell","shell"},{"Reboot","reboot"},{"Shutdown","shutdown"}}
+        local iy=my+4
+        for _,item in ipairs(items) do
+            local hover=desktop.mouse.x>=26 and desktop.mouse.x<138 and desktop.mouse.y>=iy and desktop.mouse.y<iy+12
+            if hover then R.fillRect(26,iy,112,12,SYM.DARK_BLUE) end
+            R.drawText(28,iy+2,item[1],hover and SYM.WHITE or SYM.BLACK)
+            iy=iy+14
+        end
+    end
+
+    desktop.dirty=false
+    desktop.lastDragRect=nil
 end
 
 -- ============================================================
--- DRAW ONLY DIRTY PART (taskbar + active window area)
+-- RENDER: SINGLE WINDOW
 -- ============================================================
-function desktop.redrawPartial()
-    if not desktop.bgCached then desktop.drawDesktop(); return end
-    -- Only redraw taskbar area
-    local by = K.h - desktop.taskbarH
-    K.fillRect(0,by,K.w,desktop.taskbarH,K.PAL.GRAY)
-    K.drawLine(0,by,K.w-1,by,K.PAL.WHITE)
-    desktop.drawTaskbar()
-    if desktop.startMenuOpen then desktop.drawStartMenu() end
+function desktop.drawWindow(win)
+    local x,y,w,h=win.cx,win.cy,win.cw,win.ch
+    local by=R.h-desktop.taskbarH
+    if y+h>by then h=math.max(20,by-y) end
+
+    R.fillRect(x,y,w,h,SYM.LIGHT_BG)
+    local active=(desktop.activeWin and desktop.activeWin.id==win.id)
+    R.drawTitleBar(x,y,w,active)
+    R.drawText(x+4,y+4,win.title,active and SYM.WHITE or SYM.GRAY)
+
+    -- Title bar buttons
+    R.drawButton(x+w-18,y+1,16,14,false); R.drawText(x+w-13,y+4,"X",SYM.BLACK)
+    R.drawButton(x+w-36,y+1,16,14,false); R.drawRect(x+w-32,y+4,8,8,SYM.BLACK)
+    R.drawButton(x+w-54,y+1,16,14,false); R.fillRect(x+w-49,y+6,6,2,SYM.BLACK)
+
+    R.drawW95Raised(x,y,w,h)
+    R.fillRect(x+2,y+17,w-4,h-19,SYM.LIGHT_BG)
+    if win.onDraw then pcall(win.onDraw,win,x+3,y+18,w-6,h-21) end
 end
 
 -- ============================================================
 -- MOUSE HANDLING
--- Returns: action string or nil
--- nil = consumed but no action needed (click on window client, empty space)
--- "files","edit","settings","shell","reboot","shutdown" = open app
 -- ============================================================
 function desktop.handleClick(mx,my,button)
-    -- Start menu open?
+    -- Start menu
     if desktop.startMenuOpen then
-        local my2=desktop.startBtn.y-100; if my2<1 then my2=1 end
+        local my2=R.h-desktop.taskbarH-100; if my2<1 then my2=1 end
         local items={"files","edit","settings","shell","reboot","shutdown"}
         local iy=my2+4
-        for i,action in ipairs(items) do
+        for _,action in ipairs(items) do
             if mx>=26 and mx<138 and my>=iy and my<iy+12 then
                 desktop.startMenuOpen=false; return action
             end
@@ -251,22 +195,21 @@ function desktop.handleClick(mx,my,button)
     end
 
     -- Start button
-    if mx>=2 and mx<56 and my>=desktop.startBtn.y and my<desktop.startBtn.y+16 then
+    local by=R.h-desktop.taskbarH
+    if mx>=2 and mx<56 and my>=by+2 and my<by+18 then
         desktop.startMenuOpen=true; return nil
     end
 
-    -- Taskbar window buttons (click to restore minimized)
-    local by=K.h-desktop.taskbarH
+    -- Taskbar window buttons
     if my>=by then
         local btnX=60
         for _,win in ipairs(desktop.windows) do
-            local bw=math.min(100,K.w-btnX-55)
+            local bw=math.min(100,R.w-btnX-55)
             if bw<25 then break end
             if mx>=btnX and mx<btnX+bw and my>=by+3 and my<by+17 then
                 if win.minimized then
                     win.minimized=false; win.visible=true
-                    desktop.bringToFront(win)
-                    desktop.dirty=true
+                    desktop.bringToFront(win); desktop.dirty=true
                 elseif desktop.activeWin and desktop.activeWin.id==win.id then
                     win.minimized=true; desktop.dirty=true
                 else
@@ -281,31 +224,28 @@ function desktop.handleClick(mx,my,button)
 
     -- Desktop icons
     local icons={{"Files","files"},{"Editor","edit"},{"Settings","settings"},{"Shell","shell"}}
-    local iw,ih=48,40
-    local cols=math.max(1,math.floor((K.w-10)/(iw+10)))
+    local iw,ih=48,42
+    local cols=math.max(1,math.floor((R.w-10)/(iw+10)))
     for i,icon in ipairs(icons) do
         local col=(i-1)%cols; local row=math.floor((i-1)/cols)
         local ix=8+col*(iw+10); local iy=8+row*(ih+8)
-        if mx>=ix-2 and mx<ix+iw+2 and my>=iy-2 and my<iy+ih+2 then
-            return icon[2]
-        end
+        if mx>=ix-2 and mx<ix+iw+2 and my>=iy-2 and my<iy+ih+2 then return icon[2] end
     end
 
-    -- Windows (topmost first)
+    -- Windows
     local win=desktop.getWindowAt(mx,my)
     if win then
         desktop.bringToFront(win)
-
         -- Title bar
         if my>=win.cy and my<win.cy+16 then
             if mx>=win.cx+win.cw-18 then desktop.destroyWindow(win); return nil end  -- close
-            if mx>=win.cx+win.cw-36 and mx<win.cx+win.cw-20 then  -- maximize/restore
+            if mx>=win.cx+win.cw-36 and mx<win.cx+win.cw-20 then  -- maximize
                 if win.maximized then
                     if win.prevState then win.cx=win.prevState.x;win.cy=win.prevState.y;win.cw=win.prevState.w;win.ch=win.prevState.h;win.prevState=nil end
                     win.maximized=false
                 else
                     win.prevState={x=win.cx,y=win.cy,w=win.cw,h=win.ch}
-                    win.cx=1;win.cy=1;win.cw=K.w;win.ch=K.h-desktop.taskbarH-1;win.maximized=true
+                    win.cx=1;win.cy=1;win.cw=R.w;win.ch=R.h-desktop.taskbarH-1;win.maximized=true
                 end
                 desktop.dirty=true; return nil
             end
@@ -314,17 +254,16 @@ function desktop.handleClick(mx,my,button)
             end
             -- Drag start
             if not win.maximized then
-                win.dragging=true; win.dragOffX=mx-win.cx; win.dragOffY=my-win.cy
+                desktop.dragWin=win
+                desktop.dragOX=mx-win.cx; desktop.dragOY=my-win.cy
             end
             return nil
         end
-
         -- Resize
         if mx>=win.cx+win.cw-8 and my>=win.cy+win.ch-8 and not win.maximized then
             win.resizing=true; return nil
         end
-
-        -- Client area — forward click to window
+        -- Client click
         if win.onClick then pcall(win.onClick,win,mx-win.cx-3,my-win.cy-18) end
         return nil
     end
@@ -333,25 +272,50 @@ function desktop.handleClick(mx,my,button)
 end
 
 function desktop.handleDrag(mx,my)
-    for _,win in ipairs(desktop.windows) do
-        if win.dragging then
-            win.cx=mx-win.dragOffX; win.cy=my-win.dragOffY
-            if win.cy<1 then win.cy=1 end
-            local by=K.h-desktop.taskbarH
-            if win.cy+win.ch>by+1 then win.cy=by-win.ch+2 end
-        end
-        if win.resizing then
-            local nw=mx-win.cx+1; local nh=my-win.cy+1
-            if nw>=win.minW then win.cw=nw end
-            if nh>=win.minH then win.ch=nh end
-            if win.cw>K.w-win.cx then win.cw=K.w-win.cx end
-            if win.ch>K.h-desktop.taskbarH-win.cy then win.ch=K.h-desktop.taskbarH-win.cy end
+    local win=desktop.dragWin
+    if not win then return end
+    local nx=mx-desktop.dragOX; local ny=my-desktop.dragOY
+    if ny<1 then ny=1 end
+    local by=R.h-desktop.taskbarH
+    if ny+win.ch>by+1 then ny=by-win.ch+2 end
+
+    -- Clear old drag outline
+    if desktop.lastDragRect then
+        local r=desktop.lastDragRect
+        local cx=math.max(1,r.x); local cy=math.max(1,r.y)
+        local cw=math.min(r.w,R.w-cx); local ch=math.min(r.h,by-cy)
+        if cw>0 and ch>0 then R.fillRect(cx,cy,cw,ch,SYM.W95_DESKTOP) end
+        -- Redraw any windows that were under the old rect
+        for _,w in ipairs(desktop.windows) do
+            if w.id~=win.id and w.visible and not w.minimized then
+                -- Simple overlap check
+                if not (w.cx+w.cw < r.x or w.cx > r.x+r.w or w.cy+w.ch < r.y or w.cy > r.y+r.h) then
+                    desktop.drawWindow(w)
+                end
+            end
         end
     end
+
+    -- Draw new drag outline
+    R.drawDragOutline(nx,ny,win.cw,win.ch)
+    desktop.lastDragRect={x=nx,y=ny,w=win.cw,h=win.ch}
 end
 
 function desktop.handleMouseUp()
-    for _,win in ipairs(desktop.windows) do win.dragging=false; win.resizing=false end
+    if desktop.dragWin then
+        local win=desktop.dragWin
+        local nx=desktop.mouse.x-desktop.dragOX
+        local ny=desktop.mouse.y-desktop.dragOY
+        if ny<1 then ny=1 end
+        local by=R.h-desktop.taskbarH
+        if ny+win.ch>by+1 then ny=by-win.ch+2 end
+        win.cx=nx; win.cy=ny
+        desktop.dragWin=nil
+        desktop.lastDragRect=nil
+        desktop.dirty=true  -- full redraw to place window at final position
+    end
+    -- Stop resize
+    for _,w in ipairs(desktop.windows) do w.resizing=false end
 end
 
 function desktop.handleKey(key,char)
@@ -364,6 +328,7 @@ end
 -- MAIN LOOP
 -- ============================================================
 function desktop.run()
+    R.init()
     local running=true
     local timer=os.startTimer(1)
     desktop.drawDesktop()
@@ -372,50 +337,26 @@ function desktop.run()
         local event,p1,p2,p3,p4=os.pullEvent()
 
         if event=="mouse_click" then
-            K.mouse.x=p2; K.mouse.y=p3
+            desktop.mouse.x=p2; desktop.mouse.y=p3
             local action=desktop.handleClick(p2,p3,p1)
             if action=="reboot" then
-                K.clear();K.drawPixelText(10,10,"Rebooting...",K.PAL.WHITE);sleep(0.5);os.reboot()
-            elseif action=="shutdown" then
-                running=false
-            elseif action=="files" then desktop.app_fm_open()
-            elseif action=="edit" then desktop.app_editor_open()
-            elseif action=="settings" then desktop.app_settings_open()
-            elseif action=="shell" then desktop.app_shell_open()
+                R.clear();R.drawText(10,10,"Rebooting...",SYM.WHITE);sleep(0.5);os.reboot()
+            elseif action=="shutdown" then running=false
+            elseif action=="files" then desktop.app_fm()
+            elseif action=="edit" then desktop.app_editor()
+            elseif action=="settings" then desktop.app_settings()
+            elseif action=="shell" then desktop.app_shell()
             end
             if desktop.dirty then desktop.drawDesktop() end
 
         elseif event=="mouse_drag" then
-            K.mouse.x=p2; K.mouse.y=p3
-            -- Save old rect for cleanup
-            local oldRect=nil
-            for _,w in ipairs(desktop.windows) do
-                if w.dragging or w.resizing then
-                    oldRect={x=w.cx,y=w.cy,w=w.cw,h=w.ch} break
-                end
-            end
+            desktop.mouse.x=p2; desktop.mouse.y=p3
             desktop.handleDrag(p2,p3)
-            -- Check if moved
-            local moved=false
-            for _,w in ipairs(desktop.windows) do
-                if w.dragging and (w.cx~=oldRect.x or w.cy~=oldRect.y) then moved=true; break end
-                if w.resizing and (w.cw~=oldRect.w or w.ch~=oldRect.h) then moved=true; break end
-            end
-            if moved and oldRect then
-                -- Clear old position (draw bg over it)
-                local by=K.h-desktop.taskbarH
-                local cx=math.max(1,oldRect.x); local cy=math.max(1,oldRect.y)
-                local cw=math.min(oldRect.w,K.w-cx); local ch=math.min(oldRect.h,by-cy)
-                if cw>0 and ch>0 then K.fillRect(cx,cy,cw,ch,K.PAL.W95_DESKTOP) end
-                -- Draw window at new position
-                for _,w in ipairs(desktop.windows) do
-                    if w.dragging or w.resizing then desktop.drawWindow(w); break end
-                end
-            end
+            -- No full redraw — drag outline is drawn directly
 
         elseif event=="mouse_up" then
             desktop.handleMouseUp()
-            desktop.drawDesktop()  -- full redraw on drop
+            if desktop.dirty then desktop.drawDesktop() end
 
         elseif event=="key" then
             if p1==keys.q and desktop.startMenuOpen then
@@ -431,19 +372,26 @@ function desktop.run()
             local t=os.time and os.time() or 0
             local h=math.floor(t); local m=math.floor((t-h)*60)
             local nc=string.format("%02d:%02d",h,m)
-            if nc~=desktop.clock then desktop.clock=nc; desktop.redrawPartial() end
+            if nc~=desktop.clock then
+                desktop.clock=nc
+                -- Partial redraw: just clock area
+                local by=R.h-desktop.taskbarH
+                R.drawW95Sunken(R.w-48,by+3,44,14)
+                R.drawText(R.w-44,by+6,nc,SYM.BLACK)
+            end
             timer=os.startTimer(1)
         end
     end
 
-    K.clear();K.fillRect(0,0,K.w,K.h,K.PAL.BLACK)
-    K.drawPixelText(10,10,"CCOS shutdown.",K.PAL.WHITE)
+    R.clear();R.fillRect(0,0,R.w,R.h,SYM.BLACK)
+    R.drawText(10,10,"CCOS shutdown.",SYM.WHITE)
 end
 
 -- ============================================================
--- FILE MANAGER (with mouse support)
+-- APPS
 -- ============================================================
-function desktop.app_fm_open()
+
+function desktop.app_fm()
     local path="/"
     local selected=1
     local scroll=0
@@ -458,237 +406,146 @@ function desktop.app_fm_open()
             table.insert(items,fs.isDir(fp) and ("/"..item) or item)
         end
         if #items==0 then items={"(empty)"} end
-        if selected>#items then selected=#items end
-        if selected<1 then selected=1 end
+        selected=math.max(1,math.min(selected,#items))
     end
     refresh()
 
-    desktop.createWindow("File Manager",30,25,220,130,
-        function(w,cx,cy,cw,ch)
-            local listH=math.floor((ch-20)/8)
-            for i=1,listH do
-                local idx=scroll+i; local item=items[idx]
-                if not item then break end
-                local iy=cy+(i-1)*8
-                -- Check mouse hover for this item
-                local hover = K.mouse.x>=cx and K.mouse.x<cx+cw and K.mouse.y>=iy-1 and K.mouse.y<iy+8
-                if idx==selected or hover then
-                    K.fillRect(cx,iy-1,cw,9,K.PAL.DARK_BLUE)
-                    K.drawPixelText(cx+2,iy,item,K.PAL.WHITE)
-                else
-                    K.drawPixelText(cx+2,iy,item,K.PAL.BLACK)
-                end
-            end
-            K.fillRect(cx,cy+ch-12,cw,10,K.PAL.GRAY)
-            K.drawPixelText(cx+2,cy+ch-10," "..path,K.PAL.BLACK)
-        end,
-        function(w,key,char)
-            if key==keys.up and selected>1 then
-                selected=selected-1; if selected<=scroll then scroll=scroll-1 end
-            elseif key==keys.down and selected<#items then
-                selected=selected+1
-                local lh=math.floor((w.ch-20)/8)
-                if selected>scroll+lh then scroll=scroll+1 end
-            elseif key==keys.enter then
-                local item=items[selected]
-                if not item then return end
-                if item==".." then path=K.getDir(path);selected=1;scroll=0;refresh()
-                elseif item:sub(1,1)=="/" then
-                    local np=path=="/" and item or (path..item)
-                    if fs.isDir(np) then path=np;selected=1;scroll=0;refresh() end
-                else
-                    local fp=path=="/" and ("/"..item) or (path.."/"..item)
-                    desktop.app_editor_open(fp)
-                end
-            elseif key==keys.backspace then path=K.getDir(path);selected=1;scroll=0;refresh()
-            elseif key==keys.f5 then refresh()
-            elseif key==keys.escape or key==keys.q then desktop.destroyWindow(w)
+    local win=desktop.createWindow("File Manager",30,25,220,130)
+    win.onDraw=function(w,cx,cy,cw,ch)
+        local lh=math.floor((ch-20)/8)
+        for i=1,lh do
+            local idx=scroll+i; local item=items[idx]
+            if not item then break end
+            local iy=cy+(i-1)*8
+            local hover=desktop.mouse.x>=cx and desktop.mouse.x<cx+cw and desktop.mouse.y>=iy-1 and desktop.mouse.y<iy+8
+            if idx==selected or hover then
+                R.fillRect(cx,iy-1,cw,9,SYM.DARK_BLUE)
+                R.drawText(cx+2,iy,item,SYM.WHITE)
+            else
+                R.drawText(cx+2,iy,item,SYM.BLACK)
             end
         end
-    )
-
-    -- Override onClick for mouse interaction
-    local win = desktop.windows[#desktop.windows]
-    win.onClick = function(w, mx, my)
-        local listH = math.floor((w.ch-20)/8)
-        for i=1,listH do
-            local idx = scroll + i
-            local iy = 18 + (i-1)*8  -- client y offset
-            if my >= iy-1 and my < iy+8 then
-                selected = idx
-                if idx <= #items then
-                    local item = items[idx]
-                    if item == ".." then
-                        path = K.getDir(path); selected=1; scroll=0; refresh()
-                    elseif item:sub(1,1) == "/" then
-                        local np = path=="/" and item or (path..item)
-                        if fs.isDir(np) then path=np; selected=1; scroll=0; refresh() end
-                    else
-                        local fp = path=="/" and ("/"..item) or (path.."/"..item)
-                        desktop.app_editor_open(fp)
-                    end
-                end
+        R.fillRect(cx,cy+ch-12,cw,10,SYM.GRAY)
+        R.drawText(cx+2,cy+ch-10," "..path,SYM.BLACK)
+    end
+    win.onKey=function(w,key,char)
+        if key==keys.up and selected>1 then selected=selected-1; if selected<=scroll then scroll=scroll-1 end
+        elseif key==keys.down and selected<#items then selected=selected+1; local lh=math.floor((w.ch-20)/8); if selected>scroll+lh then scroll=scroll+1 end
+        elseif key==keys.enter then
+            local item=items[selected]; if not item then return end
+            if item==".." then path=desktop.getDir(path);selected=1;scroll=0;refresh()
+            elseif item:sub(1,1)=="/" then local np=path=="/" and item or (path..item); if fs.isDir(np) then path=np;selected=1;scroll=0;refresh() end
+            else local fp=path=="/" and ("/"..item) or (path.."/"..item); desktop.app_editor(fp) end
+        elseif key==keys.backspace then path=desktop.getDir(path);selected=1;scroll=0;refresh()
+        elseif key==keys.f5 then refresh()
+        elseif key==keys.escape or key==keys.q then desktop.destroyWindow(w) end
+    end
+    win.onClick=function(w,mx,my)
+        local lh=math.floor((w.ch-20)/8)
+        for i=1,lh do
+            local idx=scroll+i; local iy=18+(i-1)*8
+            if my>=iy-1 and my<iy+8 then
+                selected=idx; local item=items[idx]
+                if not item then return end
+                if item==".." then path=desktop.getDir(path);selected=1;scroll=0;refresh()
+                elseif item:sub(1,1)=="/" then local np=path=="/" and item or (path..item); if fs.isDir(np) then path=np;selected=1;scroll=0;refresh() end
+                else local fp=path=="/" and ("/"..item) or (path.."/"..item); desktop.app_editor(fp) end
                 return
             end
         end
     end
 end
 
--- ============================================================
--- TEXT EDITOR (Ctrl+S=Save, Ctrl+Q=Quit)
--- ============================================================
-function desktop.app_editor_open(filePath)
+function desktop.app_editor(filePath)
     filePath=filePath or "/untitled.txt"
     local lines={}
-    local content=K.readFile(filePath)
+    local content=desktop.readFile(filePath)
     if content then for line in content:gmatch("[^\n]*") do table.insert(lines,line) end end
     if #lines==0 then table.insert(lines,"") end
-    local cursorLine,cursorCol,scrollY=1,1,0
+    local cL,cC,sY=1,1,0
     local modified=false
 
-    desktop.createWindow("Edit: "..K.getFileName(filePath),40,20,250,140,
-        function(w,cx,cy,cw,ch)
-            local eh=math.floor((ch-16)/8)
-            for i=1,eh do
-                local li=scrollY+i
-                K.drawPixelText(cx+2,cy+(i-1)*8,lines[li] or "",K.PAL.BLACK)
-            end
-            if cursorLine>scrollY and cursorLine<=scrollY+eh then
-                local cy2=cy+(cursorLine-scrollY-1)*8
-                local cx2=cx+(cursorCol-1)*6
-                if cx2>=cx and cx2<cx+cw then
-                    K.fillRect(cx2,cy2,6,8,K.PAL.DARK_BLUE)
-                    local c=(lines[cursorLine] or ""):sub(cursorCol,cursorCol)
-                    K.drawPixelText(cx2,cy2,c=="" and " " or c,K.PAL.WHITE)
-                end
-            end
-            K.fillRect(cx,cy+ch-12,cw,10,K.PAL.GRAY)
-            local ms=modified and " [modified]" or ""
-            K.drawPixelText(cx+2,cy+ch-10,"Ln "..cursorLine..ms.." | Ctrl+S=Save Ctrl+Q=Quit",K.PAL.BLACK)
-        end,
-        function(w,key,char)
-            -- Ctrl+S = save (key 19 = Ctrl+S in some implementations, but we check for 's' with ctrl)
-            -- In CC:Tweaked, Ctrl+S is keys.s with modifier. We'll use F2 for save instead.
-            if char then
-                local l=lines[cursorLine] or ""
-                lines[cursorLine]=l:sub(1,cursorCol-1)..char..l:sub(cursorCol)
-                cursorCol=cursorCol+1; modified=true
-            elseif key==keys.backspace then
-                if cursorCol>1 then
-                    local l=lines[cursorLine] or ""
-                    lines[cursorLine]=l:sub(1,cursorCol-2)..l:sub(cursorCol)
-                    cursorCol=cursorCol-1; modified=true
-                elseif cursorLine>1 then
-                    local pl=#lines[cursorLine-1]
-                    lines[cursorLine-1]=lines[cursorLine-1]..(lines[cursorLine] or "")
-                    table.remove(lines,cursorLine); cursorLine=cursorLine-1; cursorCol=pl+1; modified=true
-                end
-            elseif key==keys.enter then
-                local l=lines[cursorLine] or ""
-                lines[cursorLine]=l:sub(1,cursorCol-1)
-                table.insert(lines,cursorLine,l:sub(cursorCol))
-                cursorLine=cursorLine+1; cursorCol=1; modified=true
-            elseif key==keys.up and cursorLine>1 then
-                cursorLine=cursorLine-1; cursorCol=math.min(cursorCol,#(lines[cursorLine] or "")+1)
-                if cursorLine<=scrollY then scrollY=scrollY-1 end
-            elseif key==keys.down and cursorLine<#lines then
-                cursorLine=cursorLine+1; cursorCol=math.min(cursorCol,#(lines[cursorLine] or "")+1)
-                local eh=math.floor((w.ch-16)/8)
-                if cursorLine>scrollY+eh then scrollY=scrollY+1 end
-            elseif key==keys.left then
-                if cursorCol>1 then cursorCol=cursorCol-1
-                elseif cursorLine>1 then cursorLine=cursorLine-1; cursorCol=#(lines[cursorLine] or "")+1 end
-            elseif key==keys.right then
-                if cursorCol<=#(lines[cursorLine] or "") then cursorCol=cursorCol+1
-                elseif cursorLine<#lines then cursorLine=cursorLine+1; cursorCol=1 end
-            elseif key==keys.home then cursorCol=1
-            elseif key==keys["end"] then cursorCol=#(lines[cursorLine] or "")+1
-            elseif key==keys.tab then
-                local l=lines[cursorLine] or ""
-                lines[cursorLine]=l:sub(1,cursorCol-1).."  "..l:sub(cursorCol)
-                cursorCol=cursorCol+2; modified=true
-            elseif key==keys.f2 then  -- F2 = Save
-                local f=fs.open(filePath,"w")
-                if f then f.write(table.concat(lines,"\n")); f.close(); modified=false end
-            elseif key==keys.f3 then  -- F3 = Quit
-                if modified then
-                    local f=fs.open(filePath,"w")
-                    if f then f.write(table.concat(lines,"\n")); f.close() end
-                end
-                desktop.destroyWindow(w)
+    local win=desktop.createWindow("Edit: "..desktop.getFileName(filePath),40,20,250,140)
+    win.onDraw=function(w,cx,cy,cw,ch)
+        local eh=math.floor((ch-16)/8)
+        for i=1,eh do local li=sY+i; R.drawText(cx+2,cy+(i-1)*8,lines[li] or "",SYM.BLACK) end
+        if cL>sY and cL<=sY+eh then
+            local cy2=cy+(cL-sY-1)*8; local cx2=cx+(cC-1)*6
+            if cx2>=cx and cx2<cx+cw then
+                R.fillRect(cx2,cy2,6,8,SYM.DARK_BLUE)
+                local c=(lines[cL] or ""):sub(cC,cC)
+                R.drawText(cx2,cy2,c=="" and " " or c,SYM.WHITE)
             end
         end
-    )
+        R.fillRect(cx,cy+ch-12,cw,10,SYM.GRAY)
+        local ms=modified and " [mod]" or ""
+        R.drawText(cx+2,cy+ch-10,"Ln "..cL..ms.." | F2=Save F3=Quit",SYM.BLACK)
+    end
+    win.onKey=function(w,key,char)
+        if char then local l=lines[cL] or ""; lines[cL]=l:sub(1,cC-1)..char..l:sub(cC); cC=cC+1; modified=true
+        elseif key==keys.backspace then
+            if cC>1 then local l=lines[cL] or ""; lines[cL]=l:sub(1,cC-2)..l:sub(cC); cC=cC-1; modified=true
+            elseif cL>1 then local pl=#lines[cL-1]; lines[cL-1]=lines[cL-1]..(lines[cL] or ""); table.remove(lines,cL); cL=cL-1; cC=pl+1; modified=true end
+        elseif key==keys.enter then local l=lines[cL] or ""; lines[cL]=l:sub(1,cC-1); table.insert(lines,cL,l:sub(cC)); cL=cL+1; cC=1; modified=true
+        elseif key==keys.up and cL>1 then cL=cL-1; cC=math.min(cC,#(lines[cL] or "")+1); if cL<=sY then sY=sY-1 end
+        elseif key==keys.down and cL<#lines then cL=cL+1; cC=math.min(cC,#(lines[cL] or "")+1); local eh=math.floor((w.ch-16)/8); if cL>sY+eh then sY=sY+1 end
+        elseif key==keys.left then if cC>1 then cC=cC-1 elseif cL>1 then cL=cL-1; cC=#(lines[cL] or "")+1 end
+        elseif key==keys.right then if cC<=#(lines[cL] or "") then cC=cC+1 elseif cL<#lines then cL=cL+1; cC=1 end
+        elseif key==keys.home then cC=1
+        elseif key==keys["end"] then cC=#(lines[cL] or "")+1
+        elseif key==keys.tab then local l=lines[cL] or ""; lines[cL]=l:sub(1,cC-1).."  "..l:sub(cC); cC=cC+2; modified=true
+        elseif key==keys.f2 then local f=fs.open(filePath,"w"); if f then f.write(table.concat(lines,"\n")); f.close(); modified=false end
+        elseif key==keys.f3 then if modified then local f=fs.open(filePath,"w"); if f then f.write(table.concat(lines,"\n")); f.close() end end; desktop.destroyWindow(w)
+        end
+    end
 end
 
--- ============================================================
--- SETTINGS
--- ============================================================
-function desktop.app_settings_open()
+function desktop.app_settings()
     local lt=os.getComputerLabel and os.getComputerLabel() or "No Label"
-    desktop.createWindow("Settings",50,30,180,100,
-        function(w,cx,cy,cw,ch)
-            K.drawPixelText(cx+4,cy+4,"Computer Label:",K.PAL.BLACK)
-            drawW95Sunken(cx+4,cy+16,cw-8,12)
-            K.drawPixelText(cx+6,cy+18,lt,K.PAL.BLACK)
-            K.drawPixelText(cx+4,cy+36,"Display: "..K.w.."x"..K.h,K.PAL.BLACK)
-            K.drawPixelText(cx+4,cy+48,"Color: "..(K.isColor and "Yes" or "No"),K.PAL.BLACK)
-            K.drawPixelText(cx+4,cy+60,"Graphics: "..(K.hasGraphics and "Yes" or "No"),K.PAL.BLACK)
-        end,
-        function(w,key)
-            if key==keys.escape or key==keys.q or key==keys.f3 then desktop.destroyWindow(w) end
-        end
-    )
+    local win=desktop.createWindow("Settings",50,30,180,100)
+    win.onDraw=function(w,cx,cy,cw,ch)
+        R.drawText(cx+4,cy+4,"Computer Label:",SYM.BLACK)
+        R.drawW95Sunken(cx+4,cy+16,cw-8,12)
+        R.drawText(cx+6,cy+18,lt,SYM.BLACK)
+        R.drawText(cx+4,cy+36,"Display: "..R.w.."x"..R.h,SYM.BLACK)
+        R.drawText(cx+4,cy+48,"Color: "..(R.isColor and "Yes" or "No"),SYM.BLACK)
+        R.drawText(cx+4,cy+60,"Graphics: "..(R.hasGraphics and "Yes" or "No"),SYM.BLACK)
+    end
+    win.onKey=function(w,key)
+        if key==keys.escape or key==keys.q or key==keys.f3 then desktop.destroyWindow(w) end
+    end
 end
 
--- ============================================================
--- SHELL (fixed syntax)
--- ============================================================
-function desktop.app_shell_open()
+function desktop.app_shell()
     local output={"> "}
     local inputLine=""
     local scrollY=0
 
-    desktop.createWindow("Shell",30,25,250,130,
-        function(w,cx,cy,cw,ch)
-            local ml=math.floor((ch-16)/8)
-            for i=1,ml do
-                K.drawPixelText(cx+2,cy+(i-1)*8,output[scrollY+i] or "",K.PAL.BLACK)
-            end
-            K.fillRect(cx,cy+ch-12,cw,10,K.PAL.GRAY)
-            K.drawPixelText(cx+2,cy+ch-10,"> "..inputLine,K.PAL.BLACK)
-        end,
-        function(w,key,char)
-            if char then
-                inputLine=inputLine..char
-            elseif key==keys.backspace then
-                inputLine=inputLine:sub(1,-2)
-            elseif key==keys.enter then
-                table.insert(output,"> "..inputLine)
-                local cmd=inputLine
-                inputLine=""
-                if cmd=="exit" then desktop.destroyWindow(w); return end
-                -- Try as expression first, then as statement
-                local fn,err=load("return "..cmd,"shell","t",_G)
-                if not fn then fn,err=load(cmd,"shell","t",_G) end
-                if fn then
-                    local ok,res=pcall(fn)
-                    if ok then if res~=nil then table.insert(output,tostring(res)) end
-                    else table.insert(output,"Error: "..tostring(res)) end
-                else
-                    table.insert(output,"Error: "..tostring(err)) end
-                local ml=math.floor((w.ch-16)/8)
-                if #output>ml then scrollY=#output-ml end
-            elseif key==keys.up then
-                if scrollY>0 then scrollY=scrollY-1 end
-            elseif key==keys.down then
-                local ml=math.floor((w.ch-16)/8)
-                if scrollY<#output-ml then scrollY=scrollY+1 end
-            elseif key==keys.q then
-                desktop.destroyWindow(w)
-            end
+    local win=desktop.createWindow("Shell",30,25,250,130)
+    win.onDraw=function(w,cx,cy,cw,ch)
+        local ml=math.floor((ch-16)/8)
+        for i=1,ml do R.drawText(cx+2,cy+(i-1)*8,output[scrollY+i] or "",SYM.BLACK) end
+        R.fillRect(cx,cy+ch-12,cw,10,SYM.GRAY)
+        R.drawText(cx+2,cy+ch-10,"> "..inputLine,SYM.BLACK)
+    end
+    win.onKey=function(w,key,char)
+        if char then inputLine=inputLine..char
+        elseif key==keys.backspace then inputLine=inputLine:sub(1,-2)
+        elseif key==keys.enter then
+            table.insert(output,"> "..inputLine)
+            local cmd=inputLine; inputLine=""
+            if cmd=="exit" then desktop.destroyWindow(w); return end
+            local fn,err=load("return "..cmd,"shell","t",_G)
+            if not fn then fn,err=load(cmd,"shell","t",_G) end
+            if fn then local ok,res=pcall(fn); if ok then if res~=nil then table.insert(output,tostring(res)) end else table.insert(output,"Error: "..tostring(res)) end
+            else table.insert(output,"Error: "..tostring(err)) end
+            local ml=math.floor((w.ch-16)/8)
+            if #output>ml then scrollY=#output-ml end
+        elseif key==keys.up then if scrollY>0 then scrollY=scrollY-1 end
+        elseif key==keys.down then local ml=math.floor((w.ch-16)/8); if scrollY<#output-ml then scrollY=scrollY+1 end
+        elseif key==keys.q then desktop.destroyWindow(w)
         end
-    )
+    end
 end
 
 return desktop
