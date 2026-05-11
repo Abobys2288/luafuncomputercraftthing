@@ -224,7 +224,7 @@ function D.appFM()
     end
     w.onClick=function(w,mx,my)
         local lh=math.floor((w.ch-12)/8) for i=1,lh do local idx=scroll+i local iy=18+(i-1)*8
-            if my>=iy-1 and my<iy+8 then sel=local it=items[idx] if not it then return end
+            if my>=iy-1 and my<iy+8 then sel=idx local it=items[idx] if not it then return end
                 if it==".." then path=gd(path) sel=1 scroll=0 ref()
                 elseif it:sub(1,1)=="/" then local np=path=="/" and it or (path..it) if fs.isDir(np) then path=np sel=1 scroll=0 ref() end
                 else D.appEdit(path=="/" and ("/"..it) or (path.."/"..it)) end return end end
