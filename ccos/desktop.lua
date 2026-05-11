@@ -9,6 +9,18 @@ local R = _G.ccos_render
 local A = _G.ccos_api
 local desktop = {}
 
+-- Direct palette indices (must match render.lua PALETTE table)
+local C = {
+    BLACK=0, WHITE=1, GRAY=2, LGRAY=3, DGRAY=4,
+    BLUE=5, DBLUE=6, CYAN=7, LBLUE=8,
+    GREEN=9, DGREEN=10, RED=11, DRED=12,
+    YELLOW=13, ORANGE=14, BROWN=15, PURPLE=16, PINK=17,
+    DTITLE=18, TBLUE=19, TINACT=20,
+    PBLUE=21, AWHITE=22, NBLACK=23, MGRAY=24,
+    BFACE=25, BHI=26, DNAVY=28, BTDARK=28,
+    DGBG=29, DESKTOP=30,
+}
+desktop.C = C
 desktop.R = R
 desktop.windows = {}
 desktop.activeWin = nil
@@ -112,14 +124,14 @@ end
 -- ============================================================
 -- RENDER: DESKTOP
 -- ============================================================
-local SYM = R.PAL  -- shortcut
+local C = desktop.C  -- color constants
 
 function desktop.drawDesktop()
     R.clear()
     local by = R.h - desktop.taskbarH
 
     -- Background
-    R.fillRect(0, 0, R.w, by, SYM.W95_DESKTOP)
+    R.fillRect(0, 0, R.w, by, C.W95_DESKTOP)
 
     -- Desktop icons in grid
     local icons = {{"Files","files"},{"Editor","edit"},{"Settings","settings"},{"Shell","shell"}}
@@ -130,11 +142,11 @@ function desktop.drawDesktop()
         local ix=8+col*(iw+10); local iy=8+row*(ih+8)
         if iy+ih>by-4 then break end
         local hover = desktop.mouse.x>=ix-2 and desktop.mouse.x<ix+iw+2 and desktop.mouse.y>=iy-2 and desktop.mouse.y<iy+ih+2
-        if hover then R.fillRect(ix-2,iy-2,iw+4,ih+4,SYM.DARK_BLUE) end
-        R.fillRect(ix,iy,iw,24,SYM.LIGHT_GRAY)
+        if hover then R.fillRect(ix-2,iy-2,iw+4,ih+4,C.DARK_BLUE) end
+        R.fillRect(ix,iy,iw,24,C.LIGHT_GRAY)
         R.drawW95Sunken(ix,iy,iw,24)
-        R.drawText(ix+16,iy+7,icon[1]:sub(1,1),SYM.DARK_BLUE)
-        R.drawText(ix,iy+28,icon[1],SYM.WHITE)
+        R.drawText(ix+16,iy+7,icon[1]:sub(1,1),C.DARK_BLUE)
+        R.drawText(ix,iy+28,icon[1],C.WHITE)
     end
 
     -- Windows
@@ -143,12 +155,12 @@ function desktop.drawDesktop()
     end
 
     -- Taskbar
-    R.fillRect(0,by,R.w,desktop.taskbarH,SYM.GRAY)
-    R.drawLine(0,by,R.w-1,by,SYM.WHITE)
+    R.fillRect(0,by,R.w,desktop.taskbarH,C.GRAY)
+    R.drawLine(0,by,R.w-1,by,C.WHITE)
 
     -- Start button
     R.drawButton(2,by+2,54,16,desktop.startMenuOpen)
-    R.drawText(6,by+6,"Start",SYM.BLACK)
+    R.drawText(6,by+6,"Start",C.BLACK)
 
     -- Window buttons in taskbar
     local btnX=60
@@ -159,27 +171,27 @@ function desktop.drawDesktop()
         R.drawButton(btnX,by+3,bw,14,ia)
         local tt=#win.title>12 and win.title:sub(1,10)..".." or win.title
         if win.minimized then tt="("..tt..")" end
-        R.drawText(btnX+4,by+6,tt,ia and SYM.WHITE or SYM.BLACK)
+        R.drawText(btnX+4,by+6,tt,ia and C.WHITE or C.BLACK)
         btnX=btnX+bw+2
     end
 
     -- Clock
     R.drawW95Sunken(R.w-48,by+3,44,14)
-    R.drawText(R.w-44,by+6,desktop.clock,SYM.BLACK)
+    R.drawText(R.w-44,by+6,desktop.clock,C.BLACK)
 
     -- Start menu
     if desktop.startMenuOpen then
         local my=by-100; if my<1 then my=1 end
-        R.fillRect(2,my,140,96,SYM.GRAY)
+        R.fillRect(2,my,140,96,C.GRAY)
         R.drawW95Raised(2,my,140,96)
-        R.fillRect(4,my+2,20,92,SYM.DARK_BLUE)
-        R.drawText(5,my+30,"CC",SYM.WHITE)
+        R.fillRect(4,my+2,20,92,C.DARK_BLUE)
+        R.drawText(5,my+30,"CC",C.WHITE)
         local items={{"File Manager","files"},{"Text Editor","edit"},{"Settings","settings"},{"Shell","shell"},{"Reboot","reboot"},{"Shutdown","shutdown"}}
         local iy=my+4
         for _,item in ipairs(items) do
             local hover=desktop.mouse.x>=26 and desktop.mouse.x<138 and desktop.mouse.y>=iy and desktop.mouse.y<iy+12
-            if hover then R.fillRect(26,iy,112,12,SYM.DARK_BLUE) end
-            R.drawText(28,iy+2,item[1],hover and SYM.WHITE or SYM.BLACK)
+            if hover then R.fillRect(26,iy,112,12,C.DARK_BLUE) end
+            R.drawText(28,iy+2,item[1],hover and C.WHITE or C.BLACK)
             iy=iy+14
         end
     end
@@ -196,18 +208,18 @@ function desktop.drawWindow(win)
     local by=R.h-desktop.taskbarH
     if y+h>by then h=math.max(20,by-y) end
 
-    R.fillRect(x,y,w,h,SYM.LIGHT_BG)
+    R.fillRect(x,y,w,h,C.LIGHT_BG)
     local active=(desktop.activeWin and desktop.activeWin.id==win.id)
     R.drawTitleBar(x,y,w,active)
-    R.drawText(x+4,y+4,win.title,active and SYM.WHITE or SYM.GRAY)
+    R.drawText(x+4,y+4,win.title,active and C.WHITE or C.GRAY)
 
     -- Title bar buttons
-    R.drawButton(x+w-18,y+1,16,14,false); R.drawText(x+w-13,y+4,"X",SYM.BLACK)
-    R.drawButton(x+w-36,y+1,16,14,false); R.drawRect(x+w-32,y+4,8,8,SYM.BLACK)
-    R.drawButton(x+w-54,y+1,16,14,false); R.fillRect(x+w-49,y+6,6,2,SYM.BLACK)
+    R.drawButton(x+w-18,y+1,16,14,false); R.drawText(x+w-13,y+4,"X",C.BLACK)
+    R.drawButton(x+w-36,y+1,16,14,false); R.drawRect(x+w-32,y+4,8,8,C.BLACK)
+    R.drawButton(x+w-54,y+1,16,14,false); R.fillRect(x+w-49,y+6,6,2,C.BLACK)
 
     R.drawW95Raised(x,y,w,h)
-    R.fillRect(x+2,y+17,w-4,h-19,SYM.LIGHT_BG)
+    R.fillRect(x+2,y+17,w-4,h-19,C.LIGHT_BG)
     if win.onDraw then pcall(win.onDraw,win,x+3,y+18,w-6,h-21) end
 end
 
@@ -319,7 +331,7 @@ function desktop.handleDrag(mx,my)
         local r=desktop.lastDragRect
         local cx=math.max(1,r.x); local cy=math.max(1,r.y)
         local cw=math.min(r.w,R.w-cx); local ch=math.min(r.h,by-cy)
-        if cw>0 and ch>0 then R.fillRect(cx,cy,cw,ch,SYM.W95_DESKTOP) end
+        if cw>0 and ch>0 then R.fillRect(cx,cy,cw,ch,C.W95_DESKTOP) end
         -- Redraw any windows that were under the old rect
         for _,w in ipairs(desktop.windows) do
             if w.id~=win.id and w.visible and not w.minimized then
@@ -375,7 +387,7 @@ function desktop.run()
             desktop.mouse.x=p2; desktop.mouse.y=p3
             local action=desktop.handleClick(p2,p3,p1)
             if action=="reboot" then
-                R.clear();R.drawText(10,10,"Rebooting...",SYM.WHITE);sleep(0.5);os.reboot()
+                R.clear();R.drawText(10,10,"Rebooting...",C.WHITE);sleep(0.5);os.reboot()
             elseif action=="shutdown" then running=false
             elseif action=="files" then desktop.app_fm()
             elseif action=="edit" then desktop.app_editor()
@@ -409,17 +421,18 @@ function desktop.run()
             local nc=string.format("%02d:%02d",h,m)
             if nc~=desktop.clock then
                 desktop.clock=nc
-                -- Partial redraw: just clock area
+                -- Partial redraw: clear clock area and redraw
                 local by=R.h-desktop.taskbarH
+                R.fillRect(R.w-48,by+3,44,14,C.DGRAY)  -- clear with dark gray
                 R.drawW95Sunken(R.w-48,by+3,44,14)
-                R.drawText(R.w-44,by+6,nc,SYM.BLACK)
+                R.drawText(R.w-44,by+6,nc,C.BLACK)
             end
             timer=os.startTimer(1)
         end
     end
 
-    R.clear();R.fillRect(0,0,R.w,R.h,SYM.BLACK)
-    R.drawText(10,10,"CCOS shutdown.",SYM.WHITE)
+    R.clear();R.fillRect(0,0,R.w,R.h,C.BLACK)
+    R.drawText(10,10,"CCOS shutdown.",C.WHITE)
 end
 
 -- ============================================================
@@ -454,14 +467,14 @@ function desktop.app_fm()
             local iy=cy+(i-1)*8
             local hover=desktop.mouse.x>=cx and desktop.mouse.x<cx+cw and desktop.mouse.y>=iy-1 and desktop.mouse.y<iy+8
             if idx==selected or hover then
-                R.fillRect(cx,iy-1,cw,9,SYM.DARK_BLUE)
-                R.drawText(cx+2,iy,item,SYM.WHITE)
+                R.fillRect(cx,iy-1,cw,9,C.DARK_BLUE)
+                R.drawText(cx+2,iy,item,C.WHITE)
             else
-                R.drawText(cx+2,iy,item,SYM.BLACK)
+                R.drawText(cx+2,iy,item,C.BLACK)
             end
         end
-        R.fillRect(cx,cy+ch-12,cw,10,SYM.GRAY)
-        R.drawText(cx+2,cy+ch-10," "..path,SYM.BLACK)
+        R.fillRect(cx,cy+ch-12,cw,10,C.GRAY)
+        R.drawText(cx+2,cy+ch-10," "..path,C.BLACK)
     end
     win.onKey=function(w,key,char)
         if key==keys.up and selected>1 then selected=selected-1; if selected<=scroll then scroll=scroll-1 end
@@ -503,18 +516,18 @@ function desktop.app_editor(filePath)
     local win=desktop.createWindow("Edit: "..getFileName(filePath),40,20,250,140)
     win.onDraw=function(w,cx,cy,cw,ch)
         local eh=math.floor((ch-16)/8)
-        for i=1,eh do local li=sY+i; R.drawText(cx+2,cy+(i-1)*8,lines[li] or "",SYM.BLACK) end
+        for i=1,eh do local li=sY+i; R.drawText(cx+2,cy+(i-1)*8,lines[li] or "",C.BLACK) end
         if cL>sY and cL<=sY+eh then
             local cy2=cy+(cL-sY-1)*8; local cx2=cx+(cC-1)*6
             if cx2>=cx and cx2<cx+cw then
-                R.fillRect(cx2,cy2,6,8,SYM.DARK_BLUE)
+                R.fillRect(cx2,cy2,6,8,C.DARK_BLUE)
                 local c=(lines[cL] or ""):sub(cC,cC)
-                R.drawText(cx2,cy2,c=="" and " " or c,SYM.WHITE)
+                R.drawText(cx2,cy2,c=="" and " " or c,C.WHITE)
             end
         end
-        R.fillRect(cx,cy+ch-12,cw,10,SYM.GRAY)
+        R.fillRect(cx,cy+ch-12,cw,10,C.GRAY)
         local ms=modified and " [mod]" or ""
-        R.drawText(cx+2,cy+ch-10,"Ln "..cL..ms.." | F2=Save F3=Quit",SYM.BLACK)
+        R.drawText(cx+2,cy+ch-10,"Ln "..cL..ms.." | F2=Save F3=Quit",C.BLACK)
     end
     win.onKey=function(w,key,char)
         if char then local l=lines[cL] or ""; lines[cL]=l:sub(1,cC-1)..char..l:sub(cC); cC=cC+1; modified=true
@@ -539,12 +552,12 @@ function desktop.app_settings()
     local lt=os.getComputerLabel and os.getComputerLabel() or "No Label"
     local win=desktop.createWindow("Settings",50,30,180,100)
     win.onDraw=function(w,cx,cy,cw,ch)
-        R.drawText(cx+4,cy+4,"Computer Label:",SYM.BLACK)
+        R.drawText(cx+4,cy+4,"Computer Label:",C.BLACK)
         R.drawW95Sunken(cx+4,cy+16,cw-8,12)
-        R.drawText(cx+6,cy+18,lt,SYM.BLACK)
-        R.drawText(cx+4,cy+36,"Display: "..R.w.."x"..R.h,SYM.BLACK)
-        R.drawText(cx+4,cy+48,"Color: "..(R.isColor and "Yes" or "No"),SYM.BLACK)
-        R.drawText(cx+4,cy+60,"Graphics: "..(R.hasGraphics and "Yes" or "No"),SYM.BLACK)
+        R.drawText(cx+6,cy+18,lt,C.BLACK)
+        R.drawText(cx+4,cy+36,"Display: "..R.w.."x"..R.h,C.BLACK)
+        R.drawText(cx+4,cy+48,"Color: "..(R.isColor and "Yes" or "No"),C.BLACK)
+        R.drawText(cx+4,cy+60,"Graphics: "..(R.hasGraphics and "Yes" or "No"),C.BLACK)
     end
     win.onKey=function(w,key)
         if key==keys.escape or key==keys.q or key==keys.f3 then desktop.destroyWindow(w) end
@@ -559,9 +572,9 @@ function desktop.app_shell()
     local win=desktop.createWindow("Shell",30,25,250,130)
     win.onDraw=function(w,cx,cy,cw,ch)
         local ml=math.floor((ch-16)/8)
-        for i=1,ml do R.drawText(cx+2,cy+(i-1)*8,output[scrollY+i] or "",SYM.BLACK) end
-        R.fillRect(cx,cy+ch-12,cw,10,SYM.GRAY)
-        R.drawText(cx+2,cy+ch-10,"> "..inputLine,SYM.BLACK)
+        for i=1,ml do R.drawText(cx+2,cy+(i-1)*8,output[scrollY+i] or "",C.BLACK) end
+        R.fillRect(cx,cy+ch-12,cw,10,C.GRAY)
+        R.drawText(cx+2,cy+ch-10,"> "..inputLine,C.BLACK)
     end
     win.onKey=function(w,key,char)
         if char then inputLine=inputLine..char

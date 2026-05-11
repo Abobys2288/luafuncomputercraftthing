@@ -1,7 +1,7 @@
 --[[
     CCOS Render Engine
     ==================
-    All drawing functions. Separated from desktop logic.
+    All drawing functions.
 ]]
 
 local R = {}
@@ -10,39 +10,72 @@ R.hasGraphics = term.setGraphicsMode ~= nil
 R.isColor = term.isColor and term.isColor() or false
 R.w, R.h = 0, 0
 R.display = term
-R.mode = 0  -- 0=text, 1=16col, 2=256col
+R.mode = 0
 
--- Palette (0-based indices for graphics mode 2)
-R.PAL = {
-    BLACK=0, WHITE=1, GRAY=2, LIGHT_GRAY=3, DARK_GRAY=4,
-    BLUE=5, DARK_BLUE=6, CYAN=7, LIGHT_BLUE=8,
-    GREEN=9, DARK_GREEN=10, RED=11, DARK_RED=12,
-    YELLOW=13, ORANGE=14, BROWN=15, PURPLE=16, PINK=17,
-    W95_TITLE_BLUE=19, W95_TITLE_INACTIVE=20,
-    W95_DESKTOP=30, LIGHT_BG=31,
-}
+-- Color constants (will be set after palette init)
+R.PAL = {}
 
-R.PALETTE = {
-    {0,0,0}, {255,255,255}, {192,192,192}, {224,224,224}, {128,128,128},
-    {0,0,192}, {0,0,128}, {0,192,192}, {128,224,255},
-    {0,192,0}, {0,128,0}, {255,0,0}, {128,0,0},
-    {255,255,0}, {255,192,0}, {128,64,0}, {128,0,128}, {255,128,255},
-    {64,64,64}, {0,84,168}, {128,158,200},
-    {0,0,0},{0,0,0},{0,0,0},{0,0,0},{0,0,0},{0,0,0},{0,0,0},{0,0,0},
-    {0,128,128}, {192,192,192},
+-- Full 32-color W95 palette (indices 0-31)
+local PALETTE = {
+    {0,0,0},           -- 0  BLACK
+    {255,255,255},     -- 1  WHITE
+    {192,192,192},     -- 2  GRAY (window bg)
+    {223,223,223},     -- 3  LIGHT_GRAY
+    {128,128,128},     -- 4  DARK_GRAY
+    {0,0,192},         -- 5  BLUE
+    {0,0,128},         -- 6  DARK_BLUE (active title)
+    {0,192,192},       -- 7  CYAN
+    {128,224,255},     -- 8  LIGHT_BLUE
+    {0,192,0},         -- 9  GREEN
+    {0,128,0},         -- 10 DARK_GREEN
+    {255,0,0},         -- 11 RED
+    {128,0,0},         -- 12 DARK_RED
+    {255,255,0},       -- 13 YELLOW
+    {255,192,0},       -- 14 ORANGE
+    {128,64,0},        -- 15 BROWN
+    {128,0,128},       -- 16 PURPLE
+    {255,128,255},     -- 17 PINK
+    {64,64,64},        -- 18 DARK_TITLE_INACTIVE
+    {0,84,168},        -- 19 W95_TITLE_BLUE (active title)
+    {128,158,200},     -- 20 W95_TITLE_INACTIVE
+    {0,0,255},         -- 21 PURE_BLUE
+    {240,240,240},     -- 22 ALMOST_WHITE
+    {32,32,32},        -- 23 NEAR_BLACK
+    {160,160,160},     -- 24 MID_GRAY
+    {200,200,200},     -- 25 BUTTON_FACE
+    {248,248,248},     -- 26 BUTTON_HIGHLIGHT
+    {0,0,64},          -- 27 DEEP_NAVY
+    {48,48,48},        -- 28 BTNFACE_DARK
+    {0,128,0},         -- 29 DARK_GREEN_BG
+    {0,128,128},       -- 30 W95_DESKTOP (teal)
+    {192,192,192},     -- 31 LIGHT_BG (same as GRAY)
 }
 
 function R.init()
     if R.hasGraphics then
         R.display.setGraphicsMode(2)
-        for i, c in ipairs(R.PALETTE) do
-            pcall(function() R.display.setPaletteColor(i-1, c[1]/255, c[2]/255, c[3]/255) end)
+        for i, c in ipairs(PALETTE) do
+            pcall(function()
+                R.display.setPaletteColor(i-1, c[1]/255, c[2]/255, c[3]/255)
+            end)
         end
         R.w, R.h = R.display.getSize(1)
         R.mode = 2
     else
         R.w, R.h = R.display.getSize()
     end
+
+    -- Set up color constants after palette is loaded
+    R.PAL = {
+        BLACK=0, WHITE=1, GRAY=2, LIGHT_GRAY=3, DARK_GRAY=4,
+        BLUE=5, DARK_BLUE=6, CYAN=7, LIGHT_BLUE=8,
+        GREEN=9, DARK_GREEN=10, RED=11, DARK_RED=12,
+        YELLOW=13, ORANGE=14, BROWN=15, PURPLE=16, PINK=17,
+        DARK_TITLE=18, W95_TITLE_BLUE=19, W95_TITLE_INACTIVE=20,
+        PURE_BLUE=21, ALMOST_WHITE=22, NEAR_BLACK=23, MID_GRAY=24,
+        BUTTON_FACE=25, BUTTON_HI=26, DEEP_NAVY=27, BTNFACE_DARK=28,
+        DARK_GREEN_BG=29, W95_DESKTOP=30, LIGHT_BG=2,  -- LIGHT_BG = GRAY
+    }
 end
 
 -- Basic pixel operations
@@ -52,7 +85,7 @@ function R.setPixel(x, y, color)
 end
 
 function R.fillRect(x, y, w, h, color)
-    if R.mode == 0 then return end
+    if R.mode == 0 or w <= 0 or h <= 0 then return end
     for row = 0, h-1 do
         for col = 0, w-1 do
             R.setPixel(x+col, y+row, color)
@@ -82,31 +115,37 @@ function R.drawRect(x, y, w, h, color)
     R.drawLine(x+w-1, y, x+w-1, y+h-1, color)
 end
 
--- W95-style 3D effects
 function R.drawW95Raised(x, y, w, h)
     if R.mode == 0 then return end
-    R.drawLine(x, y, x+w-1, y, R.PAL.LIGHT_GRAY)
-    R.drawLine(x, y, x, y+h-1, R.PAL.LIGHT_GRAY)
-    R.drawLine(x+w-1, y, x+w-1, y+h-1, R.PAL.DARK_GRAY)
-    R.drawLine(x, y+h-1, x+w-1, y+h-1, R.PAL.DARK_GRAY)
+    local LG = R.PAL.LIGHT_GRAY
+    local DG = R.PAL.DARK_GRAY
+    R.drawLine(x, y, x+w-1, y, LG)
+    R.drawLine(x, y, x, y+h-1, LG)
+    R.drawLine(x+w-1, y, x+w-1, y+h-1, DG)
+    R.drawLine(x, y+h-1, x+w-1, y+h-1, DG)
 end
 
 function R.drawW95Sunken(x, y, w, h)
     if R.mode == 0 then return end
-    R.drawLine(x, y, x+w-1, y, R.PAL.DARK_GRAY)
-    R.drawLine(x, y, x, y+h-1, R.PAL.DARK_GRAY)
-    R.drawLine(x+w-1, y, x+w-1, y+h-1, R.PAL.LIGHT_GRAY)
-    R.drawLine(x, y+h-1, x+w-1, y+h-1, R.PAL.LIGHT_GRAY)
+    local LG = R.PAL.LIGHT_GRAY
+    local DG = R.PAL.DARK_GRAY
+    R.drawLine(x, y, x+w-1, y, DG)
+    R.drawLine(x, y, x, y+h-1, DG)
+    R.drawLine(x+w-1, y, x+w-1, y+h-1, LG)
+    R.drawLine(x, y+h-1, x+w-1, y+h-1, LG)
 end
 
 function R.drawButton(x, y, w, h, pressed)
     if R.mode == 0 then return end
-    R.fillRect(x+2, y+2, w-4, h-4, R.PAL.GRAY)
+    local G = R.PAL.GRAY
+    local DG = R.PAL.DARK_GRAY
+    local LG = R.PAL.LIGHT_GRAY
+    R.fillRect(x+2, y+2, w-4, h-4, G)
     if pressed then
-        R.drawLine(x, y, x+w-1, y, R.PAL.DARK_GRAY)
-        R.drawLine(x, y, x, y+h-1, R.PAL.DARK_GRAY)
-        R.drawLine(x+w-1, y, x+w-1, y+h-1, R.PAL.LIGHT_GRAY)
-        R.drawLine(x, y+h-1, x+w-1, y+h-1, R.PAL.LIGHT_GRAY)
+        R.drawLine(x, y, x+w-1, y, DG)
+        R.drawLine(x, y, x, y+h-1, DG)
+        R.drawLine(x+w-1, y, x+w-1, y+h-1, LG)
+        R.drawLine(x, y+h-1, x+w-1, y+h-1, LG)
     else
         R.drawW95Raised(x, y, w, h)
     end
@@ -117,19 +156,19 @@ function R.drawTitleBar(x, y, w, active)
     R.fillRect(x, y, w, 16, active and R.PAL.W95_TITLE_BLUE or R.PAL.GRAY)
 end
 
--- Drag outline (dashed rectangle)
 function R.drawDragOutline(x, y, w, h)
     if R.mode == 0 then return end
+    local BK = R.PAL.BLACK
     for i = 0, w-1 do
         if i % 4 < 2 then
-            R.setPixel(x+i, y, R.PAL.BLACK)
-            if y+h-1 < R.h then R.setPixel(x+i, y+h-1, R.PAL.BLACK) end
+            R.setPixel(x+i, y, BK)
+            if y+h-1 < R.h then R.setPixel(x+i, y+h-1, BK) end
         end
     end
     for i = 0, h-1 do
         if i % 4 < 2 then
-            R.setPixel(x, y+i, R.PAL.BLACK)
-            if x+w-1 < R.w then R.setPixel(x+w-1, y+i, R.PAL.BLACK) end
+            R.setPixel(x, y+i, BK)
+            if x+w-1 < R.w then R.setPixel(x+w-1, y+i, BK) end
         end
     end
 end
