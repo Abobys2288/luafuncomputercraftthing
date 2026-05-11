@@ -206,7 +206,7 @@ function desktop.drawDesktop()
     K.clear()
 
     -- Desktop background (teal W95 style)
-    K.fillRect(0, 0, K.w, K.h - desktop.taskbarH, K.PAL.DARK_GREEN)
+    K.fillRect(0, 0, K.w, K.h - desktop.taskbarH, K.PAL.W95_DESKTOP)
 
     -- Draw desktop icons
     local icons = {
@@ -397,19 +397,122 @@ end
 function desktop.run()
     local running = true
     local needsRedraw = true
-    local dragTimer = nil
+    local lastMX, lastMY = 0, 0
+    local lastClickTime = 0
+    local lastClickX, lastClickY = 0, 0
+
+    local function shouldRedraw()
+        local mx, my = K.getMousePos()
+        if mx ~= lastMX or my ~= lastMY then
+            lastMX = mx
+            lastMY = my
+            return true
+        end
+        return false
+    end
+
+    -- Initial draw
+    desktop.drawDesktop()
+
+    -- Timer for periodic redraw (cursor blink, clock)
+    local timer = os.startTimer(0.5)
 
     while running do
-        if needsRedraw then
+        -- Redraw periodically or on mouse move
+        if needsRedraw or shouldRedraw() then
             -- Update clock
+            local timeUpdated = false
             local t = os.time and os.time() or 0
             local h = math.floor(t)
             local m = math.floor((t - h) * 60)
-            desktop.clock = string.format("%02d:%02d", h, m)
+            local newClock = string.format("%02d:%02d", h, m)
+            if newClock ~= desktop.clock then
+                desktop.clock = newClock
+                timeUpdated = true
+            end
 
             desktop.drawDesktop()
             needsRedraw = false
         end
+
+        local event, p1, p2, p3, p4 = os.pullEvent()
+
+        if event == "mouse_click" then
+            K.mouse.x = p2
+            K.mouse.y = p3
+            local mx, my = p2, p3
+            -- Double-click detection
+            local now = os.clock and os.clock() or 0
+            local isDouble = (now - lastClickTime < 0.4) and math.abs(mx - lastClickX) <= 2 and math.abs(my - lastClickY) <= 2
+            lastClickTime = now
+            lastClickX = mx
+            lastClickY = my
+
+            local action = desktop.handleClick(mx, my, p4)
+            needsRedraw = true
+
+            if action == "reboot" then
+                K.clear()
+                K.drawPixelText(10, 10, "Rebooting...", K.PAL.WHITE)
+                sleep(0.5)
+                os.reboot()
+            elseif action == "shutdown" then
+                running = false
+            elseif action == "desktop_click" then
+                -- Context menu or selection on desktop
+            elseif action then
+                -- Open apps (mouse action already handled in handleClick)
+                if action == "files" then
+                    desktop.runFileManager()
+                elseif action == "edit" then
+                    desktop.runEditor()
+                elseif action == "settings" then
+                    desktop.runSettings()
+                elseif action == "shell" then
+                    desktop.runShell()
+                end
+            end
+
+        elseif event == "mouse_drag" then
+            K.mouse.x = p2
+            K.mouse.y = p3
+            desktop.handleDrag(p2, p3)
+            needsRedraw = true
+
+        elseif event == "mouse_up" then
+            desktop.handleMouseUp()
+            needsRedraw = true
+
+        elseif event == "mouse_scroll" then
+            -- Scroll in active window
+            if desktop.activeWin and desktop.activeWin.onScroll then
+                pcall(desktop.activeWin.onScroll, desktop.activeWin, p2)
+            end
+            needsRedraw = true
+
+        elseif event == "key" then
+            if p1 == keys.q and desktop.startMenuOpen then
+                desktop.startMenuOpen = false
+                needsRedraw = true
+            elseif p1 == keys.f5 then
+                needsRedraw = true
+            else
+                desktop.handleKey(p1, nil)
+            end
+
+        elseif event == "char" then
+            desktop.handleKey(nil, p1)
+
+        elseif event == "timer" then
+            timer = os.startTimer(0.5)
+            needsRedraw = true
+        end
+    end
+
+    K.clear()
+    K.fillRect(0, 0, K.w, K.h, K.PAL.BLACK)
+    K.drawPixelText(10, 10, "CCOS shutdown. Goodbye!", K.PAL.WHITE)
+end
 
         local event = os.pullEvent()
 

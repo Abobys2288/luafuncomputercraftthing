@@ -11,7 +11,7 @@ local kernel = {}
 kernel.hasGraphics = term.setGraphicsMode ~= nil
 kernel.isColor = term.isColor and term.isColor() or false
 
--- W95 palette indices (for graphics mode 2)
+-- W95 palette indices (for graphics mode 2) — 0-based for setPixel
 kernel.PAL = {
     BLACK = 0, WHITE = 1,
     GRAY = 2, LIGHT_GRAY = 3,
@@ -23,6 +23,20 @@ kernel.PAL = {
     YELLOW = 13, ORANGE = 14,
     BROWN = 15, PURPLE = 16,
     PINK = 17,
+    DARK_TITLE = 18,      -- 64,64,64
+    W95_TITLE_BLUE = 19,   -- 0,84,168 active title
+    W95_TITLE_INACTIVE = 20,-- 128,158,200
+    PURE_BLUE = 21,        -- 0,0,255
+    ALMOST_WHITE = 22,     -- 240,240,240
+    NEAR_BLACK = 23,       -- 32,32,32
+    MID_GRAY = 24,         -- 160,160,160
+    W95_BUTTON_FACE = 25,  -- 200,200,200
+    W95_BUTTON_HI = 26,    -- 248,248,248
+    DEEP_NAVY = 27,        -- 0,0,64
+    W95_BTNFACE_DARK = 28, -- 48,48,48
+    DARK_GREEN_BG = 29,    -- 0,128,0 desktop bg
+    W95_DESKTOP = 30,      -- 0,128,128 teal
+    LIGHT_BG = 31,         -- 192,192,192 window bg
 }
 
 -- W95 style colors (RGB for palette mode 2)
@@ -56,6 +70,9 @@ kernel.PALETTE = {
     {248, 248, 248},     -- 26 W95_BUTTON_HIGHLIGHT
     {0, 0, 64},          -- 27 DEEP_NAVY
     {48, 48, 48},        -- 28 W95_BTNFACE_DARK
+    {0, 128, 0},         -- 29 DARK_GREEN_BG
+    {0, 128, 128},       -- 30 W95_DESKTOP (teal)
+    {192, 192, 192},     -- 31 LIGHT_BG
 }
 
 kernel.w, kernel.h = 0, 0
