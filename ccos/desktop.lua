@@ -267,12 +267,12 @@ function desktop.handleClick(mx, my, button)
         end
     end
 
-    -- Windows
+    -- Windows (topmost first)
     local win = desktop.getWindowAt(mx, my)
     if win then
         desktop.bringToFront(win)
         if my >= win.cy and my < win.cy+16 then
-            if mx >= win.cx+win.cw-18 then desktop.destroyWindow(win); return nil end
+            if mx >= win.cx+win.cw-18 then desktop.destroyWindow(win); return "handled" end
             if mx >= win.cx+win.cw-36 and mx < win.cx+win.cw-20 then
                 if win.maximized then
                     if win.prevState then win.cx=win.prevState.x; win.cy=win.prevState.y; win.cw=win.prevState.w; win.ch=win.prevState.h; win.prevState=nil end
@@ -281,18 +281,19 @@ function desktop.handleClick(mx, my, button)
                     win.prevState={x=win.cx,y=win.cy,w=win.cw,h=win.ch}
                     win.cx=1; win.cy=1; win.cw=K.w; win.ch=K.h-desktop.taskbarH-1; win.maximized=true
                 end
-                desktop.dirty = true; return nil
+                desktop.dirty = true; return "handled"
             end
             if mx >= win.cx+win.cw-54 and mx < win.cx+win.cw-38 then
-                win.visible = false; desktop.dirty = true; return nil
+                win.visible = false; desktop.dirty = true; return "handled"
             end
             if not win.maximized then win.dragging = true; win.dragOffX = mx-win.cx; win.dragOffY = my-win.cy end
-            return nil
+            return "handled"
         end
         if mx >= win.cx+win.cw-8 and my >= win.cy+win.ch-8 and not win.maximized then
-            win.resizing = true; return nil
+            win.resizing = true; return "handled"
         end
         if win.onClick then pcall(win.onClick, win, mx-win.cx-3, my-win.cy-18) end
+        return "handled"
     end
     return nil
 end
@@ -326,6 +327,24 @@ function desktop.handleKey(key, char)
 end
 
 -- ============================================================
+-- PARTIAL REDRAW (drag/resize) — only windows + taskbar
+-- ============================================================
+function desktop.redrawWindows()
+    local by = K.h - desktop.taskbarH
+    -- Clear only the area where windows are (above taskbar)
+    K.fillRect(0, 0, K.w, by, K.PAL.W95_DESKTOP)
+    -- Redraw windows
+    for _, win in ipairs(desktop.windows) do
+        if win.visible then desktop.drawWindow(win) end
+    end
+    -- Redraw taskbar
+    local tby = K.h - desktop.taskbarH
+    K.fillRect(0, tby, K.w, desktop.taskbarH, K.PAL.GRAY)
+    K.drawLine(0, tby, K.w-1, tby, K.PAL.WHITE)
+    desktop.drawTaskbar()
+end
+
+-- ============================================================
 -- MAIN LOOP — single event loop, no modal blocks
 -- ============================================================
 function desktop.run()
@@ -345,25 +364,29 @@ function desktop.run()
                 K.clear(); K.drawPixelText(10,10,"Rebooting...",K.PAL.WHITE); sleep(0.5); os.reboot()
             elseif action == "shutdown" then
                 running = false
-            elseif action == "files" then
-                desktop.app_fm_open()
-            elseif action == "edit" then
-                desktop.app_editor_open()
-            elseif action == "settings" then
-                desktop.app_settings_open()
-            elseif action == "shell" then
-                desktop.app_shell_open()
+            elseif action == "files" then desktop.app_fm_open()
+            elseif action == "edit" then desktop.app_editor_open()
+            elseif action == "settings" then desktop.app_settings_open()
+            elseif action == "shell" then desktop.app_shell_open()
             end
+            -- "handled" means click was consumed by a window — don't propagate
 
         elseif event == "mouse_drag" then
             K.mouse.x = p2; K.mouse.y = p3
             desktop.handleDrag(p2, p3)
+            -- Only redraw if actually dragging/resizing
+            local dragging = false
             for _, w in ipairs(desktop.windows) do
-                if w.dragging or w.resizing then desktop.dirty = true; break end
+                if w.dragging or w.resizing then dragging = true; break end
+            end
+            if dragging then
+                -- Partial redraw: only taskbar + affected windows
+                desktop.redrawWindows()
             end
 
         elseif event == "mouse_up" then
             desktop.handleMouseUp()
+            desktop.dirty = true  -- full redraw on drop
 
         elseif event == "key" then
             if p1 == keys.q and desktop.startMenuOpen then
