@@ -11,8 +11,9 @@ local BASE_URL = "https://raw.githubusercontent.com/" .. REPO .. "/" .. BRANCH .
 
 local FILES = {
     "init.lua",
-    "kernel.lua",
+    "render.lua",
     "desktop.lua",
+    "api.lua",
 }
 
 local function clear()
