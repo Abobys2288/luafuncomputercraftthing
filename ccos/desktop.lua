@@ -2,14 +2,49 @@
     CCOS Desktop — Window Manager & Event Loop
     ============================================
     Pure logic: window management, mouse handling, event routing.
-    Rendering is in render.lua, API in api.lua.
+    Rendering uses ccos_render (R), API uses ccos_api (A).
 ]]
 
-local R = require("ccos.render")
+local R = _G.ccos_render
+local A = _G.ccos_api
 local desktop = {}
 
 desktop.R = R
 desktop.windows = {}
+desktop.activeWin = nil
+desktop.taskbarH = 20
+desktop.startMenuOpen = false
+desktop.clock = ""
+desktop.nextWinId = 1
+desktop.dirty = true
+desktop.dragWin = nil
+desktop.dragOX = 0
+desktop.dragOY = 0
+desktop.lastDragRect = nil
+desktop.mouse = {x=0, y=0}
+
+-- FS helpers
+local function getDir(path)
+    if not path or path == "/" then return "/" end
+    local parts = {}
+    for p in path:gmatch("[^/]+") do table.insert(parts, p) end
+    if #parts <= 1 then return "/" end
+    table.remove(parts)
+    return "/" .. table.concat(parts, "/")
+end
+
+local function getFileName(path)
+    if not path or path == "/" then return "" end
+    for p in path:gmatch("[^/]+") do end
+    return p or ""
+end
+
+local function readFile(path)
+    if not fs.exists(path) then return nil end
+    local f = fs.open(path, "r")
+    if not f then return nil end
+    local c = f.readAll(); f.close(); return c
+end
 desktop.activeWin = nil
 desktop.taskbarH = 20
 desktop.startMenuOpen = false
@@ -433,10 +468,10 @@ function desktop.app_fm()
         elseif key==keys.down and selected<#items then selected=selected+1; local lh=math.floor((w.ch-20)/8); if selected>scroll+lh then scroll=scroll+1 end
         elseif key==keys.enter then
             local item=items[selected]; if not item then return end
-            if item==".." then path=desktop.getDir(path);selected=1;scroll=0;refresh()
+            if item==".." then path=getDir(path);selected=1;scroll=0;refresh()
             elseif item:sub(1,1)=="/" then local np=path=="/" and item or (path..item); if fs.isDir(np) then path=np;selected=1;scroll=0;refresh() end
             else local fp=path=="/" and ("/"..item) or (path.."/"..item); desktop.app_editor(fp) end
-        elseif key==keys.backspace then path=desktop.getDir(path);selected=1;scroll=0;refresh()
+        elseif key==keys.backspace then path=getDir(path);selected=1;scroll=0;refresh()
         elseif key==keys.f5 then refresh()
         elseif key==keys.escape or key==keys.q then desktop.destroyWindow(w) end
     end
@@ -447,7 +482,7 @@ function desktop.app_fm()
             if my>=iy-1 and my<iy+8 then
                 selected=idx; local item=items[idx]
                 if not item then return end
-                if item==".." then path=desktop.getDir(path);selected=1;scroll=0;refresh()
+                if item==".." then path=getDir(path);selected=1;scroll=0;refresh()
                 elseif item:sub(1,1)=="/" then local np=path=="/" and item or (path..item); if fs.isDir(np) then path=np;selected=1;scroll=0;refresh() end
                 else local fp=path=="/" and ("/"..item) or (path.."/"..item); desktop.app_editor(fp) end
                 return
@@ -459,13 +494,13 @@ end
 function desktop.app_editor(filePath)
     filePath=filePath or "/untitled.txt"
     local lines={}
-    local content=desktop.readFile(filePath)
+    local content=readFile(filePath)
     if content then for line in content:gmatch("[^\n]*") do table.insert(lines,line) end end
     if #lines==0 then table.insert(lines,"") end
     local cL,cC,sY=1,1,0
     local modified=false
 
-    local win=desktop.createWindow("Edit: "..desktop.getFileName(filePath),40,20,250,140)
+    local win=desktop.createWindow("Edit: "..getFileName(filePath),40,20,250,140)
     win.onDraw=function(w,cx,cy,cw,ch)
         local eh=math.floor((ch-16)/8)
         for i=1,eh do local li=sY+i; R.drawText(cx+2,cy+(i-1)*8,lines[li] or "",SYM.BLACK) end

@@ -13,8 +13,9 @@
       api.redrawRect(win, x, y, w, h)  -- partial redraw
 ]]
 
+local desktop = _G.desktop
+local R = _G.ccos_render
 local api = {}
-local desktop = _G._desktop
 
 function api.window(title, cx, cy, cw, ch)
     return desktop.createWindow(title, cx, cy, cw, ch)
@@ -29,12 +30,11 @@ function api.redraw(win)
 end
 
 function api.redrawRect(win, x, y, w, h)
-    -- Mark specific region dirty (for future optimization)
     desktop.dirty = true
 end
 
 function api.getScreenSize()
-    return desktop.R.w, desktop.R.h
+    return R.w, R.h
 end
 
 function api.getWindow(win)

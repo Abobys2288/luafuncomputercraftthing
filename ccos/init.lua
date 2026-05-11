@@ -11,6 +11,8 @@ local function loadModule(name)
 end
 
 local ok, err = pcall(function()
+    _G.ccos_render = loadModule("render")
+    _G.ccos_api = loadModule("api")
     _G.desktop = loadModule("desktop")
 end)
 
@@ -21,7 +23,7 @@ if not ok then
 end
 
 -- Boot screen
-local R = _G.desktop.R
+local R = _G.ccos_render
 R.init()
 R.clear()
 R.fillRect(10, 10, R.w-20, R.h-20, R.PAL.GRAY)
