@@ -186,7 +186,7 @@ local function draw(d, w, h, info)
 
     -- Header
     if info.isColor then
-        setColors(d, C.CYAN, C.BLACK)
+        setColors(d, C.WHITE, C.BLACK)
     end
     writeCenter(d, y, "===========================", w)
     y = y + 1
