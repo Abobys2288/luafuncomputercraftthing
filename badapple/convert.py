@@ -256,6 +256,7 @@ def generate_lua_string_encoded(frames, output_path, fps, target_w, target_h):
     lines.append("local FPS={}".format(fps))
     lines.append("local BPR={}".format(bpr))
     lines.append("local N={}".format(len(frames)))
+    lines.append("local DATA")
     lines.append("")
 
     lines.append("local function getDisplay()")
@@ -307,7 +308,7 @@ def generate_lua_string_encoded(frames, output_path, fps, target_w, target_h):
     lines.append("local DATA_PARTS = {}")
     for part in parts:
         lines.append("DATA_PARTS[#DATA_PARTS+1]=" + part)
-    lines.append("local DATA = table.concat(DATA_PARTS)")
+    lines.append("DATA = table.concat(DATA_PARTS)")
     lines.append("DATA_PARTS = nil")
     lines.append("")
     lines.append("local function main()")
