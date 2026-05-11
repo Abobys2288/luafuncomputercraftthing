@@ -4,7 +4,7 @@
     Browse filesystem, open/edit/delete/rename files and folders.
 ]]
 
-local gui = require("ccos.gui")
+local gui = _G.gui
 
 local fm = {}
 fm.currentPath = "/"

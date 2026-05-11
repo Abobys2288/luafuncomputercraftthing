@@ -4,7 +4,7 @@
     Main menu with app launcher, system info, quick actions.
 ]]
 
-local gui = require("ccos.gui")
+local gui = _G.gui
 
 local desktop = {}
 
@@ -228,7 +228,12 @@ function desktop.runEditor()
     end
 
     -- Use file manager's edit function
-    local fm = require("ccos.files")
+    local fm = _G.fm
+    if not fm then
+        _G.kernel.clear()
+        print("Error: files module not loaded")
+        return
+    end
     fm.editFile(path, content)
 end
 

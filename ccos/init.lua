@@ -13,12 +13,24 @@ if not shell.path():find("ccos") then
     shell.setPath(shell.path() .. ":/ccos")
 end
 
--- Load modules
+-- Load modules manually (require doesn't work properly in CC:Tweaked)
+local function loadModule(name)
+    local path = "/ccos/" .. name .. ".lua"
+    if not fs.exists(path) then
+        error("Module not found: " .. path)
+    end
+    local fn, err = loadfile(path)
+    if not fn then
+        error("Failed to load " .. name .. ": " .. tostring(err))
+    end
+    return fn()
+end
+
 local ok, err = pcall(function()
-    _G.kernel = require("ccos.kernel")
-    _G.gui = require("ccos.gui")
-    _G.desktop = require("ccos.desktop")
-    _G.fm = require("ccos.files")
+    _G.kernel = loadModule("kernel")
+    _G.gui = loadModule("gui")
+    _G.desktop = loadModule("desktop")
+    _G.fm = loadModule("files")
 end)
 
 if not ok then

@@ -115,7 +115,7 @@ local function main()
             print("")
             printC("Starting CCOS...", colors.cyan)
             sleep(0.5)
-            shell.run("ccos/init")
+            shell.run("/ccos/init.lua")
         end
     else
         printC("Some files failed to download.", colors.red)
