@@ -12,8 +12,45 @@
 ]]
 
 local R = _G.ccos_render
-local gui = _G.gui or {}
 local D = {} ; _G._desktop = D
+
+-- Simple input dialog (no external gui needed)
+local function simpleInput(title, prompt, default)
+    default = default or ""
+    local input = default
+    local result = nil
+    local w = D.createWindow(title, 40, 40, 220, 70)
+
+    w.onDraw = function(win, cx, cy, cw, ch)
+        R.drawText(cx+4, cy+4, prompt, K.BLACK)
+        R.drawW95Sunken(cx+4, cy+16, cw-8, 14)
+        R.drawText(cx+6, cy+18, input .. "_", K.BLACK)
+        R.drawText(cx+4, cy+38, "Enter = OK   Esc = Cancel", K.BLACK)
+    end
+
+    w.onKey = function(win, k, ch)
+        if ch then
+            input = input .. ch
+            D.markDirty()
+        elseif k == keys.backspace then
+            input = input:sub(1, -2)
+            D.markDirty()
+        elseif k == keys.enter then
+            result = input
+            D.destroyWindow(win)
+        elseif k == keys.escape then
+            result = nil
+            D.destroyWindow(win)
+        end
+    end
+
+    -- Wait loop
+    while w.visible do
+        D.drawAll()
+        os.pullEvent()
+    end
+    return result
+end
 
 local K = {
     BLACK=0, WHITE=1, GRAY=2, LGRAY=3, DGRAY=4,
@@ -394,7 +431,7 @@ function D.appFM()
         if my >= cy and my < cy+14 then
             if mx >= cx and mx < cx+40 then
                 -- NEW FILE
-                local name = gui.inputBox("New File", "Filename:", "newfile.txt")
+                local name = simpleInput("New File", "Filename:", "newfile.txt")
                 if name then
                     local fp = path=="/" and ("/"..name) or (path.."/"..name)
                     writeFile(fp, "")
@@ -402,7 +439,7 @@ function D.appFM()
                 end
             elseif mx >= cx+42 and mx < cx+94 then
                 -- NEW DIR
-                local name = gui.inputBox("New Folder", "Folder name:", "newdir")
+                local name = simpleInput("New Folder", "Folder name:", "newdir")
                 if name then
                     local fp = path=="/" and ("/"..name) or (path.."/"..name)
                     fs.makeDir(fp)
@@ -508,7 +545,7 @@ function D.appEdit(fp)
                 mod = false D.markDirty()
             elseif mx >= win.cx+38 and mx < win.cx+78 then
                 -- Open
-                local newPath = gui.inputBox("Open File", "Enter path:", fp)
+                local newPath = simpleInput("Open File", "Enter path:", fp)
                 if newPath and fs.exists(newPath) then
                     fp = newPath
                     lines = {}

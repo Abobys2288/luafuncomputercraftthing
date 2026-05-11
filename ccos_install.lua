@@ -1,19 +1,21 @@
 --[[
-    CCOS Installer
-    ==============
-    Downloads all CCOS files from GitHub and installs them.
-    Run: pastebin run <code>  or  ccos_install
+    CCOS Installer v2 — Fixed
+    =======================
+    Downloads all CCOS files and installs them.
+    Run: pastebin run <code> or ccos_install
 ]]
 
 local REPO = "Abobys2288/luafuncomputercraftthing"
 local BRANCH = "main"
 local BASE_URL = "https://raw.githubusercontent.com/" .. REPO .. "/" .. BRANCH .. "/ccos/"
 
+-- All required files (desktop.lua is our fixed version)
 local FILES = {
     "init.lua",
     "render.lua",
-    "desktop.lua",
+    "desktop.lua",      -- This is the FIXED version
     "api.lua",
+    "kernel.lua",
 }
 
 local function clear()
@@ -49,24 +51,21 @@ end
 local function main()
     clear()
     printC("============================", colors.cyan)
-    printC("  CCOS Installer v1.0", colors.cyan)
+    printC("  CCOS Installer v2 (Fixed)", colors.cyan)
     printC("============================", colors.cyan)
     print("")
 
-    -- Check if http is available
     if not http then
         printC("ERROR: HTTP API is not enabled!", colors.red)
-        print("Enable it in ComputerCraft config or")
-        print("use 'http_enable=true' in server.properties")
+        print("Enable it in ComputerCraft config")
         return
     end
 
-    -- Create ccos directory
     if not fs.exists("/ccos") then
         fs.makeDir("/ccos")
         printC("Created /ccos/ directory", colors.green)
     else
-        printC("/ccos/ already exists, updating...", colors.yellow)
+        printC("/ccos/ already exists — updating...", colors.yellow)
     end
 
     print("")
@@ -91,7 +90,6 @@ local function main()
             if err then print("    " .. err) end
             failed = failed + 1
         end
-
         sleep(0.1)
     end
 
@@ -122,7 +120,6 @@ local function main()
     end
 end
 
--- Run installer
 local ok, err = pcall(main)
 if not ok then
     printC("INSTALLER ERROR:", colors.red)
