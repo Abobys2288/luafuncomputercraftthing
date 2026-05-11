@@ -1,7 +1,7 @@
 --[[
-    CCOS Desktop — Windows 95 style v3
+    CCOS Desktop — Windows 95 style v4
     ===================================
-    Single event loop, no modal blocks, proper window management
+    Optimized: drag rectangle, smart redraw, click filtering
 ]]
 
 local K = _G.kernel
@@ -15,8 +15,22 @@ desktop.startBtn = {x = 0, y = 0, w = 54, h = 16}
 desktop.clock = ""
 desktop.nextWinId = 1
 desktop.dirty = true
-desktop.mode = "desktop"  -- "desktop" or app name
-desktop.appState = {}     -- per-app state
+desktop.dragRect = nil  -- {x,y,w,h} for drag outline
+desktop.lastWinRects = {} -- previous window positions for cleanup
+
+-- ============================================================
+-- DIRTY REGION TRACKING
+-- ============================================================
+local dirtyRegions = {}
+
+function desktop.markDirty(x, y, w, h)
+    table.insert(dirtyRegions, {x = x or 0, y = y or 0, w = w or K.w, h = h or K.h})
+end
+
+function desktop.markAllDirty()
+    dirtyRegions = {{x = 0, y = 0, w = K.w, h = K.h}}
+    desktop.dirty = true
+end
 
 -- ============================================================
 -- WINDOW MANAGEMENT
@@ -35,7 +49,7 @@ function desktop.createWindow(title, cx, cy, cw, ch, onDraw, onKey, onClose)
     }
     table.insert(desktop.windows, win)
     desktop.activeWin = win
-    desktop.dirty = true
+    desktop.markAllDirty()
     return win
 end
 
@@ -47,7 +61,7 @@ function desktop.destroyWindow(win)
         desktop.activeWin = desktop.windows[#desktop.windows]
     end
     if win.onClose then pcall(win.onClose) end
-    desktop.dirty = true
+    desktop.markAllDirty()
 end
 
 function desktop.bringToFront(win)
@@ -56,7 +70,7 @@ function desktop.bringToFront(win)
             table.remove(desktop.windows, i)
             table.insert(desktop.windows, win)
             desktop.activeWin = win
-            desktop.dirty = true
+            desktop.markAllDirty()
             return
         end
     end
@@ -138,6 +152,42 @@ function desktop.drawWindow(win)
 end
 
 -- ============================================================
+-- DRAW DRAG RECTANGLE (outline only)
+-- ============================================================
+function desktop.drawDragRect(rect)
+    if not rect or not K.hasGraphics then return end
+    local x, y, w, h = rect.x, rect.y, rect.w, rect.h
+    -- Draw dashed outline
+    for i = 0, w-1 do
+        if i % 4 < 2 then
+            K.setPixel(x+i, y, K.PAL.BLACK)
+            K.setPixel(x+i, y+h-1, K.PAL.BLACK)
+        end
+    end
+    for i = 0, h-1 do
+        if i % 4 < 2 then
+            K.setPixel(x, y+i, K.PAL.BLACK)
+            K.setPixel(x+w-1, y+i, K.PAL.BLACK)
+        end
+    end
+end
+
+function desktop.clearDragRect(rect)
+    if not rect then return end
+    -- Redraw desktop background where rect was
+    local x, y, w, h = rect.x, rect.y, rect.w, rect.h
+    local by = K.h - desktop.taskbarH
+    -- Clip to desktop area
+    local cx = math.max(1, x)
+    local cy = math.max(1, y)
+    local cw = math.min(w, K.w - cx)
+    local ch = math.min(h, by - cy)
+    if cw > 0 and ch > 0 then
+        K.fillRect(cx, cy, cw, ch, K.PAL.W95_DESKTOP)
+    end
+end
+
+-- ============================================================
 -- DRAW TASKBAR
 -- ============================================================
 function desktop.drawTaskbar()
@@ -191,7 +241,7 @@ function desktop.drawStartMenu()
 end
 
 -- ============================================================
--- DRAW DESKTOP
+-- DRAW DESKTOP (full redraw)
 -- ============================================================
 function desktop.drawDesktop()
     K.clear()
@@ -205,8 +255,8 @@ function desktop.drawDesktop()
     for i, icon in ipairs(icons) do
         local col = (i-1) % cols
         local row = math.floor((i-1) / cols)
-        local ix = 8 + col * (iw+10)
-        local iy = 8 + row * (ih+8)
+        local ix = 8 + col*(iw+10)
+        local iy = 8 + row*(ih+8)
         if iy + ih > by - 4 then break end
         if K.mouse.x >= ix-2 and K.mouse.x < ix+iw+2 and K.mouse.y >= iy-2 and K.mouse.y < iy+ih+2 then
             K.fillRect(ix-2, iy-2, iw+4, ih+4, K.PAL.DARK_BLUE)
@@ -224,13 +274,18 @@ function desktop.drawDesktop()
     desktop.drawTaskbar()
     desktop.drawStartMenu()
     desktop.dirty = false
+    dirtyRegions = {}
 end
 
 -- ============================================================
--- MOUSE HANDLING
+-- MOUSE HANDLING — returns action or nil
+-- Returns: "reboot"|"shutdown"|"files"|"edit"|"settings"|"shell"|"handled"|"button_click"|nil
+-- nil = click in empty space, do nothing
+-- "handled" = click on window client area, do nothing
+-- "button_click" = click on window button, already handled
 -- ============================================================
 function desktop.handleClick(mx, my, button)
-    -- Start menu
+    -- Start menu open?
     if desktop.startMenuOpen then
         local my2 = desktop.startBtn.y - 100
         if my2 < 1 then my2 = 1 end
@@ -244,13 +299,13 @@ function desktop.handleClick(mx, my, button)
             iy = iy + 14
         end
         desktop.startMenuOpen = false
-        return nil
+        return nil  -- clicked outside menu, just close it
     end
 
     -- Start button
     if mx >= 2 and mx < 56 and my >= desktop.startBtn.y and my < desktop.startBtn.y+16 then
         desktop.startMenuOpen = true
-        return nil
+        return "button_click"
     end
 
     -- Desktop icons
@@ -267,12 +322,19 @@ function desktop.handleClick(mx, my, button)
         end
     end
 
-    -- Windows (topmost first)
+    -- Windows
     local win = desktop.getWindowAt(mx, my)
     if win then
         desktop.bringToFront(win)
+
+        -- Title bar buttons
         if my >= win.cy and my < win.cy+16 then
-            if mx >= win.cx+win.cw-18 then desktop.destroyWindow(win); return "handled" end
+            -- Close
+            if mx >= win.cx+win.cw-18 then
+                desktop.destroyWindow(win)
+                return "button_click"
+            end
+            -- Maximize
             if mx >= win.cx+win.cw-36 and mx < win.cx+win.cw-20 then
                 if win.maximized then
                     if win.prevState then win.cx=win.prevState.x; win.cy=win.prevState.y; win.cw=win.prevState.w; win.ch=win.prevState.h; win.prevState=nil end
@@ -281,27 +343,44 @@ function desktop.handleClick(mx, my, button)
                     win.prevState={x=win.cx,y=win.cy,w=win.cw,h=win.ch}
                     win.cx=1; win.cy=1; win.cw=K.w; win.ch=K.h-desktop.taskbarH-1; win.maximized=true
                 end
-                desktop.dirty = true; return "handled"
+                desktop.markAllDirty()
+                return "button_click"
             end
+            -- Minimize
             if mx >= win.cx+win.cw-54 and mx < win.cx+win.cw-38 then
-                win.visible = false; desktop.dirty = true; return "handled"
+                win.visible = false
+                desktop.markAllDirty()
+                return "button_click"
             end
-            if not win.maximized then win.dragging = true; win.dragOffX = mx-win.cx; win.dragOffY = my-win.cy end
-            return "handled"
+            -- Drag start
+            if not win.maximized then
+                win.dragging = true
+                win.dragOffX = mx - win.cx
+                win.dragOffY = my - win.cy
+            end
+            return "button_click"
         end
+
+        -- Resize handle
         if mx >= win.cx+win.cw-8 and my >= win.cy+win.ch-8 and not win.maximized then
-            win.resizing = true; return "handled"
+            win.resizing = true
+            return "button_click"
         end
+
+        -- Client area click — "in moloko", do nothing
         if win.onClick then pcall(win.onClick, win, mx-win.cx-3, my-win.cy-18) end
-        return "handled"
+        return nil
     end
+
+    -- Click in empty space
     return nil
 end
 
 function desktop.handleDrag(mx, my)
     for _, win in ipairs(desktop.windows) do
         if win.dragging then
-            win.cx = mx - win.dragOffX; win.cy = my - win.dragOffY
+            win.cx = mx - win.dragOffX
+            win.cy = my - win.dragOffY
             if win.cy < 1 then win.cy = 1 end
             local by = K.h - desktop.taskbarH
             if win.cy + win.ch > by+1 then win.cy = by - win.ch + 2 end
@@ -327,25 +406,7 @@ function desktop.handleKey(key, char)
 end
 
 -- ============================================================
--- PARTIAL REDRAW (drag/resize) — only windows + taskbar
--- ============================================================
-function desktop.redrawWindows()
-    local by = K.h - desktop.taskbarH
-    -- Clear only the area where windows are (above taskbar)
-    K.fillRect(0, 0, K.w, by, K.PAL.W95_DESKTOP)
-    -- Redraw windows
-    for _, win in ipairs(desktop.windows) do
-        if win.visible then desktop.drawWindow(win) end
-    end
-    -- Redraw taskbar
-    local tby = K.h - desktop.taskbarH
-    K.fillRect(0, tby, K.w, desktop.taskbarH, K.PAL.GRAY)
-    K.drawLine(0, tby, K.w-1, tby, K.PAL.WHITE)
-    desktop.drawTaskbar()
-end
-
--- ============================================================
--- MAIN LOOP — single event loop, no modal blocks
+-- MAIN LOOP
 -- ============================================================
 function desktop.run()
     local running = true
@@ -358,39 +419,61 @@ function desktop.run()
         if event == "mouse_click" then
             K.mouse.x = p2; K.mouse.y = p3
             local action = desktop.handleClick(p2, p3, p1)
-            desktop.dirty = true
 
             if action == "reboot" then
                 K.clear(); K.drawPixelText(10,10,"Rebooting...",K.PAL.WHITE); sleep(0.5); os.reboot()
             elseif action == "shutdown" then
                 running = false
-            elseif action == "files" then desktop.app_fm_open()
-            elseif action == "edit" then desktop.app_editor_open()
-            elseif action == "settings" then desktop.app_settings_open()
-            elseif action == "shell" then desktop.app_shell_open()
+            elseif action == "files" then
+                desktop.app_fm_open()
+            elseif action == "edit" then
+                desktop.app_editor_open()
+            elseif action == "settings" then
+                desktop.app_settings_open()
+            elseif action == "shell" then
+                desktop.app_shell_open()
+            elseif action == "button_click" then
+                desktop.markAllDirty()  -- redraw to show button press
+            elseif action == "handled" then
+                desktop.markAllDirty()  -- window brought to front
             end
-            -- "handled" means click was consumed by a window — don't propagate
+            -- action == nil: click in empty space or window client — do nothing
 
         elseif event == "mouse_drag" then
             K.mouse.x = p2; K.mouse.y = p3
-            desktop.handleDrag(p2, p3)
-            -- Only redraw if actually dragging/resizing
-            local dragging = false
+            -- Save old positions
+            local oldRects = {}
             for _, w in ipairs(desktop.windows) do
-                if w.dragging or w.resizing then dragging = true; break end
+                if w.dragging or w.resizing then
+                    table.insert(oldRects, {x=w.cx, y=w.cy, w=w.cw, h=w.ch, win=w})
+                end
             end
-            if dragging then
-                -- Partial redraw: only taskbar + affected windows
-                desktop.redrawWindows()
+            desktop.handleDrag(p2, p3)
+            -- Check if anything actually moved
+            local moved = false
+            for _, r in ipairs(oldRects) do
+                if r.win.cx ~= r.x or r.win.cy ~= r.y or r.win.cw ~= r.w or r.win.ch ~= r.h then
+                    moved = true; break
+                end
+            end
+            if moved then
+                -- Draw drag outline at new position
+                for _, w in ipairs(desktop.windows) do
+                    if w.dragging then
+                        desktop.drawDragRect({x=w.cx, y=w.cy, w=w.cw, h=w.ch})
+                    elseif w.resizing then
+                        desktop.drawDragRect({x=w.cx, y=w.cy, w=w.cw, h=w.ch})
+                    end
+                end
             end
 
         elseif event == "mouse_up" then
             desktop.handleMouseUp()
-            desktop.dirty = true  -- full redraw on drop
+            desktop.markAllDirty()  -- full redraw to show final position
 
         elseif event == "key" then
             if p1 == keys.q and desktop.startMenuOpen then
-                desktop.startMenuOpen = false; desktop.dirty = true
+                desktop.startMenuOpen = false; desktop.markAllDirty()
             else
                 desktop.handleKey(p1, nil)
             end
@@ -402,7 +485,10 @@ function desktop.run()
             local t = os.time and os.time() or 0
             local h = math.floor(t); local m = math.floor((t-h)*60)
             local nc = string.format("%02d:%02d", h, m)
-            if nc ~= desktop.clock then desktop.clock = nc; desktop.dirty = true end
+            if nc ~= desktop.clock then
+                desktop.clock = nc
+                desktop.markAllDirty()
+            end
             timer = os.startTimer(1)
         end
 
@@ -414,7 +500,7 @@ function desktop.run()
 end
 
 -- ============================================================
--- APPS — register windows, no modal loops
+-- APPS — just register windows, no loops
 -- ============================================================
 
 function desktop.app_fm_open()
