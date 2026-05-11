@@ -14,18 +14,18 @@
 local R = _G.ccos_render
 local D = {} ; _G._desktop = D
 
--- Simple input dialog (no external gui needed)
+-- Simple input dialog (improved)
 local function simpleInput(title, prompt, default)
     default = default or ""
     local input = default
     local result = nil
-    local w = D.createWindow(title, 40, 40, 220, 70)
+    local w = D.createWindow(title, 30, 30, 240, 80)
 
     w.onDraw = function(win, cx, cy, cw, ch)
         R.drawText(cx+4, cy+4, prompt, K.BLACK)
-        R.drawW95Sunken(cx+4, cy+16, cw-8, 14)
-        R.drawText(cx+6, cy+18, input .. "_", K.BLACK)
-        R.drawText(cx+4, cy+38, "Enter = OK   Esc = Cancel", K.BLACK)
+        R.drawW95Sunken(cx+4, cy+18, cw-8, 16)
+        R.drawText(cx+6, cy+20, input .. "_", K.BLACK)
+        R.drawText(cx+4, cy+42, "Enter=OK  Esc=Cancel", K.BLACK)
     end
 
     w.onKey = function(win, k, ch)
@@ -36,7 +36,7 @@ local function simpleInput(title, prompt, default)
             input = input:sub(1, -2)
             D.markDirty()
         elseif k == keys.enter then
-            result = input
+            result = input ~= "" and input or nil
             D.destroyWindow(win)
         elseif k == keys.escape then
             result = nil
@@ -44,7 +44,7 @@ local function simpleInput(title, prompt, default)
         end
     end
 
-    -- Wait loop
+    -- Modal wait
     while w.visible do
         D.drawAll()
         os.pullEvent()
@@ -518,7 +518,6 @@ function D.appEdit(fp)
     w.onDraw = function(win, cx, cy, cw, ch)
         R.drawButton(cx, cy, 36, 14, false) R.drawText(cx+2, cy+3, "Save", K.BLACK)
         R.drawButton(cx+38, cy, 40, 14, false) R.drawText(cx+40, cy+3, "Open", K.BLACK)
-        R.drawButton(cx+80, cy, 48, 14, false) R.drawText(cx+82, cy+3, "Close", K.BLACK)
 
         local eh = math.floor((ch-24)/8)
         for i=1,eh do
@@ -557,10 +556,6 @@ function D.appEdit(fp)
                     win.title = "Edit: "..getFileName(fp)
                     D.markDirty()
                 end
-            elseif mx >= win.cx+80 and mx < win.cx+128 then
-                -- Close
-                if mod then writeFile(fp, table.concat(lines, "\n")) end
-                D.destroyWindow(win)
             end
         end
     end
@@ -570,7 +565,8 @@ function D.appEdit(fp)
             local l = lines[cl] or ""
             lines[cl] = l:sub(1, cc-1)..ch..l:sub(cc)
             cc = cc + 1
-            mod = true D.markDirty()
+            mod = true
+            -- НЕ вызываем markDirty() при печати — только при необходимости
         elseif k == keys.backspace then
             if cc > 1 then
                 local l = lines[cl] or ""
