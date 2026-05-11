@@ -236,16 +236,15 @@ def generate_lua_string_encoded(frames, output_path, fps, target_w, target_h):
     # Но ]=] тоже может встретиться. Используем больше =: [==[...]==]
     # В бинарных данных ]===] крайне маловероятно, но на всякий случай проверим
 
-    # Кодируем байты в одну Lua-строку через конкатенацию string.char
-    # Важно: короткие чанки, чтобы CC:Tweaked нормально парсил файл.
-    CHUNK = 1000
+    # Кодируем байты в куски string.char.
+    # Небольшой CHUNK нужен, иначе Lua 5.1 может ругаться:
+    # "function or expression too complex".
+    CHUNK = 120
     parts = []
     for i in range(0, len(all_bytes), CHUNK):
         chunk = all_bytes[i:i+CHUNK]
         nums = ",".join(str(b) for b in chunk)
         parts.append("string.char(" + nums + ")")
-
-    data_lua = "..".join(parts)
 
     lines = []
     lines.append("--[[")
@@ -305,7 +304,11 @@ def generate_lua_string_encoded(frames, output_path, fps, target_w, target_h):
     lines.append("end")
     lines.append("")
 
-    lines.append("local DATA=" + data_lua)
+    lines.append("local DATA_PARTS = {}")
+    for part in parts:
+        lines.append("DATA_PARTS[#DATA_PARTS+1]=" + part)
+    lines.append("local DATA = table.concat(DATA_PARTS)")
+    lines.append("DATA_PARTS = nil")
     lines.append("")
     lines.append("local function main()")
     lines.append("    local d,w,h=getDisplay()")
