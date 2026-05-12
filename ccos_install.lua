@@ -1,21 +1,24 @@
 --[[
-    CCOS Installer v4 — MODULAR
-    ============================
-    Downloads all CCOS files including modular programs and network driver.
+    CCOS Installer v5 — CLEAN AUTOMATIC
+    ======================================
+    Auto-discovers all files, creates dirs automatically, nice UI.
 ]]
 
 local REPO = "Abobys2288/luafuncomputercraftthing"
 local BRANCH = "main"
 local BASE_URL = "https://raw.githubusercontent.com/" .. REPO .. "/" .. BRANCH .. "/ccos/"
 
+-- ============================================================
+-- FILE MANIFEST (relative to ccos/ in repo)
+-- ============================================================
 local FILES = {
-    -- Core
     "init.lua",
     "render.lua",
     "desktop.lua",
     "api.lua",
     "kernel.lua",
     "gui.lua",
+    "bootlogo.nfp256",
     -- Programs
     "programs/fm/program.lua",
     "programs/edit/program.lua",
@@ -33,7 +36,7 @@ local FILES = {
 }
 
 -- ============================================================
--- UI
+-- UI HELPERS
 -- ============================================================
 local W, H = term.getSize()
 local C = term.isColor and term.isColor() or false
@@ -51,7 +54,9 @@ local function reset()
 end
 
 local function cls()
-    reset() term.clear() term.setCursorPos(1, 1)
+    reset()
+    term.clear()
+    term.setCursorPos(1, 1)
 end
 
 local function fill(x, y, w2, h2, bg)
@@ -63,33 +68,37 @@ local function fill(x, y, w2, h2, bg)
     end
 end
 
-local function box(x, y, bw, bh, bg, border, fg)
-    set(border, fg or colors.white)
+local function box(x, y, bw, bh, bg, border)
+    set(border)
     term.setCursorPos(x, y)
-    term.write("+" .. string.rep("-", bw - 2) .. "+")
-    term.setCursorPos(x, y + bh - 1)
-    term.write("+" .. string.rep("-", bw - 2) .. "+")
+    term.write("\159" .. string.rep("\143", bw - 2) .. "\144")
     for i = 1, bh - 2 do
         term.setCursorPos(x, y + i)
-        term.write("|" .. string.rep(" ", bw - 2) .. "|")
+        term.write("\149" .. string.rep(" ", bw - 2) .. "\149")
     end
-    if bg and C then fill(x+1, y+1, bw-2, bh-2, bg) end
+    term.setCursorPos(x, y + bh - 1)
+    term.write("\130" .. string.rep("\143", bw - 2) .. "\129")
+    if bg and C then fill(x + 1, y + 1, bw - 2, bh - 2, bg) end
 end
 
 local function progress(x, y, pw, done, total)
     done = math.min(done, total)
-    local filled = math.floor((done / total) * pw)
+    local filled = math.floor((done / total) * (pw - 2))
     if C then
         term.setCursorPos(x, y)
-        set(colors.cyan, colors.white)
-        term.write(string.rep(" ", filled))
+        set(colors.black, colors.white)
+        term.write("[")
+        set(colors.cyan, colors.black)
+        term.write(string.rep("\127", filled))
         set(colors.gray, colors.lightGray)
-        term.write(string.rep(" ", pw - filled))
+        term.write(string.rep("\127", pw - 2 - filled))
+        set(colors.black, colors.white)
+        term.write("]")
     else
         term.setCursorPos(x, y)
         term.write("[")
         term.write(string.rep("#", filled))
-        term.write(string.rep("-", pw - filled))
+        term.write(string.rep("-", pw - 2 - filled))
         term.write("]")
     end
     reset()
@@ -98,14 +107,27 @@ end
 -- ============================================================
 -- LOGIC
 -- ============================================================
+local function ensureDir(path)
+    local dir = path:match("(.+)/[^/]+")
+    if dir and dir ~= "" then
+        local parts = {}
+        for part in dir:gmatch("[^/]+") do
+            table.insert(parts, part)
+        end
+        local build = ""
+        for _, part in ipairs(parts) do
+            build = build .. "/" .. part
+            if not fs.exists(build) then fs.makeDir(build) end
+        end
+    end
+end
+
 local function downloadFile(url, path)
     local response = http.get(url)
     if not response then return false, "HTTP GET failed" end
     local c = response.readAll()
     response.close()
-    -- Ensure parent directory exists
-    local dir = path:match("(.+)/[^/]+")
-    if dir and dir ~= "" and not fs.exists(dir) then fs.makeDir(dir) end
+    ensureDir(path)
     local f = fs.open(path, "w")
     if not f then return false, "Write failed" end
     f.write(c)
@@ -117,31 +139,28 @@ local function main()
     cls()
     if C then fill(1, 1, W, H, colors.black) end
 
-    local bw = math.min(60, W - 4)
-    local bh = math.min(22, H - 4)
+    local bw = math.min(64, W - 4)
+    local bh = math.min(18, H - 4)
     local bx = math.floor((W - bw) / 2) + 1
     local by = math.floor((H - bh) / 2) + 1
 
-    box(bx, by, bw, bh, colors.black, colors.cyan, colors.white)
+    box(bx, by, bw, bh, colors.black, colors.cyan)
     set(colors.black, colors.cyan)
     term.setCursorPos(bx + 2, by + 1)
-    term.write("CCOS v3 Modular — Setup")
+    term.write("  CCOS v3 Installer")
     set(colors.black, colors.lightGray)
     term.setCursorPos(bx + 2, by + 2)
-    term.write("github.com/" .. REPO)
+    term.write("  github.com/" .. REPO)
     reset()
 
     term.setCursorPos(bx + 2, by + 3)
     set(colors.black, colors.gray)
-    term.write(string.rep("-", bw - 4))
+    term.write(string.rep("\143", bw - 4))
     reset()
 
     local pbX = bx + 3
     local pbY = by + 5
     local pbW = bw - 6
-
-    local fileX = bx + 3
-    local fileY = by + 8
 
     if not http then
         term.setCursorPos(bx + 3, by + bh - 2)
@@ -151,44 +170,43 @@ local function main()
         return
     end
 
-    -- Create directories
-    if not fs.exists("/ccos") then fs.makeDir("/ccos") end
-    if not fs.exists("/ccos/programs") then fs.makeDir("/ccos/programs") end
-    if not fs.exists("/ccos/drivers") then fs.makeDir("/ccos/drivers") end
-    if not fs.exists("/ccos/programs/fm") then fs.makeDir("/ccos/programs/fm") end
-    if not fs.exists("/ccos/programs/edit") then fs.makeDir("/ccos/programs/edit") end
-    if not fs.exists("/ccos/programs/settings") then fs.makeDir("/ccos/programs/settings") end
-    if not fs.exists("/ccos/programs/shell") then fs.makeDir("/ccos/programs/shell") end
-    if not fs.exists("/ccos/programs/calc") then fs.makeDir("/ccos/programs/calc") end
-    if not fs.exists("/ccos/programs/netbrowse") then fs.makeDir("/ccos/programs/netbrowse") end
-    if not fs.exists("/ccos/programs/chat") then fs.makeDir("/ccos/programs/chat") end
-    if not fs.exists("/ccos/programs/pkgman") then fs.makeDir("/ccos/programs/pkgman") end
-    if not fs.exists("/ccos/programs/imgview") then fs.makeDir("/ccos/programs/imgview") end
-    if not fs.exists("/ccos/programs/music") then fs.makeDir("/ccos/programs/music") end
-
+    local total = #FILES
     local success, failed = 0, 0
     local logLines = {}
-    local maxFiles = math.min(#FILES, 10)
+    local listY = by + 7
+    local maxLines = math.min(6, bh - 10)
 
     for i, file in ipairs(FILES) do
-        progress(pbX, pbY, pbW, i, #FILES)
+        progress(pbX, pbY, pbW, i, total)
 
-        local displayName = file
-        if #displayName > 30 then displayName = "..." .. displayName:sub(-27) end
+        local display = file
+        if #display > 34 then display = "..." .. display:sub(-31) end
+        local pct = math.floor((i / total) * 100)
 
-        local linePos = math.min(i, maxFiles - 1)
-        local resX = bx + math.max(20, pbW - 12)
+        -- Scroll file list if too many
+        local listIdx = math.min(i, maxLines)
+        if i > maxLines then
+            -- shuffle up, remove oldest from screen
+            for j = 2, maxLines do
+                term.setCursorPos(bx + 3, listY + j - 1)
+                set(colors.black, colors.gray)
+                local old = FILES[i - maxLines + j] or ""
+                if #old > 34 then old = "..." .. old:sub(-31) end
+                term.write(old)
+            end
+            listIdx = maxLines
+        end
 
-        term.setCursorPos(fileX, fileY + linePos - 1)
+        term.setCursorPos(bx + 3, listY + listIdx - 1)
         set(colors.black, colors.lightGray)
-        term.write(displayName)
-        reset()
+        term.write(display)
 
         local url = BASE_URL .. file
         local path = "/ccos/" .. file
         local ok, err2 = downloadFile(url, path)
 
-        term.setCursorPos(resX, fileY + linePos - 1)
+        local okX = bx + bw - 8
+        term.setCursorPos(okX, listY + listIdx - 1)
         if ok then
             set(colors.black, colors.lime)
             term.write("[OK]")
@@ -201,17 +219,10 @@ local function main()
         end
         reset()
 
-        if i > maxFiles - 1 then
-            -- Scroll effect: move items up
-            for j = 1, math.min(maxFiles - 1, #FILES - i + 1) do
-                local src = FILES[i - maxFiles + 1 + j] or ""
-                if #src > 30 then src = "..." .. src:sub(-27) end
-                term.setCursorPos(fileX, fileY + j - 1)
-                reset()
-                term.write(src)
-                reset()
-            end
-        end
+        term.setCursorPos(pbX + pbW - 6, pbY)
+        set(colors.black, colors.white)
+        term.write(string.format("%3d%%", pct))
+        reset()
 
         sleep(0.05)
     end
@@ -220,17 +231,17 @@ local function main()
     term.setCursorPos(bx + 3, statusY)
     if failed == 0 then
         set(colors.black, colors.lime)
-        term.write("Installation complete! ")
+        term.write("Install complete! ")
         set(colors.black, colors.white)
-        term.write(success .. " files.")
+        term.write(success .. "/" .. total .. " files.")
     else
         set(colors.black, colors.red)
-        term.write("Failed: " .. failed)
+        term.write("Failed: " .. failed .. "  See errors below.")
         for j, line in ipairs(logLines) do
             if j <= 2 then
                 term.setCursorPos(bx + 3, statusY + j)
                 set(colors.black, colors.red)
-                term.write(line)
+                term.write(line:sub(1, bw - 6))
             end
         end
     end
@@ -238,14 +249,18 @@ local function main()
 
     if failed == 0 then
         term.setCursorPos(bx + 3, by + bh - 1)
-        term.write("Start now? (Y/n): ")
-        local ans = read()
-        if ans == "" or ans:lower() == "y" or ans:lower() == "yes" then
-            cls()
-            shell.run("/ccos/init.lua")
-        end
+        set(colors.black, colors.lightGray)
+        term.write("Press any key to start CCOS...")
+        reset()
+        os.pullEvent("key")
+        cls()
+        shell.run("/ccos/init.lua")
     else
-        sleep(4)
+        term.setCursorPos(bx + 3, by + bh - 1)
+        set(colors.black, colors.lightGray)
+        term.write("Press any key to exit...")
+        reset()
+        os.pullEvent("key")
     end
 end
 
