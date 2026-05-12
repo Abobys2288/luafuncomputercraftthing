@@ -28,6 +28,84 @@ D._contentWin = nil
 D._clockDirty = false
 D.programs = {}
 
+D.iconCache = {}
+D.lastIconCacheW = 0
+D.lastIconCacheH = 0
+
+D.rebuildIconCache = function()
+    D.iconCache = {}
+    local by = R.h - D.taskbarH
+    local iw, ih = 48, 42
+    local cols = math.max(1, math.floor((R.w - 10) / (iw + 10)))
+    for i, prog in ipairs(D.programs) do
+        local col = (i - 1) % cols
+        local row = math.floor((i - 1) / cols)
+        local ix, iy = 8 + col * (iw + 10), 8 + row * (ih + 8)
+        if iy + ih > by then break end
+        local lab = prog.name
+        if #lab > 8 then lab = lab:sub(1, 7) .. ".." end
+        table.insert(D.iconCache, {
+            prog = prog,
+            ix = ix, iy = iy,
+            iw = iw, ih = ih,
+            lab = lab,
+            hover = false
+        })
+    end
+    D.lastIconCacheW = R.w
+    D.lastIconCacheH = R.h
+end
+
+-- ============================================================
+-- CONFIG PERSISTENCE
+-- ============================================================
+D.configPath = "/ccos/config/desktop.cfg"
+
+function D.loadConfig()
+    if not fs.exists(D.configPath) then return end
+    local f = fs.open(D.configPath, "r")
+    if not f then return end
+    local content = f.readAll()
+    f.close()
+    local ok, cfg = pcall(textutils.unserialize, content)
+    if ok and cfg then
+        if cfg.windows then
+            for _, cw in ipairs(cfg.windows) do
+                for _, prog in ipairs(D.programs) do
+                    if prog.name == cw.title then
+                        local wx, wy, ww, wh = D.fitWin(cw.cw or 200, cw.ch or 120)
+                        if cw.cx then wx = cw.cx end
+                        if cw.cy then wy = cw.cy end
+                        if cw.cw then ww = cw.cw end
+                        if cw.ch then wh = cw.ch end
+                        D.createWindow(cw.title, wx, wy, ww, wh)
+                        break
+                    end
+                end
+            end
+        end
+    end
+end
+
+function D.saveConfig()
+    local cfg = {windows = {}}
+    for _, w in ipairs(D.windows) do
+        if w.visible and not w.modal then
+            table.insert(cfg.windows, {
+                title = w.title,
+                cx = w.cx, cy = w.cy,
+                cw = w.cw, ch = w.ch
+            })
+        end
+    end
+    if not fs.isDir("/ccos/config") then fs.makeDir("/ccos/config") end
+    local f = fs.open(D.configPath, "w")
+    if f then
+        f.write(textutils.serialize(cfg))
+        f.close()
+    end
+end
+
 D.startMenuDragY = nil
 D.startMenuDragScroll = nil
 
@@ -84,6 +162,52 @@ function D.showError(title, message)
     end
 end
 
+function D.showContextMenu(cx, cy)
+    local items = {
+        {"Refresh", function() D.loadPrograms(); D.markDirty() end},
+        {"Save Session", function() D.saveConfig() end},
+        {"Separator", nil},
+        {"Settings", function() for _, p in ipairs(D.programs) do if p.icon == "settings" then D.safeRun(p.run) break end end end},
+        {"Reboot", function() os.reboot() end},
+        {"Shutdown", function() os.shutdown() end},
+    }
+    local itemH = 14
+    local mw = 100
+    local mh = #items * itemH + 4
+    if cy + mh > R.h - D.taskbarH then cy = R.h - D.taskbarH - mh end
+    if cx + mw > R.w then cx = R.w - mw end
+    local w = D.createWindow("Menu", cx, cy, mw, mh)
+    w.modal = true
+    w.onDraw = function(_, wx, wy, ww, wh)
+        R.fillRect(wx, wy, ww, wh, K.GRAY)
+        R.drawW95Raised(wx, wy, ww, wh)
+        for i, it in ipairs(items) do
+            local iy = wy + 2 + (i - 1) * itemH
+            local hit = D.mouse.x >= wx + 2 and D.mouse.x < wx + ww - 2 and D.mouse.y >= iy and D.mouse.y < iy + itemH
+            if it[1] == "Separator" then
+                R.drawLine(wx + 4, iy + math.floor(itemH / 2), wx + ww - 4, iy + math.floor(itemH / 2), K.DGRAY)
+            else
+                if hit then R.fillRect(wx + 2, iy, ww - 4, itemH, K.DBLUE) end
+                R.drawText(wx + 6, iy + 2, it[1], hit and K.WHITE or K.BLACK, hit and K.DBLUE or K.GRAY)
+            end
+        end
+    end
+    w.onClick = function(_, mx, my)
+        for i, it in ipairs(items) do
+            local iy = 2 + (i - 1) * itemH
+            if my >= iy and my < iy + itemH and it[1] ~= "Separator" then
+                D.destroyWindow(w)
+                if it[2] then it[2]() end
+                return
+            end
+        end
+        D.destroyWindow(w)
+    end
+    w.onKey = function(_, k)
+        if k == keys.escape then D.destroyWindow(w) end
+    end
+end
+
 function D.safeRun(fn, ...)
     local ok, err = pcall(fn, ...)
     if not ok then
@@ -103,7 +227,7 @@ end
 
 function D.loadPrograms()
     D.programs = {}
-    if not fs.isDir("/ccos/programs") then return end
+    if not fs.isDir("/ccos/programs") then D.rebuildIconCache(); return end
     for _, name in ipairs(fs.list("/ccos/programs")) do
         local path = "/ccos/programs/" .. name .. "/program.lua"
         if fs.exists(path) then
@@ -116,6 +240,7 @@ function D.loadPrograms()
             end
         end
     end
+    D.rebuildIconCache()
 end
 
 function D.createWindow(title, cx, cy, cw, ch)
@@ -183,23 +308,21 @@ function D._drawFull()
     -- Desktop bg
     R.fillRect(0,0,R.w,by,K.DESKTOP)
 
-    -- Desktop icons
-    local iw,ih=48,42; local cols=math.max(1,math.floor((R.w-10)/(iw+10)))
-    for i,prog in ipairs(D.programs) do
-        local col=(i-1)%cols; local row=math.floor((i-1)/cols)
-        local ix,iy=8+col*(iw+10),8+row*(ih+8)
-        if iy+ih>by then break end
-        local hover=D.mouse.x>=ix-2 and D.mouse.x<ix+iw+2 and D.mouse.y>=iy-2 and D.mouse.y<iy+ih+2
-        local lab=prog.name; if #lab>8 then lab=lab:sub(1,7)..".." end
+    -- Desktop icons (cached layout)
+    if R.w ~= D.lastIconCacheW or R.h ~= D.lastIconCacheH then
+        D.rebuildIconCache()
+    end
+    for _, ic in ipairs(D.iconCache) do
+        local hover = D.mouse.x >= ic.ix - 2 and D.mouse.x < ic.ix + ic.iw + 2 and D.mouse.y >= ic.iy - 2 and D.mouse.y < ic.iy + ic.ih + 2
         if hover then
-            R.fillRect(ix-2,iy-2,iw+4,ih+4,K.DBLUE)
-            R.fillRect(ix,iy,iw,24,K.LGRAY); R.drawW95Sunken(ix,iy,iw,24)
-            R.drawText(ix+math.floor((iw-6)/2),iy+7,prog.name:sub(1,1):upper(),K.DBLUE,K.LGRAY)
-            R.drawText(ix+math.floor((iw-#lab*6)/2),iy+28,lab,K.WHITE,K.DBLUE)
+            R.fillRect(ic.ix - 2, ic.iy - 2, ic.iw + 4, ic.ih + 4, K.DBLUE)
+            R.fillRect(ic.ix, ic.iy, ic.iw, 24, K.LGRAY); R.drawW95Sunken(ic.ix, ic.iy, ic.iw, 24)
+            R.drawText(ic.ix + math.floor((ic.iw - 6) / 2), ic.iy + 7, ic.prog.name:sub(1, 1):upper(), K.DBLUE, K.LGRAY)
+            R.drawText(ic.ix + math.floor((ic.iw - #ic.lab * 6) / 2), ic.iy + 28, ic.lab, K.WHITE, K.DBLUE)
         else
-            R.fillRect(ix,iy,iw,24,K.LGRAY); R.drawW95Sunken(ix,iy,iw,24)
-            R.drawText(ix+math.floor((iw-6)/2),iy+7,prog.name:sub(1,1):upper(),K.DBLUE,K.LGRAY)
-            R.drawText(ix+math.floor((iw-#lab*6)/2),iy+28,lab,K.WHITE,K.DESKTOP)
+            R.fillRect(ic.ix, ic.iy, ic.iw, 24, K.LGRAY); R.drawW95Sunken(ic.ix, ic.iy, ic.iw, 24)
+            R.drawText(ic.ix + math.floor((ic.iw - 6) / 2), ic.iy + 7, ic.prog.name:sub(1, 1):upper(), K.DBLUE, K.LGRAY)
+            R.drawText(ic.ix + math.floor((ic.iw - #ic.lab * 6) / 2), ic.iy + 28, ic.lab, K.WHITE, K.DESKTOP)
         end
     end
 
@@ -309,8 +432,20 @@ end
 -- ============================================================
 -- INPUT
 -- ============================================================
-function D.click(mx,my)
+function D.click(mx,my,btn)
     local by=R.h-D.taskbarH
+    -- Right-click on empty desktop
+    if btn==2 then
+        if my>=by then return nil end
+        local w=D.winAt(mx,my)
+        if w then return nil end
+        if R.w ~= D.lastIconCacheW or R.h ~= D.lastIconCacheH then D.rebuildIconCache() end
+        for _, ic in ipairs(D.iconCache) do
+            if mx>=ic.ix-2 and mx<ic.ix+ic.iw+2 and my>=ic.iy-2 and my<ic.iy+ic.ih+2 then return nil end
+        end
+        D.showContextMenu(mx,my)
+        return nil
+    end
     -- Start button
     if mx>=2 and mx<56 and my>=by+2 and my<by+18 then
         D.startMenuOpen=not D.startMenuOpen; if D.startMenuOpen then D.startMenuSel=1; D.startMenuScroll=0 else D.startMenuScroll=0 end; D.markDirty(); return nil
@@ -366,10 +501,15 @@ function D.click(mx,my)
         end
         if w.onClick then pcall(w.onClick,w,mx-w.cx-3,my-w.cy-18) end; return nil
     end
-    -- Desktop icons
-    local iw,ih=48,42; local cols=math.max(1,math.floor((R.w-10)/(iw+10)))
-    for i,prog in ipairs(D.programs) do local col=(i-1)%cols; local row=math.floor((i-1)/cols); local ix,iy=8+col*(iw+10),8+row*(ih+8)
-        if mx>=ix-2 and mx<ix+iw+2 and my>=iy-2 and my<iy+ih+2 then D.safeRun(prog.run); return nil end
+    -- Desktop icons (cached layout)
+    if R.w ~= D.lastIconCacheW or R.h ~= D.lastIconCacheH then
+        D.rebuildIconCache()
+    end
+    for _, ic in ipairs(D.iconCache) do
+        if mx >= ic.ix - 2 and mx < ic.ix + ic.iw + 2 and my >= ic.iy - 2 and my < ic.iy + ic.ih + 2 then
+            D.safeRun(ic.prog.run)
+            return nil
+        end
     end
     return nil
 end
@@ -405,7 +545,7 @@ function D.drop() D.dragWin=nil; D.resizeWin=nil; D.startMenuDragY=nil; D.startM
 -- ============================================================
 function D.run()
     local ok, err = pcall(function()
-        R.init(); D.loadPrograms(); local running=true; local lastTimer=nil; D.markDirty()
+        R.init(); D.loadPrograms(); D.loadConfig(); local running=true; local lastTimer=nil; D.markDirty()
         while running do
             D.drawAll()
             if lastTimer then os.cancelTimer(lastTimer) end
@@ -414,7 +554,7 @@ function D.run()
             if e=="timer" then
                 local t=os.time and os.time() or 0; local h=math.floor(t); local m=math.floor((t-h)*60); local nc=string.format("%02d:%02d",h,m); if nc~=D.clock then D.clock=nc; D.markClockDirty() end
             end
-            if e=="mouse_click" then D.mouse.x=b; D.mouse.y=c; D.click(b,c)
+            if e=="mouse_click" then D.mouse.x=b; D.mouse.y=c; D.click(b,c,a)
             elseif e=="mouse_double_click" then D.mouse.x=b; D.mouse.y=c; local w=D.winAt(b,c); if w then D.bringToFront(w); if w.onDoubleClick then pcall(w.onDoubleClick,w,b-w.cx-3,c-w.cy-18) end end
             elseif e=="mouse_drag" then D.mouse.x=b; D.mouse.y=c; D.drag(b,c)
             elseif e=="mouse_up" then D.drop()
