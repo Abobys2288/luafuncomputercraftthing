@@ -99,7 +99,6 @@ local function appPkgMan()
             R.drawText(cx+4,iy,text:sub(1,math.floor((cw-8)/6)),active and K.WHITE or K.BLACK,active and K.DBLUE or K.GRAY)
         end
     end
-    end
 
     w.onClick = function(_,mx,my)
         if my>=0 and my<14 and mx>=0 and mx<50 then fetchList(); return end
