@@ -24,6 +24,49 @@ if not ok then
     return
 end
 
+-- ============================================================
+-- Custom require() for CCOS user modules
+-- CC:Tweaked's require() doesn't search /ccos/ by default
+-- ============================================================
+_G._ccos_require = function(name)
+    if _G[name] then return _G[name] end
+    -- Convert module.name to module/name
+    local path = name:gsub("%.", "/")
+    local candidates = {
+        "/" .. path .. ".lua",
+        "/" .. path .. "/init.lua",
+        "/ccos/" .. path .. ".lua",
+        "/ccos/" .. path .. "/init.lua",
+    }
+    for _, cpath in ipairs(candidates) do
+        if fs.exists(cpath) then
+            local fn = loadfile(cpath)
+            if fn then
+                local ok2, mod = pcall(fn)
+                if ok2 then
+                    _G[name] = mod
+                    return mod
+                else
+                    error("Module " .. name .. " failed: " .. tostring(mod))
+                end
+            end
+        end
+    end
+    error("Module not found: " .. name)
+end
+
+-- Override global require (if missing or wrap existing)
+if type(_G.require) ~= "function" then
+    _G.require = _G._ccos_require
+else
+    local oldReq = _G.require
+    _G.require = function(name)
+        local ok2, mod = pcall(oldReq, name)
+        if ok2 and mod then return mod end
+        return _G._ccos_require(name)
+    end
+end
+
 -- Boot screen
 local R = _G.ccos_render
 R.init()

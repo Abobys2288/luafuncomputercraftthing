@@ -92,6 +92,40 @@ function R.shutdown()
     end
 end
 
+-- ============================================================
+-- BSOD (Blue Screen of Death)
+-- ============================================================
+function R.bsod(errorCode, message)
+    if R.mode == 0 then
+        term.setBackgroundColor(colors.blue)
+        term.setTextColor(colors.white)
+        term.clear()
+        term.setCursorPos(1, 1)
+        print("")
+        print("  *** STOP: " .. tostring(errorCode or "0x0000001E"))
+        print("")
+        print("  " .. tostring(message or "A fatal exception has occurred."))
+        print("")
+        print("  * Press any key to reboot your computer.")
+        return
+    end
+    R.beginDraw()
+    R.clear()
+    -- Windows 95 style BSOD — dark blue background
+    R.fillRect(0, 0, R.w, R.h, R.PAL.DBLUE)
+    local y = 20
+    R.drawText(20, y, "*** STOP: " .. tostring(errorCode or "0x0000001E"), R.PAL.WHITE, R.PAL.DBLUE)
+    y = y + 20
+    R.drawText(20, y, tostring(message or "A fatal exception has occurred."), R.PAL.WHITE, R.PAL.DBLUE)
+    y = y + 20
+    R.drawText(20, y, "The current application will be terminated.", R.PAL.LIGHT_GRAY, R.PAL.DBLUE)
+    y = y + 30
+    R.drawText(20, y, "* Press any key to reboot your computer.", R.PAL.WHITE, R.PAL.DBLUE)
+    y = y + 14
+    R.drawText(20, y, "* Press CTRL+ALT+DEL to restart (if available).", R.PAL.LIGHT_GRAY, R.PAL.DBLUE)
+    R.endDraw()
+end
+
 -- Basic pixel operations
 function R.setPixel(x, y, color)
     if R.mode == 0 then return end
