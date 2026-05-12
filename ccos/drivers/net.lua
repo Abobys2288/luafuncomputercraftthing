@@ -1,98 +1,91 @@
 --[[
-    CCOS Network Driver
-    ===================
-    Simple rednet/modem wrapper for CCOS networking.
-    Uses modem peripherals (wired/wireless).
+    CCOS Network Driver — Rednet Standard API
+    ==========================================
+    Uses CC:Tweaked built-in rednet (no low-level modem hacking).
 ]]
 
 local net = {}
 
-net.modem = nil
 net.protocol = "CCOS_NET"
-net.channel = 65535 -- broadcast channel
+net.hostName = os.getComputerLabel() or ("PC_" .. os.getComputerID())
+net.online = false
 
+-- Open any available modem
 function net.init()
     local sides = {"top","bottom","left","right","front","back"}
     for _, side in ipairs(sides) do
-        local ok, ptype = pcall(peripheral.getType, side)
-        if ok and ptype == "modem" then
-            local ok2, modem = pcall(peripheral.wrap, side)
-            if ok2 and modem then
-                net.modem = modem
-                local ok3 = pcall(function() modem.open(os.getComputerID()) end)
-                if ok3 then return true end
-            end
+        if peripheral.getType(side) == "modem" then
+            rednet.open(side)
+            net.online = true
+            return true
         end
     end
     return false
 end
 
 function net.isReady()
-    return net.modem ~= nil
+    return net.online
 end
 
-function net.send(targetId, message)
-    if not net.modem then return false end
-    local ok = pcall(function()
-        net.modem.transmit(targetId, os.getComputerID(), {
-            protocol = net.protocol,
-            from = os.getComputerID(),
-            data = message
-        })
-    end)
-    return ok
+-- Broadcast to all computers
+function net.broadcast(msg)
+    if not net.online then return false end
+    rednet.broadcast({proto = net.protocol, data = msg}, net.protocol)
+    return true
 end
 
-function net.broadcast(message)
-    return net.send(net.channel, message)
+-- Send to specific computer
+function net.send(targetId, msg)
+    if not net.online then return false end
+    return rednet.send(targetId, {proto = net.protocol, data = msg}, net.protocol)
 end
 
+-- Receive message (blocks until timeout)
 function net.receive(timeout)
-    if not net.modem then return nil end
-    local timer = os.startTimer(timeout or 5)
-    while true do
-        local event = {os.pullEvent()}
-        if event[1] == "modem_message" then
-            local msg = event[5]
-            if type(msg) == "table" and msg.protocol == net.protocol then
-                return msg.from, msg.data
-            end
-        elseif event[1] == "timer" and event[2] == timer then
-            return nil
-        end
+    if not net.online then return nil end
+    local id, msg = rednet.receive(net.protocol, timeout or 5)
+    if id and msg and type(msg) == "table" and msg.proto == net.protocol then
+        return id, msg.data
     end
+    return nil
 end
 
+-- Discover computers running CCOS
 function net.discover(timeout)
-    if not net.modem then return {} end
-    net.broadcast({type = "ping"})
+    if not net.online then return {} end
+    net.broadcast({type = "ping", host = net.hostName})
     local found = {}
     local start = os.clock()
     while os.clock() - start < (timeout or 3) do
-        local event = {os.pullEvent()}
-        if event[1] == "modem_message" then
-            local msg = event[5]
-            if type(msg) == "table" and msg.protocol == net.protocol then
-                if msg.data and msg.data.type == "pong" then
-                    found[msg.from] = true
-                end
-            end
+        local id, msg = net.receive(0.5)
+        if id and msg and type(msg) == "table" and msg.type == "pong" then
+            found[id] = msg.host or ("PC_" .. id)
         end
     end
-    local result = {}
-    for id in pairs(found) do table.insert(result, id) end
-    return result
+    return found
 end
 
--- Auto-respond to pings (call this in a parallel thread)
-function net.listen()
-    if not net.modem then return end
+-- Host a service (other computers can lookup)
+function net.host(serviceName)
+    if not net.online then return false end
+    rednet.host(net.protocol, serviceName)
+    return true
+end
+
+-- Lookup a service
+function net.lookup(serviceName)
+    if not net.online then return nil end
+    return rednet.lookup(net.protocol, serviceName)
+end
+
+-- Auto-responder (run in parallel with parallel.waitForAny)
+function net.listenLoop()
+    if not net.online then return end
     while true do
-        local event = {os.pullEvent("modem_message")}
-        local msg = event[5]
-        if type(msg) == "table" and msg.protocol == net.protocol then
-            if msg.data and msg.data.type == "ping" then
-                net.send(msg.from, {type = "pong"})
+        local id, msg = net.receive(999999)
+        if id and msg and type(msg) == "table" then
+            if msg.type == "ping" then
+                net.send(id, {type = "pong", host = net.hostName})
             end
         end
     end

@@ -23,6 +23,11 @@ local FILES = {
     "programs/shell/program.lua",
     "programs/calc/program.lua",
     "programs/tasks/program.lua",
+    "programs/netbrowse/program.lua",
+    "programs/chat/program.lua",
+    "programs/pkgman/program.lua",
+    "programs/imgview/program.lua",
+    "programs/music/program.lua",
     -- Drivers
     "drivers/net.lua",
 }
@@ -155,7 +160,11 @@ local function main()
     if not fs.exists("/ccos/programs/settings") then fs.makeDir("/ccos/programs/settings") end
     if not fs.exists("/ccos/programs/shell") then fs.makeDir("/ccos/programs/shell") end
     if not fs.exists("/ccos/programs/calc") then fs.makeDir("/ccos/programs/calc") end
-    if not fs.exists("/ccos/programs/tasks") then fs.makeDir("/ccos/programs/tasks") end
+    if not fs.exists("/ccos/programs/netbrowse") then fs.makeDir("/ccos/programs/netbrowse") end
+    if not fs.exists("/ccos/programs/chat") then fs.makeDir("/ccos/programs/chat") end
+    if not fs.exists("/ccos/programs/pkgman") then fs.makeDir("/ccos/programs/pkgman") end
+    if not fs.exists("/ccos/programs/imgview") then fs.makeDir("/ccos/programs/imgview") end
+    if not fs.exists("/ccos/programs/music") then fs.makeDir("/ccos/programs/music") end
 
     local success, failed = 0, 0
     local logLines = {}
