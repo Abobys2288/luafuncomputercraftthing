@@ -79,14 +79,21 @@ local function appImageViewer(fp)
             return
         end
 
+        -- Determine format by extension first, then by content
+        local ext = fp:match("%.([^%.]+)$") or ""
+        local is256 = (ext == "nfp256")
+        local is32  = (ext == "nfp")
         local first = true
-        local is256 = false
+
         while true do
             local line = f.readLine()
             if not line then break end
 
             if first then
-                is256 = isNfp256(line)
+                if not is256 and not is32 then
+                    -- Fallback heuristic only when extension unclear
+                    is256 = isNfp256(line)
+                end
                 formatName = is256 and "256-color" or "32-color"
                 first = false
             end
