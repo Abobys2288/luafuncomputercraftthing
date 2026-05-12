@@ -51,7 +51,7 @@ local function appSettings()
     end
 
     w.onKey = function(win, k)
-        if k==keys.escape then D.destroyWindow(win) end
+        -- Settings is view-only; close only via X button
     end
 end
 

@@ -21,7 +21,7 @@ local function appNetBrowse()
     local function scan()
         status = "Scanning..."
         D.markDirty()
-        peers = net.discover(3)
+        peers = net.discover(0.3)
         sel = 1
         scroll = 0
         status = "Found " .. #peers .. " peers"

@@ -98,7 +98,7 @@ local function appImageViewer(fp)
     end
 
     w.onKey = function(_,k)
-        if k==keys.escape then D.destroyWindow(w) end
+        -- Image Viewer is view-only; close only via X button
     end
 end
 

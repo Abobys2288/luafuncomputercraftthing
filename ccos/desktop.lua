@@ -28,6 +28,9 @@ D._contentWin = nil
 D._clockDirty = false
 D.programs = {}
 
+D.startMenuDragY = nil
+D.startMenuDragScroll = nil
+
 D.markDirty = function() D.dirty = true end
 D.markContentDirty = function(win) D._contentWin = win end
 D.markClockDirty = function() D._clockDirty = true end
@@ -316,9 +319,13 @@ function D.click(mx,my)
     if D.startMenuOpen then
         local mw, mh, my2, sx, innerY, innerH, maxVisible, totalItems, itemH, pad, needsScroll = D._startMenuMetrics()
         if mx >= sx and mx < sx + mw and my >= my2 and my < my2 + mh then
-            local firstItem = D.startMenuScroll + 1
-            for idx = firstItem, totalItems do
-                local iy = innerY + (idx - firstItem) * itemH
+            if mx >= sx + 24 and mx < sx + mw - 8 and my >= innerY and my < innerY + innerH then
+                -- Click in scrollable content area — begin drag
+                D.startMenuDragY = my
+                D.startMenuDragScroll = D.startMenuScroll
+            end
+            for idx = D.startMenuScroll + 1, totalItems do
+                local iy = innerY + (idx - D.startMenuScroll - 1) * itemH
                 if my >= iy and my < iy + itemH then
                     D.startMenuSel = idx
                     if idx <= #D.programs then D.startMenuOpen = false; D.startMenuScroll = 0; D.markDirty(); D.safeRun(D.programs[idx].run)
@@ -368,6 +375,16 @@ function D.click(mx,my)
 end
 
 function D.drag(mx,my)
+    if D.startMenuOpen and D.startMenuDragY then
+        local mw, mh, my2, sx, innerY, innerH, maxVisible, totalItems, itemH, pad, needsScroll = D._startMenuMetrics()
+        if needsScroll then
+            local dy = D.startMenuDragY - my
+            local delta = math.floor(dy / itemH)
+            D.startMenuScroll = math.max(0, math.min(totalItems - maxVisible, D.startMenuDragScroll + delta))
+            D.markDirty()
+        end
+        return
+    end
     local w=D.dragWin; if not w then
         w=D.resizeWin; if not w then return end
         local nw = mx - w.cx + D.resizeOX
@@ -381,16 +398,22 @@ function D.drag(mx,my)
     D.markDirty()
 end
 
-function D.drop() D.dragWin=nil; D.resizeWin=nil end
+function D.drop() D.dragWin=nil; D.resizeWin=nil; D.startMenuDragY=nil; D.startMenuDragScroll=nil end
 
 -- ============================================================
 -- MAIN LOOP
 -- ============================================================
 function D.run()
     local ok, err = pcall(function()
-        R.init(); D.loadPrograms(); local running=true; local timer=os.startTimer(1); D.markDirty()
+        R.init(); D.loadPrograms(); local running=true; local lastTimer=nil; D.markDirty()
         while running do
-            D.drawAll(); local e,a,b,c,d=os.pullEvent()
+            D.drawAll()
+            if lastTimer then os.cancelTimer(lastTimer) end
+            lastTimer = os.startTimer(1)
+            local e,a,b,c,d=os.pullEvent()
+            if e=="timer" then
+                local t=os.time and os.time() or 0; local h=math.floor(t); local m=math.floor((t-h)*60); local nc=string.format("%02d:%02d",h,m); if nc~=D.clock then D.clock=nc; D.markClockDirty() end
+            end
             if e=="mouse_click" then D.mouse.x=b; D.mouse.y=c; D.click(b,c)
             elseif e=="mouse_double_click" then D.mouse.x=b; D.mouse.y=c; local w=D.winAt(b,c); if w then D.bringToFront(w); if w.onDoubleClick then pcall(w.onDoubleClick,w,b-w.cx-3,c-w.cy-18) end end
             elseif e=="mouse_drag" then D.mouse.x=b; D.mouse.y=c; D.drag(b,c)
@@ -416,8 +439,9 @@ function D.run()
                         D.startMenuOpen=false; D.startMenuScroll=0; D.markDirty()
                     end
                 elseif D.activeWin and D.activeWin.onKey then pcall(D.activeWin.onKey,D.activeWin,a,nil) end
-            elseif e=="char" then if D.activeWin and D.activeWin.onKey then pcall(D.activeWin.onKey,D.activeWin,nil,a) end
-            elseif e=="timer" and a==timer then local t=os.time and os.time() or 0; local h=math.floor(t); local m=math.floor((t-h)*60); local nc=string.format("%02d:%02d",h,m); if nc~=D.clock then D.clock=nc; D.markClockDirty() end; timer=os.startTimer(1) end
+            elseif e=="char" then
+                if not D.startMenuOpen and D.activeWin and D.activeWin.onKey then pcall(D.activeWin.onKey,D.activeWin,nil,a) end
+            end
         end
         R.beginDraw(); R.clear(); R.fillRect(0,0,R.w,R.h,K.BLACK); R.drawText(10,10,"CCOS shutdown.",K.WHITE,K.BLACK); R.endDraw(); sleep(0.3); R.shutdown()
     end)

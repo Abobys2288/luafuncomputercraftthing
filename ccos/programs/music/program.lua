@@ -78,7 +78,8 @@ local function appMusicPlayer()
             else status = "Key: "..ch; D.markContentDirty(w) end
         elseif k == keys.space then
             playing = false; status = "Stopped"; D.markContentDirty(w)
-        elseif k == keys.escape then D.destroyWindow(w) end
+        -- Music Player closes only via X button
+        end
     end
 
     loadPlaylist()

@@ -84,8 +84,6 @@ local function appTasks()
             if win2 then D.destroyWindow(win2) end
             sel = math.min(sel, #visible)
             D.markDirty()
-        elseif k == keys.escape then
-            D.destroyWindow(win)
         end
     end
 end

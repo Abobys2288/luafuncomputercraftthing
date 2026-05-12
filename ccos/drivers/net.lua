@@ -55,7 +55,7 @@ function net.discover(timeout)
     if not net.online then return {} end
     net.broadcast({type = "ping", host = net.hostName})
     local found = {}
-    local timer = os.startTimer(timeout or 3)
+    local timer = os.startTimer(timeout or 0.5)
     while true do
         local event, p1, p2, p3 = os.pullEvent()
         if event == "rednet_message" then
