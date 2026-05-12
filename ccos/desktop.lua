@@ -156,9 +156,11 @@ function D.showError(title, message)
         R.drawText(bx + 14, by2 + 3, "OK", K.BLACK, K.GRAY)
     end
     w.onClick = function(_, mx, my)
+        local contentW = w.cw - 6
+        local contentH = w.ch - 21
         local bw = 40
-        local bx = math.floor((w.cw - bw) / 2)
-        local by2 = w.ch - 18
+        local bx = math.floor((contentW - bw) / 2)
+        local by2 = contentH - 18
         if mx >= bx and mx < bx + bw and my >= by2 and my < by2 + 14 then
             D.destroyWindow(w)
         end
