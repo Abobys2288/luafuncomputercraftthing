@@ -234,7 +234,8 @@ function D._drawFull()
         local mw = 140
         local available = by - 10
         local totalItems = #D.programs + 2  -- programs + reboot + shutdown
-        local contentHeight = totalItems * 14 + 6
+        local itemH = 12
+        local contentHeight = totalItems * itemH + 6
         local mh = math.min(available, math.max(96, contentHeight))
         local my = (by+2)-mh
         if my < 1 then my = 1 end
@@ -244,48 +245,73 @@ function D._drawFull()
         R.fillRect(sx+2, my+2, 20, mh-4, K.DBLUE)
         R.drawText(sx+3, my+30, "CC", K.WHITE, K.DBLUE)
 
-        -- Scroll arrows if needed
-        local maxVisible = math.floor((mh - 8) / 14)
+        -- Scroll indicator
+        local maxVisible = math.floor((mh - 8) / itemH)
         local needsScroll = totalItems > maxVisible
         if needsScroll then
             D.startMenuMaxVisible = maxVisible
-            -- Up arrow
-            if D.startMenuScroll > 0 then
-                R.drawText(sx+mw-14, my+4, "^", K.BLACK, K.GRAY)
-            end
-            -- Down arrow
-            if D.startMenuScroll < totalItems - maxVisible then
-                R.drawText(sx+mw-14, my+mh-12, "v", K.BLACK, K.GRAY)
-            end
+            local barH = math.max(8, math.floor(mh * maxVisible / totalItems))
+            local barY = my + 4 + math.floor((mh - 8 - barH) * D.startMenuScroll / (totalItems - maxVisible))
+            R.fillRect(sx+mw-6, barY, 4, barH, K.DGRAY)
         else
             D.startMenuMaxVisible = totalItems
             D.startMenuScroll = 0
         end
 
-        -- Clip items to visible area
+        -- Draw visible items
         local firstItem = D.startMenuScroll + 1
-        local lastItem = math.min(totalItems, D.startMenuMaxVisible + D.startMenuScroll)
+        local lastItem = math.min(totalItems, maxVisible + D.startMenuScroll)
         local iy = my + 4
+        if needsScroll then iy = iy + 14 end
+
         for idx = firstItem, lastItem do
             if idx <= #D.programs then
                 local prog = D.programs[idx]
-                local hit = D.mouse.x >= sx+24 and D.mouse.x < sx+mw-4 and D.mouse.y >= iy and D.mouse.y < iy+12
-                if hit then R.fillRect(sx+24, iy, mw-28, 12, K.DBLUE) end
+                local hit = D.mouse.x >= sx+24 and D.mouse.x < sx+mw-8 and D.mouse.y >= iy and D.mouse.y < iy+itemH
+                if hit then R.fillRect(sx+24, iy, mw-32, itemH, K.DBLUE) end
+                R.drawText(sx+28, iy+2, prog.name, hit and K.WHITE or K.BLACK, hit and K.DBLUE or K.GRAY)
+            elseif idx == #D.programs + 1 then
+                -- Separator before Reboot
+                if idx == firstItem or (idx > 1 and idx <= #D.programs + 1) then
+                    R.drawLine(sx+24, iy+math.floor(itemH/2), sx+mw-8, iy+math.floor(itemH/2), K.DGRAY)
+                end
+                local hit = D.mouse.x >= sx+24 and D.mouse.x < sx+mw-8 and D.mouse.y >= iy and D.mouse.y < iy+itemH
+                if hit then R.fillRect(sx+24, iy, mw-32, itemH, K.DBLUE) end
+                R.drawText(sx+28, iy+2, "Reboot", hit and K.WHITE or K.BLACK, hit and K.DBLUE or K.GRAY)
+            elseif idx == #D.programs + 2 then
+                local hit = D.mouse.x >= sx+24 and D.mouse.x < sx+mw-8 and D.mouse.y >= iy and D.mouse.y < iy+itemH
+                if hit then R.fillRect(sx+24, iy, mw-32, itemH, K.DBLUE) end
+                R.drawText(sx+28, iy+2, "Shutdown", hit and K.WHITE or K.BLACK, hit and K.DBLUE or K.GRAY)
+            end
+            iy = iy + itemH
+        end
+    end
+
+        -- Draw visible items
+        local firstItem = D.startMenuScroll + 1
+        local lastItem = math.min(totalItems, maxVisible + D.startMenuScroll)
+        local iy = my + 4
+        if needsScroll then iy = iy + 14 end  -- scroll arrow area padding
+
+        for idx = firstItem, lastItem do
+            if idx <= #D.programs then
+                local prog = D.programs[idx]
+                local hit = D.mouse.x >= sx+24 and D.mouse.x < sx+mw-8 and D.mouse.y >= iy and D.mouse.y < iy+itemH
+                if hit then R.fillRect(sx+24, iy, mw-32, itemH, K.DBLUE) end
                 R.drawText(sx+28, iy+2, prog.name, hit and K.WHITE or K.BLACK, hit and K.DBLUE or K.GRAY)
             elseif idx == #D.programs + 1 then
                 -- Separator
-                R.drawLine(sx+24, iy, sx+mw-4, iy, K.DGRAY)
-                iy = iy + 1
+                R.drawLine(sx+24, iy+math.floor(itemH/2), sx+mw-8, iy+math.floor(itemH/2), K.DGRAY)
             elseif idx == #D.programs + 2 then
-                local hit = D.mouse.x >= sx+24 and D.mouse.x < sx+mw-4 and D.mouse.y >= iy and D.mouse.y < iy+12
-                if hit then R.fillRect(sx+24, iy, mw-28, 12, K.DBLUE) end
+                local hit = D.mouse.x >= sx+24 and D.mouse.x < sx+mw-8 and D.mouse.y >= iy and D.mouse.y < iy+itemH
+                if hit then R.fillRect(sx+24, iy, mw-32, itemH, K.DBLUE) end
                 R.drawText(sx+28, iy+2, "Reboot", hit and K.WHITE or K.BLACK, hit and K.DBLUE or K.GRAY)
             elseif idx == #D.programs + 3 then
-                local hit = D.mouse.x >= sx+24 and D.mouse.x < sx+mw-4 and D.mouse.y >= iy and D.mouse.y < iy+12
-                if hit then R.fillRect(sx+24, iy, mw-28, 12, K.DBLUE) end
+                local hit = D.mouse.x >= sx+24 and D.mouse.x < sx+mw-8 and D.mouse.y >= iy and D.mouse.y < iy+itemH
+                if hit then R.fillRect(sx+24, iy, mw-32, itemH, K.DBLUE) end
                 R.drawText(sx+28, iy+2, "Shutdown", hit and K.WHITE or K.BLACK, hit and K.DBLUE or K.GRAY)
             end
-            iy = iy + 14
+            iy = iy + itemH
         end
     end
 
@@ -345,20 +371,44 @@ function D.click(mx,my)
         local mw = 140
         local available = by - 10
         local totalItems = #D.programs + 2
-        local contentHeight = totalItems * 14 + 6
+        local itemH = 12
+        local contentHeight = totalItems * itemH + 6
         local mh = math.min(available, math.max(96, contentHeight))
         local my2 = (by+2)-mh
         if my2 < 1 then my2 = 1 end
         if mx >= 2 and mx < 2+mw and my >= my2 and my < my2+mh then
-            -- Scroll arrows
-            local maxVisible = math.floor((mh - 8) / 14)
+            local maxVisible = math.floor((mh - 8) / itemH)
             local needsScroll = totalItems > maxVisible
-            if needsScroll then
-                if my >= my2+4 and my < my2+16 and D.startMenuScroll > 0 then
-                    D.startMenuScroll = math.max(0, D.startMenuScroll - 1)
-                    D.markDirty()
+
+            -- Calculate which item was clicked
+            local firstItem = D.startMenuScroll + 1
+            local itemY = my2 + 4
+            if needsScroll then itemY = itemY + 14 end
+
+            for idx = firstItem, totalItems do
+                if my >= itemY and my < itemY + itemH then
+                    if idx <= #D.programs then
+                        D.startMenuOpen = false
+                        D.startMenuScroll = 0
+                        D.markDirty()
+                        local ok, err = pcall(D.programs[idx].run)
+                        if not ok then print("App error: " .. tostring(err)) end
+                    elseif idx == #D.programs + 1 then
+                        D.startMenuOpen = false; D.startMenuScroll = 0; D.markDirty(); os.reboot()
+                    elseif idx == #D.programs + 2 then
+                        D.startMenuOpen = false; D.startMenuScroll = 0; D.markDirty(); os.shutdown()
+                    end
                     return nil
                 end
+                itemY = itemY + itemH
+            end
+            return nil
+        else
+            D.startMenuOpen = false
+            D.startMenuScroll = 0
+            D.markDirty()
+        end
+    end
                 if my >= my2+mh-16 and my < my2+mh-4 and D.startMenuScroll < totalItems - maxVisible then
                     D.startMenuScroll = math.min(totalItems - maxVisible, D.startMenuScroll + 1)
                     D.markDirty()
@@ -500,19 +550,15 @@ function D.run()
         elseif e == "mouse_up" then
             D.drop()
         elseif e == "key" then
-            if a == keys.q and D.startMenuOpen then
-                D.startMenuOpen = false
-                D.startMenuScroll = 0
-                D.markDirty()
-            elseif D.startMenuOpen and a == keys.up then
+            if D.startMenuOpen and a == keys.up then
                 D.startMenuScroll = math.max(0, D.startMenuScroll - 1)
                 D.markDirty()
             elseif D.startMenuOpen and a == keys.down then
                 local totalItems = #D.programs + 2
                 local by = R.h - D.taskbarH
                 local available = by - 10
-                local mh = math.min(available, math.max(96, totalItems * 14 + 6))
-                local maxVisible = math.floor((mh - 8) / 14)
+                local mh = math.min(available, math.max(96, totalItems * 12 + 6))
+                local maxVisible = math.floor((mh - 8) / 12)
                 D.startMenuScroll = math.min(totalItems - maxVisible, D.startMenuScroll + 1)
                 D.markDirty()
             elseif D.activeWin and D.activeWin.onKey then
