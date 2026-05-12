@@ -186,28 +186,6 @@ local function appImageViewer(fp)
         elseif k == keys.down then oy = oy + step; D.markContentDirty(w)
         end
     end
-        else
-            -- Start panning
-            isPanning = true
-            panSX, panSY = mx, my
-            panOX, panOY = ox, oy
-        end
-    end
-
-    -- Drag is handled by desktop via mouse_drag events, but apps
-    -- don't get mouse_drag directly. We'll use a workaround:
-    -- track in onClick and desktop will send us relative coords if we expose it.
-    -- Actually, desktop only sends onClick. We need to hook into the desktop drag.
-    -- Simpler: use keyboard arrows for pan, since drag isn't exposed to apps cleanly.
-
-    w.onKey = function(_,k)
-        local step = math.max(1, math.floor(4 / scale))
-        if k == keys.left then  ox = math.max(0, ox - step); D.markContentDirty(w)
-        elseif k == keys.right then ox = ox + step; D.markContentDirty(w)
-        elseif k == keys.up then oy = math.max(0, oy - step); D.markContentDirty(w)
-        elseif k == keys.down then oy = oy + step; D.markContentDirty(w)
-        end
-    end
 end
 
 return {name = "Image View", icon = "img", run = appImageViewer}
