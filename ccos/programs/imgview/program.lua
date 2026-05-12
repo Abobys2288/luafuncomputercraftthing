@@ -1,51 +1,112 @@
 -- CCOS Program: Image Viewer
 -- View .nfp (NPaintPro) and pixel art files
+-- Supports: CC 16-color (0-f) and CCOS 32-color (0-v)
 local D = _G._desktop
 local R = _G.ccos_render
 local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,BLUE=5,DBLUE=6,DESKTOP=30}
+
+-- Standard CC 16-color paintutils mapping
+local CC16_MAP = {
+    ['0'] = K.WHITE,      -- white
+    ['1'] = K.GRAY,       -- orange (closest)
+    ['2'] = K.GRAY,       -- magenta (closest)
+    ['3'] = K.LIGHT_BLUE, -- lightBlue
+    ['4'] = K.YELLOW,     -- yellow
+    ['5'] = K.GREEN,      -- lime
+    ['6'] = K.PINK,       -- pink
+    ['7'] = K.DARK_GRAY,  -- gray
+    ['8'] = K.LIGHT_GRAY, -- lightGray
+    ['9'] = K.CYAN,       -- cyan
+    ['a'] = K.PURPLE,     -- purple
+    ['b'] = K.BLUE,       -- blue
+    ['c'] = K.BROWN,      -- brown
+    ['d'] = K.DARK_GREEN, -- green
+    ['e'] = K.RED,        -- red
+    ['f'] = K.BLACK,      -- black
+}
+
+-- CCOS 32-color extended mapping (matches convert_to_nfp.py --ccos)
+local CCOS32_MAP = {
+    ['0'] = K.BLACK,
+    ['1'] = K.WHITE,
+    ['2'] = K.GRAY,
+    ['3'] = K.LIGHT_GRAY,
+    ['4'] = K.DARK_GRAY,
+    ['5'] = K.BLUE,
+    ['6'] = K.DARK_BLUE,
+    ['7'] = K.CYAN,
+    ['8'] = K.LIGHT_BLUE,
+    ['9'] = K.GREEN,
+    ['a'] = K.DARK_GREEN,
+    ['b'] = K.RED,
+    ['c'] = K.DARK_RED,
+    ['d'] = K.YELLOW,
+    ['e'] = K.ORANGE,
+    ['f'] = K.BROWN,
+    ['g'] = K.PURPLE,
+    ['h'] = K.PINK,
+    ['i'] = K.DARK_TITLE or K.DARK_GRAY,
+    ['j'] = K.W95_TITLE_BLUE or K.BLUE,
+    ['k'] = K.W95_TITLE_INACTIVE or K.LIGHT_GRAY,
+    ['l'] = K.PURE_BLUE or K.BLUE,
+    ['m'] = K.ALMOST_WHITE or K.WHITE,
+    ['n'] = K.NEAR_BLACK or K.BLACK,
+    ['o'] = K.MID_GRAY or K.GRAY,
+    ['p'] = K.BUTTON_FACE or K.GRAY,
+    ['q'] = K.BUTTON_HI or K.LIGHT_GRAY,
+    ['r'] = K.DEEP_NAVY or K.DARK_BLUE,
+    ['s'] = K.BTNFACE_DARK or K.DARK_GRAY,
+    ['t'] = K.DARK_GREEN_BG or K.DARK_GREEN,
+    ['u'] = K.W95_DESKTOP or K.CYAN,
+    ['v'] = K.LIGHT_BG or K.GRAY,
+}
+
+local function detectFormat(content)
+    -- If content contains chars > 'f', it's CCOS 32-color
+    for i = 1, #content do
+        local ch = content:sub(i,i)
+        if ch > 'f' and ch <= 'v' then
+            return CCOS32_MAP, "CCOS 32-color"
+        end
+    end
+    return CC16_MAP, "CC 16-color"
+end
 
 local function appImageViewer(fp)
     fp = fp or "/image.nfp"
     local pixels = {}
     local imgW, imgH = 0, 0
+    local formatName = "Unknown"
 
     local function loadImage()
         if not fs.exists(fp) then return end
         local f = fs.open(fp, "r")
         if not f then return end
-        local y = 1
+        local content = ""
+        while true do
+            local line = f.readLine()
+            if not line then break end
+            content = content .. line
+        end
+        f.close()
+
+        local colorMap, fmtName = detectFormat(content)
+        formatName = fmtName
+        pixels = {}
+        imgW, imgH = 0, 0
+
+        f = fs.open(fp, "r")
         while true do
             local line = f.readLine()
             if not line then break end
             local row = {}
             for x = 1, #line do
                 local ch = line:sub(x,x)
-                local color = K.BLACK
-                if ch == "0" then color = K.WHITE
-                elseif ch == "1" then color = K.BLACK
-                elseif ch == "2" then color = K.GRAY
-                elseif ch == "3" then color = K.LGRAY
-                elseif ch == "4" then color = K.DGRAY
-                elseif ch == "5" then color = K.BLUE
-                elseif ch == "6" then color = K.DBLUE
-                elseif ch == "7" then color = K.CYAN
-                elseif ch == "8" then color = K.LIGHT_BLUE
-                elseif ch == "9" then color = K.GREEN
-                elseif ch == "a" then color = K.DARK_GREEN
-                elseif ch == "b" then color = K.RED
-                elseif ch == "c" then color = K.DARK_RED
-                elseif ch == "d" then color = K.YELLOW
-                elseif ch == "e" then color = K.ORANGE
-                elseif ch == "f" then color = K.BROWN
-                elseif ch == "g" then color = K.PURPLE
-                elseif ch == "h" then color = K.PINK
-                end
-                table.insert(row, color)
+                table.insert(row, colorMap[ch] or K.BLACK)
             end
             table.insert(pixels, row)
             imgW = math.max(imgW, #row)
             imgH = imgH + 1
-            y = y + 1
         end
         f.close()
     end
@@ -66,9 +127,10 @@ local function appImageViewer(fp)
         R.drawButton(cx+80,cy,36,14,false)
         R.drawText(cx+84,cy+3,"-",K.BLACK,K.GRAY)
         R.drawText(cx+120,cy+3,imgW.."x"..imgH.." @"..scale.."x",K.BLACK,K.GRAY)
+        R.drawText(cx+120,cy+11,formatName,K.DBLUE,K.GRAY)
 
-        local viewX, viewY = cx+2, cy+16
-        local viewW, viewH = cw-4, ch-28
+        local viewX, viewY = cx+2, cy+28
+        local viewW, viewH = cw-4, ch-40
 
         if #pixels == 0 then
             R.drawText(viewX+10, viewY+10, "No image loaded", K.BLACK, K.GRAY)
