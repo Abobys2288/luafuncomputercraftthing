@@ -91,9 +91,10 @@ local function appFM()
                     if fs.exists(fp) then fs.delete(fp) end
                     refresh()
                     D.markDirty()
+                        end
+                    end
                 end
-            end
-            return
+                return
         end
         local lh = math.floor((win.ch-24)/8)
         for i=1, lh do
@@ -102,6 +103,25 @@ local function appFM()
             if my >= iy-1 and my < iy+8 then
                 sel = idx
                 D.markContentDirty(win)
+                return
+            end
+        end
+    end
+
+    local function openFile(filePath)
+        local ext = filePath:match("%.([^%.]+)$") or ""
+        local targetIcon = "edit"
+        if ext == "nfp" or ext == "nfp256" then targetIcon = "img" end
+        for _, prog in ipairs(D.programs) do
+            if prog.icon == targetIcon then
+                prog.run(filePath)
+                return
+            end
+        end
+        -- Fallback to edit if no specific viewer found
+        for _, prog in ipairs(D.programs) do
+            if prog.icon == "edit" then
+                prog.run(filePath)
                 return
             end
         end
@@ -131,12 +151,7 @@ local function appFM()
                             D.markDirty()
                         end
                     else
-                        for _, prog in ipairs(D.programs) do
-                            if prog.icon == "edit" then
-                                prog.run(path=="/" and ("/"..it) or (path.."/"..it))
-                                break
-                            end
-                        end
+                        openFile(path=="/" and ("/"..it) or (path.."/"..it))
                     end
                 end
                 return
@@ -163,12 +178,7 @@ local function appFM()
                     local np = path=="/" and it or (path..it)
                     if fs.isDir(np) then path = np end
                 else
-                    for _, prog in ipairs(D.programs) do
-                        if prog.icon == "edit" then
-                            prog.run(path=="/" and ("/"..it) or (path.."/"..it))
-                            break
-                        end
-                    end
+                    openFile(path=="/" and ("/"..it) or (path.."/"..it))
                 end
                 sel = 1
                 scroll = 0
