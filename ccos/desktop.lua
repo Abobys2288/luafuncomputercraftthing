@@ -128,6 +128,7 @@ D.startMenuMaxVisible = 99
 -- ERROR HANDLER
 -- ============================================================
 function D.showError(title, message)
+    D.playSound("error")
     local wx, wy, ww, wh = D.fitWin(240, 80)
     local w = D.createWindow(title or "Error", wx, wy, ww, wh)
     w.modal = true
@@ -162,11 +163,13 @@ function D.showError(title, message)
         local bx = math.floor((contentW - bw) / 2)
         local by2 = contentH - 18
         if mx >= bx and mx < bx + bw and my >= by2 and my < by2 + 14 then
+            D.playSound("close")
             D.destroyWindow(w)
         end
     end
     w.onKey = function(_, k)
         if k == keys.enter or k == keys.escape then
+            D.playSound("close")
             D.destroyWindow(w)
         end
     end
@@ -176,7 +179,7 @@ function D.showContextMenu(cx, cy)
     local items = {
         {"Refresh", function() D.loadPrograms(); D.markDirty() end},
         {"Save Session", function() D.saveConfig() end},
-        {"Separator", nil},
+        {nil, nil}, -- separator
         {"Settings", function() for _, p in ipairs(D.programs) do if p.icon == "settings" then D.safeRun(p.run) break end end end},
         {"Reboot", function() os.reboot() end},
         {"Shutdown", function() os.shutdown() end},
@@ -186,41 +189,20 @@ function D.showContextMenu(cx, cy)
     local mh = #items * itemH + 4
     if cy + mh > R.h - D.taskbarH then cy = R.h - D.taskbarH - mh end
     if cx + mw > R.w then cx = R.w - mw end
-    local w = D.createWindow("Menu", cx, cy, mw, mh)
-    w.modal = true
-    w.onDraw = function(_, wx, wy, ww, wh)
-        R.fillRect(wx, wy, ww, wh, K.GRAY)
-        R.drawW95Raised(wx, wy, ww, wh)
-        for i, it in ipairs(items) do
-            local iy = wy + 2 + (i - 1) * itemH
-            local hit = D.mouse.x >= wx + 2 and D.mouse.x < wx + ww - 2 and D.mouse.y >= iy and D.mouse.y < iy + itemH
-            if it[1] == "Separator" then
-                R.drawLine(wx + 4, iy + math.floor(itemH / 2), wx + ww - 4, iy + math.floor(itemH / 2), K.DGRAY)
-            else
-                if hit then R.fillRect(wx + 2, iy, ww - 4, itemH, K.DBLUE) end
-                R.drawText(wx + 6, iy + 2, it[1], hit and K.WHITE or K.BLACK, hit and K.DBLUE or K.GRAY)
-            end
-        end
-    end
-    w.onClick = function(_, mx, my)
-        for i, it in ipairs(items) do
-            local iy = 2 + (i - 1) * itemH
-            if my >= iy and my < iy + itemH and it[1] ~= "Separator" then
-                D.destroyWindow(w)
-                if it[2] then it[2]() end
-                return
-            end
-        end
-        D.destroyWindow(w)
-    end
-    w.onKey = function(_, k)
-        if k == keys.escape then D.destroyWindow(w) end
-    end
+    D.contextMenu = {
+        x = cx, y = cy,
+        w = mw, h = mh,
+        items = items,
+        itemH = itemH,
+    }
+    D.markDirty()
 end
 
 function D.safeRun(fn, ...)
+    D.playSound("startup")
     local ok, err = pcall(fn, ...)
     if not ok then
+        D.playSound("error")
         D.showError("Application Error", tostring(err))
         return false, err
     end
@@ -236,7 +218,30 @@ function D.fitWin(ww, wh)
 end
 
 function D.loadPrograms()
-    D.programs = {}
+D.programs = {}
+D.contextMenu = nil
+D._speaker = nil
+
+D._getSpeaker = function()
+    if D._speaker ~= nil then return D._speaker end
+    D._speaker = peripheral.find("speaker") or false
+    return D._speaker
+end
+
+D.playSound = function(event)
+    local sp = D._getSpeaker()
+    if not sp then return end
+    local sounds = {
+        click  = {note="harp",pitch=1.0},
+        startup= {note="pling",pitch=2.0},
+        error  = {note="bit",pitch=0.5},
+        close  = {note="harp",pitch=0.8},
+    }
+    local s = sounds[event]
+    if s then
+        pcall(function() sp.playNote(s.note, 1, s.pitch) end)
+    end
+end
     D.loadErrors = {}
     if not fs.isDir("/ccos/programs") then D.rebuildIconCache(); return end
     for _, name in ipairs(fs.list("/ccos/programs")) do
@@ -416,6 +421,24 @@ function D._drawFull()
         end
     end
 
+    -- Context menu (draw last, on top of everything)
+    if D.contextMenu then
+        local m = D.contextMenu
+        R.fillRect(m.x, m.y, m.w, m.h, K.GRAY)
+        R.drawW95Raised(m.x, m.y, m.w, m.h)
+        for i, it in ipairs(m.items) do
+            local iy = m.y + 2 + (i - 1) * m.itemH
+            if not it[1] then
+                -- separator
+                R.drawLine(m.x + 4, iy + math.floor(m.itemH / 2), m.x + m.w - 4, iy + math.floor(m.itemH / 2), K.DGRAY)
+            else
+                local hit = D.mouse.x >= m.x + 2 and D.mouse.x < m.x + m.w - 2 and D.mouse.y >= iy and D.mouse.y < iy + m.itemH
+                if hit then R.fillRect(m.x + 2, iy, m.w - 4, m.itemH, K.DBLUE) end
+                R.drawText(m.x + 6, iy + 2, it[1], hit and K.WHITE or K.BLACK, hit and K.DBLUE or K.GRAY)
+            end
+        end
+    end
+
     R.endDraw()
 end
 
@@ -463,8 +486,28 @@ function D.click(mx,my,btn)
         for _, ic in ipairs(D.iconCache) do
             if mx>=ic.ix-2 and mx<ic.ix+ic.iw+2 and my>=ic.iy-2 and my<ic.iy+ic.ih+2 then return nil end
         end
+        D.contextMenu = nil
         D.showContextMenu(mx,my)
         return nil
+    end
+    -- Left click while context menu open
+    if D.contextMenu then
+        local m = D.contextMenu
+        if mx >= m.x and mx < m.x + m.w and my >= m.y and my < m.y + m.h then
+            for i, it in ipairs(m.items) do
+                local iy = m.y + 2 + (i - 1) * m.itemH
+                if my >= iy and my < iy + m.itemH and it[1] then
+                    D.contextMenu = nil
+                    D.markDirty()
+                    D.playSound("click")
+                    if it[2] then it[2]() end
+                    return nil
+                end
+            end
+        end
+        D.contextMenu = nil
+        D.markDirty()
+        D.playSound("close")
     end
     -- Start button
     if mx>=2 and mx<56 and my>=by+2 and my<by+18 then
