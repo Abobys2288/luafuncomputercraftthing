@@ -255,7 +255,7 @@ function R.drawText(x, y, text, fg, bg)
         if R.isColor then R.display.setTextColor(colors.white); R.display.setBackgroundColor(colors.black) end
         return
     end
-    if R.hasDrawPixels and R._charBuf and bg ~= nil then
+        if R.hasDrawPixels and R._charBuf and bg ~= nil then
         local cx = x
         local buf = R._charBuf
         for i = 1, #text do
@@ -264,10 +264,17 @@ function R.drawText(x, y, text, fg, bg)
             for row = 1, 7 do
                 local bits = glyph[row]
                 local rd = buf[row]
-                for col = 0, 4 do
+                for col = 4, 0, -1 do
                     local mask = 2^col
-                    rd[col+1] = (math.floor(bits / mask) % 2 == 1) and fg or bg
+                    rd[5-col] = (math.floor(bits / mask) % 2 == 1) and fg or bg
                 end
+                rd[6] = bg
+            end
+            buf[8][1]=bg; buf[8][2]=bg; buf[8][3]=bg
+            buf[8][4]=bg; buf[8][5]=bg; buf[8][6]=bg
+            R.display.drawPixels(cx-1, y-1, buf)
+            cx = cx + 6
+        end
                 rd[6] = bg
             end
             buf[8][1]=bg; buf[8][2]=bg; buf[8][3]=bg
@@ -289,6 +296,14 @@ function R.drawText(x, y, text, fg, bg)
                     elseif bg then
                         R.setPixel(cx+(4-col), y+row-1, bg)
                     end
+                end
+            end
+            cx = cx + 6
+        end
+                end
+            end
+            cx = cx + 6
+        end
                 end
             end
             cx = cx + 6
