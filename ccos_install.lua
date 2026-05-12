@@ -12,6 +12,7 @@ local BASE_URL = "https://raw.githubusercontent.com/" .. REPO .. "/" .. BRANCH .
 -- FILE MANIFEST (relative to ccos/ in repo)
 -- ============================================================
 local FILES = {
+    -- Core
     "init.lua",
     "render.lua",
     "desktop.lua",
@@ -34,6 +35,9 @@ local FILES = {
     -- Drivers
     "drivers/net.lua",
 }
+
+local SERVER_FILE = "ccos_server.lua"
+local SERVER_URL = "https://raw.githubusercontent.com/" .. REPO .. "/" .. BRANCH .. "/" .. SERVER_FILE
 
 -- ============================================================
 -- UI HELPERS
@@ -170,7 +174,7 @@ local function main()
         return
     end
 
-    local total = #FILES
+    local total = #FILES + 1
     local success, failed = 0, 0
     local logLines = {}
     local listY = by + 7
@@ -225,6 +229,27 @@ local function main()
         reset()
 
         sleep(0.05)
+    end
+
+    -- Download server script separately (goes to root, not /ccos/)
+    do
+        local url = SERVER_URL
+        local path = "/" .. SERVER_FILE
+        term.setCursorPos(fileX, listY + maxLines)
+        set(colors.black, colors.lightGray)
+        term.write(SERVER_FILE)
+        local ok2, err2 = downloadFile(url, path)
+        term.setCursorPos(bx + bw - 8, listY + maxLines)
+        if ok2 then
+            set(colors.black, colors.lime)
+            term.write("[OK]")
+            success = success + 1
+        else
+            set(colors.black, colors.red)
+            term.write("[ERR]")
+            failed = failed + 1
+        end
+        reset()
     end
 
     local statusY = by + bh - 4
