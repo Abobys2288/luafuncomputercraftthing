@@ -82,10 +82,11 @@ local function appPkgMan()
             if not pkg then break end
             local iy=cy+16+(i-1)*8
             local hit=D.mouse.x>=cx+2 and D.mouse.x<cx+cw-2 and D.mouse.y>=iy and D.mouse.y<iy+8
-            if idx==sel or hit then R.fillRect(cx+2,iy,cw-4,8,K.DBLUE) end
+            local active = idx==sel or hit
+            if active then R.fillRect(cx+2,iy,cw-4,8,K.DBLUE) end
             local mark = installed[pkg.name] and "[+] " or "[ ] "
             local text = mark .. pkg.title .. " - " .. pkg.desc
-            R.drawText(cx+4,iy,text:sub(1,math.floor((cw-8)/6)),hit and K.WHITE or K.BLACK,hit and K.DBLUE or K.GRAY)
+            R.drawText(cx+4,iy,text:sub(1,math.floor((cw-8)/6)),active and K.WHITE or K.BLACK,active and K.DBLUE or K.GRAY)
         end
     end
 

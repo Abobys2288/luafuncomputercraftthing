@@ -69,6 +69,7 @@ end
 
 -- Boot screen
 local R = _G.ccos_render
+R.resetPalette() -- clean up any corruption from previous session
 R.init()
 
 -- Draw static boot screen elements (with freeze to avoid flicker)

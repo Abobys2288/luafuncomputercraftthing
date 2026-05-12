@@ -73,6 +73,36 @@ function R.init()
     }
 end
 
+-- ============================================================
+-- Default 16-color CC palette (restored when leaving graphics)
+-- ============================================================
+local DEFAULT_CC_COLORS = {
+    [colors.white]     = {240/255, 240/255, 240/255},
+    [colors.orange]    = {242/255, 178/255,  51/255},
+    [colors.magenta]   = {229/255, 127/255, 216/255},
+    [colors.lightBlue] = {153/255, 217/255, 234/255},
+    [colors.yellow]    = {222/255, 222/255, 108/255},
+    [colors.lime]      = {127/255, 204/255,  25/255},
+    [colors.pink]      = {242/255, 178/255, 204/255},
+    [colors.gray]      = { 76/255,  76/255,  76/255},
+    [colors.lightGray] = {153/255, 153/255, 153/255},
+    [colors.cyan]      = { 76/255, 153/255, 178/255},
+    [colors.purple]    = {127/255,  63/255, 178/255},
+    [colors.blue]      = { 51/255, 102/255, 204/255},
+    [colors.brown]     = {127/255, 102/255,  76/255},
+    [colors.green]     = { 87/255, 166/255,  78/255},
+    [colors.red]       = {204/255,  76/255,  76/255},
+    [colors.black]     = { 25/255,  25/255,  25/255},
+}
+
+function R.resetPalette()
+    local t = term.native() or term
+    if not t.setPaletteColor then return end
+    for col, rgb in pairs(DEFAULT_CC_COLORS) do
+        pcall(function() t.setPaletteColor(col, rgb[1], rgb[2], rgb[3]) end)
+    end
+end
+
 -- Freeze/unfreeze display during batch drawing
 function R.beginDraw()
     if R.mode > 0 and R.hasFrozen then
@@ -90,6 +120,7 @@ function R.shutdown()
     if R.hasGraphics then
         pcall(function() (term.native() or term).setGraphicsMode(0) end)
     end
+    R.resetPalette()
 end
 
 -- ============================================================
@@ -101,12 +132,8 @@ function R.bsod(errorCode, message)
     if R.hasGraphics then
         pcall(function() (term.native() or term).setGraphicsMode(0) end)
     end
+    R.resetPalette()
     local t = term.native() or term
-    -- Reset palette so standard colors render correctly after graphics mode
-    if t.setPaletteColor then
-        pcall(function() t.setPaletteColor(colors.blue, 0, 0, 1) end)
-        pcall(function() t.setPaletteColor(colors.white, 1, 1, 1) end)
-    end
     t.setBackgroundColor(colors.blue)
     t.setTextColor(colors.white)
     t.clear()

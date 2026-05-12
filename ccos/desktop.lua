@@ -156,7 +156,7 @@ end
 -- DRAW
 -- ============================================================
 function D._drawFull()
-    R.beginDraw(); R.clear(); local by=R.h-D.taskbarH
+    R.beginDraw(); local by=R.h-D.taskbarH
 
     -- Desktop bg
     R.fillRect(0,0,R.w,by,K.DESKTOP)
@@ -166,7 +166,7 @@ function D._drawFull()
     for i,prog in ipairs(D.programs) do
         local col=(i-1)%cols; local row=math.floor((i-1)/cols)
         local ix,iy=8+col*(iw+10),8+row*(ih+8)
-        if iy+ih>by-4 then break end
+        if iy+ih>by then break end
         local hover=D.mouse.x>=ix-2 and D.mouse.x<ix+iw+2 and D.mouse.y>=iy-2 and D.mouse.y<iy+ih+2
         if hover then R.fillRect(ix-2,iy-2,iw+4,ih+4,K.DBLUE) end
         R.fillRect(ix,iy,iw,24,K.LGRAY); R.drawW95Sunken(ix,iy,iw,24)
@@ -178,15 +178,18 @@ function D._drawFull()
     -- Windows
     for _,w in ipairs(D.windows) do if w.visible and not w.minimized then
         local x,y,ww,hh=w.cx,w.cy,w.cw,w.ch; if y+hh>by then hh=math.max(20,by-y) end
-        R.fillRect(x,y,ww,hh,K.GRAY); local act=D.activeWin and D.activeWin.id==w.id
+        local act=D.activeWin and D.activeWin.id==w.id
+        -- Background + content
+        R.fillRect(x,y,ww,hh,K.GRAY)
+        R.fillRect(x+2,y+17,ww-4,hh-19,K.GRAY)
+        if w.onDraw then pcall(w.onDraw,w,x+3,y+18,ww-6,hh-21) end
+        -- Title bar & frame on top to clip overflow
         R.fillRect(x,y,ww,18,act and K.DBLUE or K.GRAY)
         R.drawText(x+4,y+4,w.title,act and K.WHITE or K.LGRAY,act and K.DBLUE or K.GRAY)
         R.drawButton(x+ww-54,y+1,16,14,false); R.drawText(x+ww-49,y+4,"_",K.BLACK,K.GRAY)
         R.drawButton(x+ww-36,y+1,16,14,false); R.drawText(x+ww-31,y+4,"[]",K.BLACK,K.GRAY)
         R.drawButton(x+ww-18,y+1,16,14,false); R.drawText(x+ww-13,y+4,"X",K.BLACK,K.GRAY)
-        R.drawW95Raised(x,y,ww,hh); R.fillRect(x+2,y+17,ww-4,hh-19,K.GRAY)
-        if w.onDraw then pcall(w.onDraw,w,x+3,y+18,ww-6,hh-21) end
-        -- Resize grip
+        R.drawW95Raised(x,y,ww,hh)
         if not w.maximized then
             R.fillRect(x+ww-6, y+hh-6, 6, 6, K.DGRAY)
         end
@@ -241,7 +244,22 @@ function D.drawAll()
         D._drawFull(); D.dirty=false; D._contentWin=nil; D._clockDirty=false
     else
         if D._contentWin then local w=D._contentWin
-            if w.visible then R.fillRect(w.cx+2,w.cy+17,w.cw-4,w.ch-19,K.GRAY); if w.onDraw then pcall(w.onDraw,w,w.cx+3,w.cy+18,w.cw-6,w.ch-21) end end
+            if w.visible then
+                R.fillRect(w.cx+2,w.cy+17,w.cw-4,w.ch-19,K.GRAY)
+                if w.onDraw then pcall(w.onDraw,w,w.cx+3,w.cy+18,w.cw-6,w.ch-21) end
+                -- Redraw frame to clip any content overflow
+                local x,y,ww,hh=w.cx,w.cy,w.cw,w.ch; local by=R.h-D.taskbarH; if y+hh>by then hh=math.max(20,by-y) end
+                local act=D.activeWin and D.activeWin.id==w.id
+                R.fillRect(x,y,ww,18,act and K.DBLUE or K.GRAY)
+                R.drawText(x+4,y+4,w.title,act and K.WHITE or K.LGRAY,act and K.DBLUE or K.GRAY)
+                R.drawButton(x+ww-54,y+1,16,14,false); R.drawText(x+ww-49,y+4,"_",K.BLACK,K.GRAY)
+                R.drawButton(x+ww-36,y+1,16,14,false); R.drawText(x+ww-31,y+4,"[]",K.BLACK,K.GRAY)
+                R.drawButton(x+ww-18,y+1,16,14,false); R.drawText(x+ww-13,y+4,"X",K.BLACK,K.GRAY)
+                R.drawW95Raised(x,y,ww,hh)
+                if not w.maximized then
+                    R.fillRect(x+ww-6, y+hh-6, 6, 6, K.DGRAY)
+                end
+            end
             D._contentWin=nil
         end
         if D._clockDirty then local by=R.h-D.taskbarH; R.fillRect(R.w-48,by+3,44,14,K.GRAY); R.drawW95Sunken(R.w-48,by+3,44,14); R.drawText(R.w-44,by+6,D.clock,K.BLACK,K.GRAY); D._clockDirty=false end
