@@ -77,17 +77,28 @@ local function appPkgMan()
         R.drawText(cx+4,cy+3,"Refresh",K.BLACK,K.GRAY)
         R.drawText(cx+58,cy+3,status,K.BLACK,K.GRAY)
         local lh = math.floor((ch-28)/8)
+        -- Pre-scan hover to avoid dual highlight with keyboard selection
+        local hasHit = false
+        for i=1,lh do
+            local idx=scroll+i; local pkg=packages[idx]
+            if not pkg then break end
+            local iy=cy+16+(i-1)*8
+            if D.mouse.x>=cx+2 and D.mouse.x<cx+cw-2 and D.mouse.y>=iy and D.mouse.y<iy+8 then
+                hasHit = true; break
+            end
+        end
         for i=1,lh do
             local idx=scroll+i; local pkg=packages[idx]
             if not pkg then break end
             local iy=cy+16+(i-1)*8
             local hit=D.mouse.x>=cx+2 and D.mouse.x<cx+cw-2 and D.mouse.y>=iy and D.mouse.y<iy+8
-            local active = idx==sel or hit
+            local active = (hasHit and hit) or (not hasHit and idx==sel)
             if active then R.fillRect(cx+2,iy,cw-4,8,K.DBLUE) end
             local mark = installed[pkg.name] and "[+] " or "[ ] "
             local text = mark .. pkg.title .. " - " .. pkg.desc
             R.drawText(cx+4,iy,text:sub(1,math.floor((cw-8)/6)),active and K.WHITE or K.BLACK,active and K.DBLUE or K.GRAY)
         end
+    end
     end
 
     w.onClick = function(_,mx,my)

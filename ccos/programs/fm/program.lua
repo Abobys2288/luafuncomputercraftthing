@@ -36,13 +36,25 @@ local function appFM()
         R.drawButton(cx+96, cy, 40, 14, false)
         R.drawText(cx+100, cy+3, "Delete", K.BLACK, K.GRAY)
         local lh = math.floor((ch-24)/8)
+        -- Pre-scan hover to avoid dual highlight with keyboard selection
+        local hasHover = false
+        for i=1, lh do
+            local idx = scroll + i
+            local it = items[idx]
+            if not it then break end
+            local iy = cy + 16 + (i-1)*8
+            if D.mouse.x>=cx+2 and D.mouse.x<cx+cw-2 and D.mouse.y>=iy-1 and D.mouse.y<iy+8 then
+                hasHover = true; break
+            end
+        end
         for i=1, lh do
             local idx = scroll + i
             local it = items[idx]
             if not it then break end
             local iy = cy + 16 + (i-1)*8
             local hover = D.mouse.x>=cx+2 and D.mouse.x<cx+cw-2 and D.mouse.y>=iy-1 and D.mouse.y<iy+8
-            if idx==sel or hover then
+            local active = (hasHover and hover) or (not hasHover and idx==sel)
+            if active then
                 R.fillRect(cx+2, iy-1, cw-4, 9, K.DBLUE)
                 R.drawText(cx+4, iy, it, K.WHITE, K.DBLUE)
             else

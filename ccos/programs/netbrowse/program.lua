@@ -39,12 +39,23 @@ local function appNetBrowse()
         local list = {}
         for id,name in pairs(peers) do table.insert(list,{id=id,name=name}) end
         table.sort(list,function(a,b) return a.id < b.id end)
+        -- Pre-scan hover to avoid dual highlight with keyboard selection
+        local hasHit = false
+        for i=1,lh do
+            local idx=scroll+i; local p=list[idx]
+            if not p then break end
+            local iy=cy+16+(i-1)*8
+            if D.mouse.x>=cx+2 and D.mouse.x<cx+cw-2 and D.mouse.y>=iy and D.mouse.y<iy+8 then
+                hasHit = true; break
+            end
+        end
         for i=1,lh do
             local idx=scroll+i; local p=list[idx]
             if not p then break end
             local iy=cy+16+(i-1)*8
             local hit=D.mouse.x>=cx+2 and D.mouse.x<cx+cw-2 and D.mouse.y>=iy and D.mouse.y<iy+8
-            if idx==sel or hit then R.fillRect(cx+2,iy,cw-4,8,K.DBLUE); R.drawText(cx+4,iy,p.name.." ("..p.id..")",K.WHITE,K.DBLUE)
+            local active = (hasHit and hit) or (not hasHit and idx==sel)
+            if active then R.fillRect(cx+2,iy,cw-4,8,K.DBLUE); R.drawText(cx+4,iy,p.name.." ("..p.id..")",K.WHITE,K.DBLUE)
             else R.drawText(cx+4,iy,p.name.." ("..p.id..")",K.BLACK,K.GRAY) end
         end
     end

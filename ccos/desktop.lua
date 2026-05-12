@@ -152,6 +152,25 @@ function D.inputDialog(title,prompt,default,callback)
     return w
 end
 
+function D._startMenuMetrics()
+    local by = R.h - D.taskbarH
+    local mw = 140
+    local totalItems = #D.programs + 2
+    local itemH = 14
+    local pad = 4
+    local contentHeight = totalItems * itemH + pad * 2
+    local maxH = by - 4
+    local mh = math.min(maxH, math.max(64, contentHeight))
+    local my = by - mh
+    if my < 4 then my = 4; mh = by - 4 end
+    local sx = 2
+    local innerY = my + pad
+    local innerH = mh - pad * 2
+    local maxVisible = math.floor(innerH / itemH)
+    local needsScroll = totalItems > maxVisible
+    return mw, mh, my, sx, innerY, innerH, maxVisible, totalItems, itemH, pad, needsScroll
+end
+
 -- ============================================================
 -- DRAW
 -- ============================================================
@@ -168,11 +187,17 @@ function D._drawFull()
         local ix,iy=8+col*(iw+10),8+row*(ih+8)
         if iy+ih>by then break end
         local hover=D.mouse.x>=ix-2 and D.mouse.x<ix+iw+2 and D.mouse.y>=iy-2 and D.mouse.y<iy+ih+2
-        if hover then R.fillRect(ix-2,iy-2,iw+4,ih+4,K.DBLUE) end
-        R.fillRect(ix,iy,iw,24,K.LGRAY); R.drawW95Sunken(ix,iy,iw,24)
-        R.drawText(ix+math.floor((iw-6)/2),iy+7,prog.name:sub(1,1):upper(),K.DBLUE,K.LGRAY)
         local lab=prog.name; if #lab>8 then lab=lab:sub(1,7)..".." end
-        R.drawText(ix+math.floor((iw-#lab*6)/2),iy+28,lab,K.WHITE,K.DESKTOP)
+        if hover then
+            R.fillRect(ix-2,iy-2,iw+4,ih+4,K.DBLUE)
+            R.fillRect(ix,iy,iw,24,K.LGRAY); R.drawW95Sunken(ix,iy,iw,24)
+            R.drawText(ix+math.floor((iw-6)/2),iy+7,prog.name:sub(1,1):upper(),K.DBLUE,K.LGRAY)
+            R.drawText(ix+math.floor((iw-#lab*6)/2),iy+28,lab,K.WHITE,K.DBLUE)
+        else
+            R.fillRect(ix,iy,iw,24,K.LGRAY); R.drawW95Sunken(ix,iy,iw,24)
+            R.drawText(ix+math.floor((iw-6)/2),iy+7,prog.name:sub(1,1):upper(),K.DBLUE,K.LGRAY)
+            R.drawText(ix+math.floor((iw-#lab*6)/2),iy+28,lab,K.WHITE,K.DESKTOP)
+        end
     end
 
     -- Windows
@@ -208,29 +233,40 @@ function D._drawFull()
 
     -- Start Menu
     if D.startMenuOpen then
-        local mw=140; local totalItems=#D.programs+2; local itemH=12
-        local contentHeight=totalItems*itemH+6; local available=by-10
-        local mh=math.min(available,math.max(96,contentHeight)); local my=(by+2)-mh; if my<1 then my=1 end
-        local sx=2; R.fillRect(sx,my,mw,mh,K.GRAY); R.drawW95Raised(sx,my,mw,mh)
-        R.fillRect(sx+2,my+2,20,mh-4,K.DBLUE); R.drawText(sx+3,my+30,"CC",K.WHITE,K.DBLUE)
-        local maxVisible=math.floor((mh-8)/itemH); local needsScroll=totalItems>maxVisible
+        local mw, mh, my, sx, innerY, innerH, maxVisible, totalItems, itemH, pad, needsScroll = D._startMenuMetrics()
+        R.fillRect(sx, my, mw, mh, K.GRAY)
+        R.drawW95Raised(sx, my, mw, mh)
+        -- Sidebar
+        R.fillRect(sx + 2, my + 2, 20, mh - 4, K.DBLUE)
+        R.drawText(sx + 3, my + math.floor(mh / 2) - 4, "CC", K.WHITE, K.DBLUE)
+        -- Scrollbar
         if needsScroll then
-            local barH=math.max(8,math.floor(mh*maxVisible/totalItems))
-            local barY=my+4+math.floor((mh-8-barH)*D.startMenuScroll/(totalItems-maxVisible))
-            R.fillRect(sx+mw-6,barY,4,barH,K.DGRAY)
-        else D.startMenuScroll=0 end
-        local firstItem=D.startMenuScroll+1; local lastItem=math.min(totalItems,maxVisible+D.startMenuScroll)
-        local iy=my+4; if needsScroll then iy=iy+14 end
-        for idx=firstItem,lastItem do
+            local barH = math.max(8, math.floor(innerH * maxVisible / totalItems))
+            local barY = innerY + math.floor((innerH - barH) * D.startMenuScroll / (totalItems - maxVisible))
+            R.fillRect(sx + mw - 6, barY, 4, barH, K.DGRAY)
+        else
+            D.startMenuScroll = 0
+        end
+        local firstItem = D.startMenuScroll + 1
+        local lastItem = math.min(totalItems, maxVisible + D.startMenuScroll)
+        -- Detect if mouse is hovering any item
+        local hasHit = false
+        for idx = firstItem, lastItem do
+            local iy = innerY + (idx - firstItem) * itemH
+            if D.mouse.x >= sx + 24 and D.mouse.x < sx + mw - 8 and D.mouse.y >= iy and D.mouse.y < iy + itemH then
+                hasHit = true; break
+            end
+        end
+        for idx = firstItem, lastItem do
+            local iy = innerY + (idx - firstItem) * itemH
             local label = ""
-            if idx<=#D.programs then label = D.programs[idx].name
-            elseif idx==#D.programs+1 then label = "Reboot"
-            elseif idx==#D.programs+2 then label = "Shutdown" end
-            local hit=D.mouse.x>=sx+24 and D.mouse.x<sx+mw-8 and D.mouse.y>=iy and D.mouse.y<iy+itemH
-            local active = hit or (idx == D.startMenuSel)
-            if active then R.fillRect(sx+24,iy,mw-32,itemH,K.DBLUE) end
-            R.drawText(sx+28,iy+2,label,active and K.WHITE or K.BLACK,active and K.DBLUE or K.GRAY)
-            iy=iy+itemH
+            if idx <= #D.programs then label = D.programs[idx].name
+            elseif idx == #D.programs + 1 then label = "Reboot"
+            elseif idx == #D.programs + 2 then label = "Shutdown" end
+            local hit = D.mouse.x >= sx + 24 and D.mouse.x < sx + mw - 8 and D.mouse.y >= iy and D.mouse.y < iy + itemH
+            local active = (hasHit and hit) or (not hasHit and idx == D.startMenuSel)
+            if active then R.fillRect(sx + 24, iy, mw - 32, itemH, K.DBLUE) end
+            R.drawText(sx + 28, iy + 2, label, active and K.WHITE or K.BLACK, active and K.DBLUE or K.GRAY)
         end
     end
 
@@ -278,24 +314,24 @@ function D.click(mx,my)
     end
     -- Start menu
     if D.startMenuOpen then
-        local mw=140; local totalItems=#D.programs+2; local itemH=12
-        local contentHeight=totalItems*itemH+6; local available=by-10
-        local mh=math.min(available,math.max(96,contentHeight)); local my2=(by+2)-mh; if my2<1 then my2=1 end
-        if mx>=2 and mx<2+mw and my>=my2 and my<my2+mh then
-            local maxVisible=math.floor((mh-8)/itemH); local needsScroll=totalItems>maxVisible
-            local firstItem=D.startMenuScroll+1; local itemY=my2+4; if needsScroll then itemY=itemY+14 end
-            for idx=firstItem,totalItems do
-                if my>=itemY and my<itemY+itemH then
-                    D.startMenuSel=idx
-                    if idx<=#D.programs then D.startMenuOpen=false; D.startMenuScroll=0; D.markDirty(); D.safeRun(D.programs[idx].run)
-                    elseif idx==#D.programs+1 then D.startMenuOpen=false; D.startMenuScroll=0; D.markDirty(); os.reboot()
-                    elseif idx==#D.programs+2 then D.startMenuOpen=false; D.startMenuScroll=0; D.markDirty(); os.shutdown() end
+        local mw, mh, my2, sx, innerY, innerH, maxVisible, totalItems, itemH, pad, needsScroll = D._startMenuMetrics()
+        if mx >= sx and mx < sx + mw and my >= my2 and my < my2 + mh then
+            local firstItem = D.startMenuScroll + 1
+            for idx = firstItem, totalItems do
+                local iy = innerY + (idx - firstItem) * itemH
+                if my >= iy and my < iy + itemH then
+                    D.startMenuSel = idx
+                    if idx <= #D.programs then D.startMenuOpen = false; D.startMenuScroll = 0; D.markDirty(); D.safeRun(D.programs[idx].run)
+                    elseif idx == #D.programs + 1 then D.startMenuOpen = false; D.startMenuScroll = 0; D.markDirty(); os.reboot()
+                    elseif idx == #D.programs + 2 then D.startMenuOpen = false; D.startMenuScroll = 0; D.markDirty(); os.shutdown() end
                     return nil
                 end
-                itemY=itemY+itemH
             end
             return nil
-        else D.startMenuOpen=false; D.startMenuScroll=0; D.markDirty() end
+        else
+            D.startMenuOpen = false; D.startMenuScroll = 0; D.markDirty()
+            return nil -- prevent click-through to desktop icons
+        end
     end
     -- Taskbar
     if my>=by then local bx=60; for _,w in ipairs(D.windows) do local bw=math.min(100,R.w-bx-55); if bw<25 then break end
@@ -361,10 +397,7 @@ function D.run()
             elseif e=="mouse_up" then D.drop()
             elseif e=="key" then
                 if D.startMenuOpen then
-                    local totalItems=#D.programs+2
-                    local by=R.h-D.taskbarH; local available=by-10
-                    local mh=math.min(available,math.max(96,totalItems*12+6))
-                    local maxVisible=math.floor((mh-8)/12)
+                    local mw, mh, my, sx, innerY, innerH, maxVisible, totalItems, itemH, pad, needsScroll = D._startMenuMetrics()
                     if a==keys.up then
                         D.startMenuSel = math.max(1, D.startMenuSel - 1)
                         if D.startMenuSel <= D.startMenuScroll + 1 then D.startMenuScroll = math.max(0, D.startMenuSel - 1) end
