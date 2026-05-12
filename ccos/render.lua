@@ -1,18 +1,12 @@
---[[
-    CCOS Render Engine
-    ==================
-    All drawing functions.
-]]
-
 local R = {}
 
 R.hasGraphics = term.setGraphicsMode ~= nil
+R.hasDrawPixels = term.drawPixels ~= nil
+R.hasFrozen = term.setFrozen ~= nil
 R.isColor = term.isColor and term.isColor() or false
 R.w, R.h = 0, 0
 R.display = term
 R.mode = 0
-
--- Color constants (will be set after palette init)
 R.PAL = {}
 
 -- Full 32-color W95 palette (indices 0-31)
@@ -61,11 +55,12 @@ function R.init()
         end
         R.w, R.h = R.display.getSize(1)
         R.mode = 2
+        R.hasDrawPixels = R.display.drawPixels ~= nil
+        R.hasFrozen = R.display.setFrozen ~= nil
     else
         R.w, R.h = R.display.getSize()
     end
 
-    -- Set up color constants after palette is loaded
     R.PAL = {
         BLACK=0, WHITE=1, GRAY=2, LIGHT_GRAY=3, DARK_GRAY=4,
         BLUE=5, DARK_BLUE=6, CYAN=7, LIGHT_BLUE=8,
@@ -74,45 +69,86 @@ function R.init()
         DARK_TITLE=18, W95_TITLE_BLUE=19, W95_TITLE_INACTIVE=20,
         PURE_BLUE=21, ALMOST_WHITE=22, NEAR_BLACK=23, MID_GRAY=24,
         BUTTON_FACE=25, BUTTON_HI=26, DEEP_NAVY=27, BTNFACE_DARK=28,
-        DARK_GREEN_BG=29, W95_DESKTOP=30, LIGHT_BG=2,  -- LIGHT_BG = GRAY
+        DARK_GREEN_BG=29, W95_DESKTOP=30, LIGHT_BG=2,
     }
+
+    if R.hasDrawPixels then
+        R._charBuf = {}
+        for row = 1, 8 do
+            R._charBuf[row] = {0, 0, 0, 0, 0, 0}
+        end
+    end
+end
+
+-- Freeze/unfreeze display during batch drawing
+function R.beginDraw()
+    if R.mode > 0 and R.hasFrozen then
+        pcall(function() R.display.setFrozen(true) end)
+    end
+end
+
+function R.endDraw()
+    if R.mode > 0 and R.hasFrozen then
+        pcall(function() R.display.setFrozen(false) end)
+    end
 end
 
 -- Basic pixel operations
 function R.setPixel(x, y, color)
     if R.mode == 0 then return end
-    pcall(function() R.display.setPixel(x-1, y-1, color) end)
+    if x < 1 or y < 1 or x > R.w or y > R.h then return end
+    R.display.setPixel(x-1, y-1, color)
 end
 
+-- fillRect optimized with drawPixels (1 API call instead of w*h setPixel calls)
 function R.fillRect(x, y, w, h, color)
     if R.mode == 0 or w <= 0 or h <= 0 then return end
-    for row = 0, h-1 do
-        for col = 0, w-1 do
-            R.setPixel(x+col, y+row, color)
+    if x < 1 then w = w + x - 1; x = 1 end
+    if y < 1 then h = h + y - 1; y = 1 end
+    if x + w - 1 > R.w then w = R.w - x + 1 end
+    if y + h - 1 > R.h then h = R.h - y + 1 end
+    if w <= 0 or h <= 0 then return end
+    if R.hasDrawPixels then
+        R.display.drawPixels(x-1, y-1, color, w, h)
+    else
+        for row = 0, h-1 do
+            for col = 0, w-1 do
+                R.setPixel(x+col, y+row, color)
+            end
         end
     end
 end
 
+-- drawLine optimized: horizontal/vertical lines use fillRect
 function R.drawLine(x1, y1, x2, y2, color)
     if R.mode == 0 then return end
-    local dx, dy = math.abs(x2-x1), math.abs(y2-y1)
-    local sx, sy = x1<x2 and 1 or -1, y1<y2 and 1 or -1
-    local err = dx - dy
-    while true do
-        R.setPixel(x1, y1, color)
-        if x1==x2 and y1==y2 then break end
-        local e2 = 2*err
-        if e2 > -dy then err = err-dy; x1 = x1+sx end
-        if e2 < dx then err = err+dx; y1 = y1+sy end
+    if y1 == y2 then
+        local x = math.min(x1, x2)
+        R.fillRect(x, y1, math.abs(x2-x1)+1, 1, color)
+    elseif x1 == x2 then
+        local y = math.min(y1, y2)
+        R.fillRect(x1, y, 1, math.abs(y2-y1)+1, color)
+    else
+        local dx, dy = math.abs(x2-x1), math.abs(y2-y1)
+        local sx, sy = x1<x2 and 1 or -1, y1<y2 and 1 or -1
+        local err = dx - dy
+        while true do
+            R.setPixel(x1, y1, color)
+            if x1==x2 and y1==y2 then break end
+            local e2 = 2*err
+            if e2 > -dy then err = err-dy; x1 = x1+sx end
+            if e2 < dx then err = err+dx; y1 = y1+sy end
+        end
     end
 end
 
+-- drawRect optimized: 4 fillRect calls
 function R.drawRect(x, y, w, h, color)
-    if R.mode == 0 then return end
-    R.drawLine(x, y, x+w-1, y, color)
-    R.drawLine(x, y+h-1, x+w-1, y+h-1, color)
-    R.drawLine(x, y, x, y+h-1, color)
-    R.drawLine(x+w-1, y, x+w-1, y+h-1, color)
+    if R.mode == 0 or w <= 0 or h <= 0 then return end
+    R.fillRect(x, y, w, 1, color)
+    R.fillRect(x, y+h-1, w, 1, color)
+    R.fillRect(x, y, 1, h, color)
+    R.fillRect(x+w-1, y, 1, h, color)
 end
 
 function R.drawW95Raised(x, y, w, h)
@@ -207,6 +243,7 @@ R.FONT = {
     ["}"]={12,2,2,1,2,2,12},
 }
 
+-- drawText optimized with drawPixels per character (1 call per char instead of 35 setPixel calls)
 function R.drawText(x, y, text, fg, bg)
     if R.mode == 0 then
         R.display.setCursorPos(x, y)
@@ -218,22 +255,44 @@ function R.drawText(x, y, text, fg, bg)
         if R.isColor then R.display.setTextColor(colors.white); R.display.setBackgroundColor(colors.black) end
         return
     end
-    local cx = x
-    for i = 1, #text do
-        local ch = text:sub(i,i):upper()
-        local glyph = R.FONT[ch] or R.FONT["?"]
-        for row = 1, 7 do
-            local bits = glyph[row]
-            for col = 4, 0, -1 do
-                local mask = 2^col
-                if math.floor(bits / mask) % 2 == 1 then
-                    R.setPixel(cx+(4-col), y+row-1, fg)
-                elseif bg then
-                    R.setPixel(cx+(4-col), y+row-1, bg)
+    if R.hasDrawPixels and R._charBuf and bg ~= nil then
+        local cx = x
+        local buf = R._charBuf
+        for i = 1, #text do
+            local ch = text:sub(i,i):upper()
+            local glyph = R.FONT[ch] or R.FONT["?"]
+            for row = 1, 7 do
+                local bits = glyph[row]
+                local rd = buf[row]
+                for col = 0, 4 do
+                    local mask = 2^col
+                    rd[col+1] = (math.floor(bits / mask) % 2 == 1) and fg or bg
+                end
+                rd[6] = bg
+            end
+            buf[8][1]=bg; buf[8][2]=bg; buf[8][3]=bg
+            buf[8][4]=bg; buf[8][5]=bg; buf[8][6]=bg
+            R.display.drawPixels(cx-1, y-1, buf)
+            cx = cx + 6
+        end
+    else
+        local cx = x
+        for i = 1, #text do
+            local ch = text:sub(i,i):upper()
+            local glyph = R.FONT[ch] or R.FONT["?"]
+            for row = 1, 7 do
+                local bits = glyph[row]
+                for col = 4, 0, -1 do
+                    local mask = 2^col
+                    if math.floor(bits / mask) % 2 == 1 then
+                        R.setPixel(cx+(4-col), y+row-1, fg)
+                    elseif bg then
+                        R.setPixel(cx+(4-col), y+row-1, bg)
+                    end
                 end
             end
+            cx = cx + 6
         end
-        cx = cx + 6
     end
 end
 

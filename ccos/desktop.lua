@@ -1,8 +1,11 @@
 --[[
-    CCOS Desktop v14 — MINIMAL WORKING VERSION
-    ==========================================
-    This version is guaranteed to work.
-    Copy this file and reboot your Computer in Minecraft.
+    CCOS Desktop v15 — OPTIMIZED
+    =============================
+    - Non-blocking input dialogs (callback-based, no nested event loops)
+    - Partial redraws: only redraw active window content when typing
+    - setFrozen beginDraw/endDraw: zero flicker
+    - drawPixels fillRect: massively faster rendering
+    - Adaptive window sizes for small screens (156x180)
 ]]
 
 local R = _G.ccos_render
@@ -21,6 +24,8 @@ D.dragOX = 0
 D.dragOY = 0
 D.mouse = {x=0,y=0}
 D.dirty = true
+D._contentWin = nil
+D._clockDirty = false
 
 local function getDir(p) if not p or p=="/" then return "/" end local t={} for s in p:gmatch("[^/]+") do t[#t+1]=s end if #t<=1 then return "/" end t[#t]=nil return "/"..table.concat(t,"/") end
 local function getFileName(p) if not p or p=="/" then return "" end local l=nil for s in p:gmatch("[^/]+") do l=s end return l or "" end
@@ -28,47 +33,56 @@ local function readFile(p) if not fs.exists(p) then return nil end local f=fs.op
 local function writeFile(p,c) local f=fs.open(p,"w") if not f then return false end f.write(c) f.close() return true end
 
 function D.markDirty() D.dirty = true end
+function D.markContentDirty(win) D._contentWin = win end
+function D.markClockDirty() D._clockDirty = true end
 
--- Simple input dialog
-local function simpleInput(title, prompt, default)
+-- Adaptive window sizing
+local function fitWin(ww, wh)
+    ww = math.min(ww, R.w - 4)
+    wh = math.min(wh, R.h - D.taskbarH - 4)
+    local x = math.max(1, math.floor((R.w - ww) / 2))
+    local y = math.max(1, math.floor((R.h - D.taskbarH - wh) / 2))
+    return x, y, ww, wh
+end
+
+-- Non-blocking input dialog (callback-based, integrates with main loop)
+function D.inputDialog(title, prompt, default, callback)
     default = default or ""
     local input = default
-    local result = nil
-    local w = D.createWindow(title, 30, 30, 240, 80)
+    local ww = math.min(240, R.w - 10)
+    local wh = math.min(80, R.h - D.taskbarH - 10)
+    local wx, wy = fitWin(ww, wh)
+    local w = D.createWindow(title, wx, wy, ww, wh)
 
     w.onDraw = function(win, cx, cy, cw, ch)
-        R.drawText(cx+4, cy+4, prompt, K.BLACK)
+        R.drawText(cx+4, cy+4, prompt, K.BLACK, K.GRAY)
         R.drawW95Sunken(cx+4, cy+18, cw-8, 16)
-        R.drawText(cx+6, cy+20, input .. "_", K.BLACK)
-        R.drawText(cx+4, cy+42, "Enter=OK  Esc=Cancel", K.BLACK)
+        R.drawText(cx+6, cy+20, input .. "_", K.BLACK, K.GRAY)
+        R.drawText(cx+4, cy+42, "Enter=OK  Esc=Cancel", K.BLACK, K.GRAY)
     end
 
     w.onKey = function(win, k, ch)
         if ch then
             input = input .. ch
-            D.markDirty()
+            D.markContentDirty(win)
         elseif k == keys.backspace then
             input = input:sub(1, -2)
-            D.markDirty()
+            D.markContentDirty(win)
         elseif k == keys.enter then
-            result = input ~= "" and input or nil
-            D.destroyWindow(win)
+            local result = input ~= "" and input or nil
+            D.destroyWindow(w)
+            if callback then callback(result) end
         elseif k == keys.escape then
-            result = nil
-            D.destroyWindow(win)
+            D.destroyWindow(w)
+            if callback then callback(nil) end
         end
     end
-
-    while w.visible do
-        D.drawAll()
-        os.pullEvent()
-    end
-    return result
+    return w
 end
 
 function D.createWindow(title,cx,cy,cw,ch)
     local id = D.nextWinId D.nextWinId = id + 1
-    local w = {id=id,title=title or "Win",cx=cx or 30,cy=cy or 20,cw=cw or 200,ch=ch or 120,visible=true,minimized=false,onDraw=nil,onKey=nil,onClick=nil}
+    local w = {id=id,title=title or "Win",cx=cx or 30,cy=cy or 20,cw=cw or 200,ch=ch or 120,visible=true,minimized=false,onDraw=nil,onKey=nil,onClick=nil,onDoubleClick=nil}
     table.insert(D.windows,w) D.activeWin = w D.markDirty() return w
 end
 
@@ -88,10 +102,11 @@ function D.winAt(mx,my)
     return nil
 end
 
-function D.drawAll()
-    if not D.dirty then return end
+-- Full screen redraw
+function D._drawFull()
     R.clear()
     local by = R.h - D.taskbarH
+    -- Desktop background
     R.fillRect(0,0,R.w,by,K.DESKTOP)
     -- Desktop icons
     local icons = {{"Files","files"},{"Editor","edit"},{"Settings","settings"},{"Shell","shell"}}
@@ -104,7 +119,8 @@ function D.drawAll()
         local hover = D.mouse.x>=ix-2 and D.mouse.x<ix+iw+2 and D.mouse.y>=iy-2 and D.mouse.y<iy+ih+2
         if hover then R.fillRect(ix-2,iy-2,iw+4,ih+4,K.DBLUE) end
         R.fillRect(ix,iy,iw,24,K.LGRAY) R.drawW95Sunken(ix,iy,iw,24)
-        R.drawText(ix+16,iy+7,icon[1]:sub(1,1),K.DBLUE) R.drawText(ix,iy+28,icon[1],K.WHITE)
+        R.drawText(ix+16,iy+7,icon[1]:sub(1,1),K.DBLUE,K.LGRAY)
+        R.drawText(ix,iy+28,icon[1],K.WHITE,K.DESKTOP)
     end
     -- Windows
     for _,w in ipairs(D.windows) do if w.visible and not w.minimized then
@@ -113,10 +129,13 @@ function D.drawAll()
         R.fillRect(x,y,ww,hh,K.GRAY)
         local act = D.activeWin and D.activeWin.id == w.id
         R.fillRect(x,y,ww,18,act and K.DBLUE or K.GRAY)
-        R.drawText(x+4,y+4,w.title,act and K.WHITE or K.LGRAY)
-        R.drawButton(x+ww-54,y+1,16,14,false) R.drawText(x+ww-49,y+4,"_",K.BLACK)  -- Minimize
-        R.drawButton(x+ww-36,y+1,16,14,false) R.drawText(x+ww-31,y+4,"[]",K.BLACK)  -- Maximize
-        R.drawButton(x+ww-18,y+1,16,14,false) R.drawText(x+ww-13,y+4,"X",K.BLACK)  -- Close
+        R.drawText(x+4,y+4,w.title,act and K.WHITE or K.LGRAY,act and K.DBLUE or K.GRAY)
+        R.drawButton(x+ww-54,y+1,16,14,false)
+        R.drawText(x+ww-49,y+4,"_",K.BLACK,K.GRAY)
+        R.drawButton(x+ww-36,y+1,16,14,false)
+        R.drawText(x+ww-31,y+4,"[]",K.BLACK,K.GRAY)
+        R.drawButton(x+ww-18,y+1,16,14,false)
+        R.drawText(x+ww-13,y+4,"X",K.BLACK,K.GRAY)
         R.drawW95Raised(x,y,ww,hh)
         R.fillRect(x+2,y+17,ww-4,hh-19,K.GRAY)
         if w.onDraw then pcall(w.onDraw,w,x+3,y+18,ww-6,hh-21) end
@@ -125,7 +144,7 @@ function D.drawAll()
     R.fillRect(0,by,R.w,D.taskbarH,K.GRAY)
     R.drawLine(0,by,R.w-1,by,K.WHITE)
     R.drawButton(2,by+2,54,16,D.startMenuOpen)
-    R.drawText(6,by+6,"Start",K.BLACK)
+    R.drawText(6,by+6,"Start",K.BLACK,K.GRAY)
     local bx = 60
     for _,w in ipairs(D.windows) do
         local bw = math.min(100,R.w-bx-55) if bw<25 then break end
@@ -133,11 +152,11 @@ function D.drawAll()
         R.drawButton(bx,by+3,bw,14,active)
         local t = #w.title > 12 and w.title:sub(1,10)..".." or w.title
         if w.minimized then t = "("..t..")" end
-        R.drawText(bx+4,by+6,t,active and K.WHITE or K.BLACK)
+        R.drawText(bx+4,by+6,t,active and K.WHITE or K.BLACK,active and K.GRAY or K.GRAY)
         bx = bx + bw + 2
     end
     R.drawW95Sunken(R.w-48,by+3,44,14)
-    R.drawText(R.w-44,by+6,D.clock,K.BLACK)
+    R.drawText(R.w-44,by+6,D.clock,K.BLACK,K.GRAY)
     -- Start Menu
     if D.startMenuOpen then
         local mw,mh = 140,96
@@ -146,22 +165,51 @@ function D.drawAll()
         R.fillRect(sx,my,mw,mh,K.GRAY)
         R.drawW95Raised(sx,my,mw,mh)
         R.fillRect(sx+2,my+2,20,mh-4,K.DBLUE)
-        R.drawText(sx+3,my+30,"CC",K.WHITE)
+        R.drawText(sx+3,my+30,"CC",K.WHITE,K.DBLUE)
         local items = {{"File Manager","files"},{"Editor","edit"},{"Settings","settings"},{"Shell","shell"},{"Reboot","reboot"},{"Shutdown","shutdown"}}
         local iy = my + 4
         for _,it in ipairs(items) do
             local hit = D.mouse.x >= sx+24 and D.mouse.x < sx+mw-4 and D.mouse.y >= iy and D.mouse.y < iy+12
             if hit then R.fillRect(sx+24,iy,mw-28,12,K.DBLUE) end
-            R.drawText(sx+28,iy+2,it[1],hit and K.WHITE or K.BLACK)
+            R.drawText(sx+28,iy+2,it[1],hit and K.WHITE or K.BLACK,hit and K.DBLUE or K.GRAY)
             iy = iy + 14
         end
     end
-    D.dirty = false
+end
+
+function D.drawAll()
+    if not D.dirty and not D._contentWin and not D._clockDirty then return end
+    R.beginDraw()
+
+    local topWin = D.windows[#D.windows]
+    if D.dirty or (D._contentWin and D._contentWin ~= topWin) then
+        D._drawFull()
+        D.dirty = false
+        D._contentWin = nil
+        D._clockDirty = false
+    else
+        if D._contentWin then
+            local w = D._contentWin
+            if w.visible then
+                R.fillRect(w.cx+2, w.cy+17, w.cw-4, w.ch-19, K.GRAY)
+                if w.onDraw then pcall(w.onDraw, w, w.cx+3, w.cy+18, w.cw-6, w.ch-21) end
+            end
+            D._contentWin = nil
+        end
+        if D._clockDirty then
+            local by = R.h - D.taskbarH
+            R.fillRect(R.w-48, by+3, 44, 14, K.GRAY)
+            R.drawW95Sunken(R.w-48, by+3, 44, 14)
+            R.drawText(R.w-44, by+6, D.clock, K.BLACK, K.GRAY)
+            D._clockDirty = false
+        end
+    end
+
+    R.endDraw()
 end
 
 function D.click(mx,my)
     local by = R.h - D.taskbarH
-    -- Start Menu
     if D.startMenuOpen then
         local mw,mh = 140,96
         local my2 = (by+2)-mh if my2<1 then my2=1 end
@@ -179,13 +227,11 @@ function D.click(mx,my)
             D.startMenuOpen = false D.markDirty()
         end
     end
-    -- Start button
     if mx>=2 and mx<56 and my>=by+2 and my<by+18 then
         D.startMenuOpen = not D.startMenuOpen
         D.markDirty()
         return nil
     end
-    -- Taskbar
     if my >= by then
         local bx = 60
         for _,w in ipairs(D.windows) do
@@ -200,7 +246,6 @@ function D.click(mx,my)
         end
         return nil
     end
-    -- Windows
     local w = D.winAt(mx,my)
     if w then
         D.bringToFront(w)
@@ -218,7 +263,6 @@ function D.click(mx,my)
         if w.onClick then pcall(w.onClick,w,mx-w.cx-3,my-w.cy-18) end
         return nil
     end
-    -- Desktop icons
     local icons = {{"Files","files"},{"Editor","edit"},{"Settings","settings"},{"Shell","shell"}}
     local iw,ih = 48,42
     local cols = math.max(1,math.floor((R.w-10)/(iw+10)))
@@ -230,28 +274,23 @@ function D.click(mx,my)
     return nil
 end
 
+-- Real-time drag: move window immediately, mark dirty for redraw
 function D.drag(mx,my)
     local w = D.dragWin if not w then return end
-    local nx = mx - D.dragOX local ny = my - D.dragOY
-    if ny < 1 then ny = 1 end
-    local by = R.h - D.taskbarH if ny + w.ch > by + 1 then ny = by - w.ch + 2 end
-    if D.lastDragRect then local r = D.lastDragRect R.drawDragOutline(r.x,r.y,r.w,r.h) end
-    R.drawDragOutline(nx,ny,w.cw,w.ch)
-    D.lastDragRect = {x=nx,y=ny,w=w.cw,h=w.ch}
+    w.cx = mx - D.dragOX
+    w.cy = my - D.dragOY
+    if w.cy < 1 then w.cy = 1 end
+    local by = R.h - D.taskbarH
+    if w.cy + w.ch > by + 1 then w.cy = by - w.ch + 2 end
+    D.markDirty()
 end
 
 function D.drop()
-    if D.dragWin then
-        local w = D.dragWin
-        w.cx = D.mouse.x - D.dragOX w.cy = D.mouse.y - D.dragOY
-        if w.cy < 1 then w.cy = 1 end
-        local by = R.h - D.taskbarH if w.cy + w.ch > by + 1 then w.cy = by - w.ch + 2 end
-        D.dragWin = nil D.lastDragRect = nil D.markDirty()
-    end
+    D.dragWin = nil
 end
 
 -- ============================================
--- APPS (MINIMAL)
+-- APPS
 -- ============================================
 function D.appFM()
     local path = "/" local sel = 1 local scroll = 0 local items = {}
@@ -266,11 +305,12 @@ function D.appFM()
         sel = math.max(1,math.min(sel,#items))
     end
     refresh()
-    local w = D.createWindow("File Manager",20,15,260,160)
+    local wx, wy, ww, wh = fitWin(260, 160)
+    local w = D.createWindow("File Manager",wx,wy,ww,wh)
     w.onDraw = function(win,cx,cy,cw,ch)
-        R.drawButton(cx,cy,40,14,false) R.drawText(cx+4,cy+3,"New",K.BLACK)
-        R.drawButton(cx+42,cy,52,14,false) R.drawText(cx+46,cy+3,"New Dir",K.BLACK)
-        R.drawButton(cx+96,cy,40,14,false) R.drawText(cx+100,cy+3,"Delete",K.BLACK)
+        R.drawButton(cx,cy,40,14,false) R.drawText(cx+4,cy+3,"New",K.BLACK,K.GRAY)
+        R.drawButton(cx+42,cy,52,14,false) R.drawText(cx+46,cy+3,"New Dir",K.BLACK,K.GRAY)
+        R.drawButton(cx+96,cy,40,14,false) R.drawText(cx+100,cy+3,"Delete",K.BLACK,K.GRAY)
         local lh = math.floor((ch-24)/8)
         for i=1,lh do
             local idx=scroll+i local it=items[idx]
@@ -279,30 +319,29 @@ function D.appFM()
             local hover = D.mouse.x>=cx+2 and D.mouse.x<cx+cw-2 and D.mouse.y>=iy-1 and D.mouse.y<iy+8
             if idx==sel or hover then
                 R.fillRect(cx+2,iy-1,cw-4,9,K.DBLUE)
-                R.drawText(cx+4,iy,it,K.WHITE)
+                R.drawText(cx+4,iy,it,K.WHITE,K.DBLUE)
             else
-                R.drawText(cx+4,iy,it,K.BLACK) end
+                R.drawText(cx+4,iy,it,K.BLACK,K.GRAY) end
         end
-        R.drawText(cx+2,cy+ch-10," "..path,K.BLACK)
+        R.drawText(cx+2,cy+ch-10," "..path,K.BLACK,K.GRAY)
     end
     w.onClick = function(win,mx,my)
         if my >= 0 and my < 14 then
             if mx >= 0 and mx < 40 then
-                -- NEW FILE
-                local name = simpleInput("New File", "Enter filename:", "newfile.txt")
-                if name then
-                    local fp = path=="/" and ("/"..name) or (path.."/"..name)
-                    writeFile(fp,"") refresh() D.markDirty()
-                end
+                D.inputDialog("New File", "Enter filename:", "newfile.txt", function(name)
+                    if name then
+                        local fp = path=="/" and ("/"..name) or (path.."/"..name)
+                        writeFile(fp,"") refresh() D.markDirty()
+                    end
+                end)
             elseif mx >= 42 and mx < 94 then
-                -- NEW DIR
-                local name = simpleInput("New Folder", "Enter folder name:", "newdir")
-                if name then
-                    local fp = path=="/" and ("/"..name) or (path.."/"..name)
-                    fs.makeDir(fp) refresh() D.markDirty()
-                end
+                D.inputDialog("New Folder", "Enter folder name:", "newdir", function(name)
+                    if name then
+                        local fp = path=="/" and ("/"..name) or (path.."/"..name)
+                        fs.makeDir(fp) refresh() D.markDirty()
+                    end
+                end)
             elseif mx >= 96 and mx < 136 then
-                -- DELETE
                 local it = items[sel]
                 if it and it ~= ".." then
                     local fp = path=="/" and ("/"..it) or (path.."/"..it)
@@ -316,7 +355,7 @@ function D.appFM()
         for i=1,lh do
             local idx = scroll + i
             local iy = 16 + (i-1)*8
-            if my >= iy-1 and my < iy+8 then sel=idx D.markDirty() return end
+            if my >= iy-1 and my < iy+8 then sel=idx D.markContentDirty(win) return end
         end
     end
     w.onDoubleClick = function(win,mx,my)
@@ -337,8 +376,8 @@ function D.appFM()
         end
     end
     w.onKey = function(win,k,ch)
-        if k==keys.up and sel>1 then sel=sel-1 if sel<=scroll then scroll=scroll-1 end D.markDirty()
-        elseif k==keys.down and sel<#items then sel=sel+1 local lh=math.floor((win.ch-24)/8) if sel>scroll+lh then scroll=scroll+1 end D.markDirty()
+        if k==keys.up and sel>1 then sel=sel-1 if sel<=scroll then scroll=scroll-1 end D.markContentDirty(win)
+        elseif k==keys.down and sel<#items then sel=sel+1 local lh=math.floor((win.ch-24)/8) if sel>scroll+lh then scroll=scroll+1 end D.markContentDirty(win)
         elseif k==keys.enter then
             local it=items[sel]
             if it then
@@ -361,27 +400,28 @@ function D.appEdit(fp)
     if #lines==0 then lines={""} end
     local cl,cc,sy = 1,1,0
     local mod = false
-    local w = D.createWindow("Edit: "..getFileName(fp),30,18,260,150)
+    local wx, wy, ww, wh = fitWin(260, 150)
+    local w = D.createWindow("Edit: "..getFileName(fp),wx,wy,ww,wh)
     w.onDraw = function(win,cx,cy,cw,ch)
-        R.drawButton(cx,cy,36,14,false) R.drawText(cx+2,cy+3,"Save",K.BLACK)
+        R.drawButton(cx,cy,36,14,false) R.drawText(cx+2,cy+3,"Save",K.BLACK,K.GRAY)
         local eh = math.floor((ch-24)/8)
-        for i=1,eh do R.drawText(cx+2,cy+16+(i-1)*8,lines[sy+i] or "",K.BLACK) end
+        for i=1,eh do R.drawText(cx+2,cy+16+(i-1)*8,lines[sy+i] or "",K.BLACK,K.GRAY) end
         if cl > sy and cl <= sy+eh then
             local cy2 = cy+16+(cl-sy-1)*8
             local cx2 = cx+(cc-1)*6
             if cx2 >= cx and cx2 < cx+cw then
                 R.fillRect(cx2,cy2,6,8,K.DBLUE)
                 local c2 = (lines[cl] or ""):sub(cc,cc)
-                R.drawText(cx2,cy2,c2=="" and " " or c2,K.WHITE)
+                R.drawText(cx2,cy2,c2=="" and " " or c2,K.WHITE,K.DBLUE)
             end
         end
-        R.drawText(cx+2,cy+ch-10,getFileName(fp)..(mod and " *" or ""),K.BLACK)
+        R.drawText(cx+2,cy+ch-10,getFileName(fp)..(mod and " *" or ""),K.BLACK,K.GRAY)
     end
     w.onClick = function(win,mx,my)
         if my >= 0 and my < 14 then
             if mx >= 0 and mx < 36 then
                 writeFile(fp,table.concat(lines,"\n"))
-                mod = false D.markDirty()
+                mod = false D.markContentDirty(win)
             end
         end
     end
@@ -391,7 +431,7 @@ function D.appEdit(fp)
             lines[cl] = l:sub(1,cc-1)..ch..l:sub(cc)
             cc = cc + 1
             mod = true
-            D.markDirty()  -- чтобы было видно, что печатаешь
+            D.markContentDirty(win)
         elseif k == keys.backspace then
             if cc > 1 then
                 local l = lines[cl] or ""
@@ -405,6 +445,7 @@ function D.appEdit(fp)
                 cc = pl + 1
             end
             mod = true
+            D.markContentDirty(win)
         elseif k == keys.enter then
             local l = lines[cl] or ""
             lines[cl] = l:sub(1,cc-1)
@@ -412,19 +453,24 @@ function D.appEdit(fp)
             cl = cl + 1
             cc = 1
             mod = true
+            D.markContentDirty(win)
         elseif k == keys.up and cl > 1 then
             cl = cl - 1
             cc = math.min(cc,#(lines[cl] or "") + 1)
             if cl <= sy then sy = sy - 1 end
+            D.markContentDirty(win)
         elseif k == keys.down and cl < #lines then
             cl = cl + 1
             cc = math.min(cc,#(lines[cl] or "") + 1)
             local eh = math.floor((win.ch-16)/8)
             if cl > sy + eh then sy = sy + 1 end
+            D.markContentDirty(win)
         elseif k == keys.left then
             if cc > 1 then cc = cc - 1 elseif cl > 1 then cl=cl-1 cc=#(lines[cl] or "")+1 end
+            D.markContentDirty(win)
         elseif k == keys.right then
             if cc <= #(lines[cl] or "") then cc = cc + 1 elseif cl < #lines then cl=cl+1 cc=1 end
+            D.markContentDirty(win)
         elseif k == keys.escape or k == keys.q then
             if mod then writeFile(fp,table.concat(lines,"\n")) end
             D.destroyWindow(win)
@@ -433,11 +479,12 @@ function D.appEdit(fp)
 end
 
 function D.appSettings()
-    local w = D.createWindow("Settings",50,30,200,110)
+    local wx, wy, ww, wh = fitWin(200, 110)
+    local w = D.createWindow("Settings",wx,wy,ww,wh)
     w.onDraw = function(win,cx,cy,cw,ch)
-        R.drawText(cx+4,cy+4,"Label: "..(os.getComputerLabel and os.getComputerLabel() or "None"),K.BLACK)
-        R.drawText(cx+4,cy+20,"Size: "..R.w.."x"..R.h,K.BLACK)
-        R.drawText(cx+4,cy+32,"Windows: "..#D.windows,K.BLACK)
+        R.drawText(cx+4,cy+4,"Label: "..(os.getComputerLabel and os.getComputerLabel() or "None"),K.BLACK,K.GRAY)
+        R.drawText(cx+4,cy+20,"Size: "..R.w.."x"..R.h,K.BLACK,K.GRAY)
+        R.drawText(cx+4,cy+32,"Windows: "..#D.windows,K.BLACK,K.GRAY)
     end
     w.onKey = function(win,k) if k==keys.escape or k==keys.q then D.destroyWindow(win) end end
 end
@@ -446,16 +493,17 @@ function D.appShell()
     local out = {"> Type 'help'"}
     local inp = ""
     local sy = 0
-    local w = D.createWindow("Shell",30,25,260,140)
+    local wx, wy, ww, wh = fitWin(260, 140)
+    local w = D.createWindow("Shell",wx,wy,ww,wh)
     w.onDraw = function(win,cx,cy,cw,ch)
         local ml = math.floor((ch-16)/8)
-        for i=1,ml do R.drawText(cx+2,cy+(i-1)*8,out[sy+i] or "",K.BLACK) end
+        for i=1,ml do R.drawText(cx+2,cy+(i-1)*8,out[sy+i] or "",K.BLACK,K.GRAY) end
         R.fillRect(cx,cy+ch-12,cw,10,K.GRAY)
-        R.drawText(cx+2,cy+ch-10,"> "..inp,K.BLACK)
+        R.drawText(cx+2,cy+ch-10,"> "..inp,K.BLACK,K.GRAY)
     end
     w.onKey = function(win,k,ch)
-        if ch then inp = inp..ch D.markDirty()
-        elseif k==keys.backspace then inp=inp:sub(1,-2) D.markDirty()
+        if ch then inp = inp..ch D.markContentDirty(win)
+        elseif k==keys.backspace then inp=inp:sub(1,-2) D.markContentDirty(win)
         elseif k==keys.enter then
             table.insert(out,"> "..inp)
             local cmd = inp inp = ""
@@ -474,9 +522,9 @@ function D.appShell()
             end
             local ml = math.floor((w.ch-16)/8)
             if #out > ml then sy = #out - ml end
-            D.markDirty()
-        elseif k==keys.up then if sy>0 then sy=sy-1 end D.markDirty()
-        elseif k==keys.down then local ml=math.floor((w.ch-16)/8) if sy < #out-ml then sy=sy+1 end D.markDirty()
+            D.markContentDirty(win)
+        elseif k==keys.up then if sy>0 then sy=sy-1 end D.markContentDirty(win)
+        elseif k==keys.down then local ml=math.floor((w.ch-16)/8) if sy < #out-ml then sy=sy+1 end D.markContentDirty(win)
         elseif k==keys.escape then D.destroyWindow(win) end
     end
 end
@@ -519,17 +567,14 @@ function D.run()
             local nc = string.format("%02d:%02d",h,m)
             if nc ~= D.clock then
                 D.clock = nc
-                local by = R.h - D.taskbarH
-                R.fillRect(R.w-48,by+3,44,14,K.GRAY)
-                R.drawW95Sunken(R.w-48,by+3,44,14)
-                R.drawText(R.w-44,by+6,nc,K.BLACK)
+                D.markClockDirty()
             end
             timer = os.startTimer(1)
         end
     end
     R.clear()
     R.fillRect(0,0,R.w,R.h,K.BLACK)
-    R.drawText(10,10,"CCOS shutdown.",K.WHITE)
+    R.drawText(10,10,"CCOS shutdown.",K.WHITE,K.BLACK)
 end
 
 return D

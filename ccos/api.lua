@@ -1,16 +1,7 @@
 --[[
-    CCOS API — Application Interface
-    ================================
+    CCOS API — Application Interface v2
+    =====================================
     Apps use this to create windows, request redraws, etc.
-    
-    Usage in app:
-      local api = require("ccos.api")
-      local win = api.window("My App", 30, 20, 200, 120)
-      win.onDraw = function(w, x, y, w, h) ... end
-      win.onKey = function(w, key, char) ... end
-      win.onClick = function(w, x, y) ... end
-      api.redraw(win)  -- request redraw
-      api.redrawRect(win, x, y, w, h)  -- partial redraw
 ]]
 
 local desktop = _G.desktop
@@ -26,11 +17,15 @@ function api.close(win)
 end
 
 function api.redraw(win)
-    desktop.dirty = true
+    desktop.markDirty()
 end
 
 function api.redrawRect(win, x, y, w, h)
-    desktop.dirty = true
+    desktop.markDirty()
+end
+
+function api.redrawContent(win)
+    desktop.markContentDirty(win)
 end
 
 function api.getScreenSize()
