@@ -5,7 +5,7 @@ R.hasDrawPixels = term.drawPixels ~= nil
 R.hasFrozen = term.setFrozen ~= nil
 R.isColor = term.isColor and term.isColor() or false
 R.w, R.h = 0, 0
-R.display = term
+R.display = term.native() or term
 R.mode = 0
 R.PAL = {}
 
@@ -88,42 +88,34 @@ end
 
 function R.shutdown()
     if R.hasGraphics then
-        pcall(function() R.display.setGraphicsMode(0) end)
+        pcall(function() (term.native() or term).setGraphicsMode(0) end)
     end
 end
 
 -- ============================================================
 -- BSOD (Blue Screen of Death)
+-- Forces text mode for maximum reliability after crash
 -- ============================================================
 function R.bsod(errorCode, message)
-    if R.mode == 0 then
-        term.setBackgroundColor(colors.blue)
-        term.setTextColor(colors.white)
-        term.clear()
-        term.setCursorPos(1, 1)
-        print("")
-        print("  *** STOP: " .. tostring(errorCode or "0x0000001E"))
-        print("")
-        print("  " .. tostring(message or "A fatal exception has occurred."))
-        print("")
-        print("  * Press any key to reboot your computer.")
-        return
+    -- Switch back to text mode (safe even if graphics was active)
+    if R.hasGraphics then
+        pcall(function() (term.native() or term).setGraphicsMode(0) end)
     end
-    R.beginDraw()
-    R.clear()
-    -- Windows 95 style BSOD — dark blue background
-    R.fillRect(0, 0, R.w, R.h, R.PAL.DBLUE)
-    local y = 20
-    R.drawText(20, y, "*** STOP: " .. tostring(errorCode or "0x0000001E"), R.PAL.WHITE, R.PAL.DBLUE)
-    y = y + 20
-    R.drawText(20, y, tostring(message or "A fatal exception has occurred."), R.PAL.WHITE, R.PAL.DBLUE)
-    y = y + 20
-    R.drawText(20, y, "The current application will be terminated.", R.PAL.LIGHT_GRAY, R.PAL.DBLUE)
-    y = y + 30
-    R.drawText(20, y, "* Press any key to reboot your computer.", R.PAL.WHITE, R.PAL.DBLUE)
-    y = y + 14
-    R.drawText(20, y, "* Press CTRL+ALT+DEL to restart (if available).", R.PAL.LIGHT_GRAY, R.PAL.DBLUE)
-    R.endDraw()
+    local t = term.native() or term
+    t.setBackgroundColor(colors.blue)
+    t.setTextColor(colors.white)
+    t.clear()
+    t.setCursorPos(1, 1)
+    print("")
+    print("  *** STOP: " .. tostring(errorCode or "0x0000001E"))
+    print("")
+    print("  " .. tostring(message or "A fatal exception has occurred."))
+    print("")
+    print("  The current application will be terminated.")
+    print("")
+    print("  * Press any key to reboot your computer.")
+    print("")
+    print("  * Press CTRL+ALT+DEL to restart (if available).")
 end
 
 -- Basic pixel operations
