@@ -82,8 +82,4 @@ sleep(0.3)
 _G.desktop.run()
 
 -- Shutdown
-R.beginDraw()
-R.clear()
-R.fillRect(0, 0, R.w, R.h, R.PAL.BLACK)
-R.drawText(10, 10, "CCOS shutdown.", R.PAL.WHITE, R.PAL.BLACK)
-R.endDraw()
+R.shutdown()

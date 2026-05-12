@@ -86,6 +86,12 @@ function R.endDraw()
     end
 end
 
+function R.shutdown()
+    if R.hasGraphics then
+        pcall(function() R.display.setGraphicsMode(0) end)
+    end
+end
+
 -- Basic pixel operations
 function R.setPixel(x, y, color)
     if R.mode == 0 then return end
