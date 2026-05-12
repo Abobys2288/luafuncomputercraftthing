@@ -71,7 +71,7 @@ local function relayChat(from, text)
     local line = "[" .. from .. "] " .. text
     addChat(line)
     log("[CHAT] " .. line)
-    rednet.broadcast({proto = PROTOCOL, type = "chat", from = from, text = text}, PROTOCOL)
+    broadcastMsg({type = "chat", from = from, text = text})
 end
 
 -- ============================================================
@@ -87,7 +87,7 @@ handlers.register = function(id, msg)
     local name = msg.name or ("guest_" .. id)
     dns[name] = id
     clients[id] = {name = name, lastSeen = os.clock()}
-    rednet.send(id, {proto = PROTOCOL, type = "register_ok", name = name, id = id}, PROTOCOL)
+    sendMsg(id, {type = "register_ok", name = name, id = id})
     log("[DNS] " .. name .. " -> " .. id)
 end
 
@@ -95,9 +95,9 @@ handlers.resolve = function(id, msg)
     local name = msg.name
     local found = dns[name]
     if found then
-        rednet.send(id, {proto = PROTOCOL, type = "resolve_ok", name = name, id = found}, PROTOCOL)
+        sendMsg(id, {type = "resolve_ok", name = name, id = found})
     else
-        rednet.send(id, {proto = PROTOCOL, type = "resolve_fail", name = name}, PROTOCOL)
+        sendMsg(id, {type = "resolve_fail", name = name})
     end
 end
 
@@ -119,7 +119,7 @@ handlers.chat = function(id, msg)
 end
 
 handlers.discover = function(id, msg)
-    rednet.send(id, {proto = PROTOCOL, type = "discover_ok", host = HOST_NAME, id = os.getComputerID()}, PROTOCOL)
+    sendMsg(id, {type = "discover_ok", host = HOST_NAME, id = os.getComputerID()})
 end
 
 handlers.pkg_list = function(id, msg)
@@ -131,7 +131,7 @@ handlers.pkg_list = function(id, msg)
             end
         end
     end
-    rednet.send(id, {proto = PROTOCOL, type = "pkg_list_resp", packages = list}, PROTOCOL)
+    sendMsg(id, {type = "pkg_list_resp", packages = list})
 end
 
 handlers.pkg_get = function(id, msg)
@@ -142,15 +142,27 @@ handlers.pkg_get = function(id, msg)
         local f = fs.open(path, "r")
         if f then content = f.readAll(); f.close() end
     end
-    rednet.send(id, {proto = PROTOCOL, type = "pkg_get_resp", name = pkg, content = content}, PROTOCOL)
+    sendMsg(id, {type = "pkg_get_resp", name = pkg, content = content})
 end
 
-local function handleMessage(id, msg)
-    if isBanned(id) then return end
-    local t = msg.type
-    if handlers[t] then
-        handlers[t](id, msg)
+local function sendMsg(targetId, msg)
+    rednet.send(targetId, {proto = PROTOCOL, data = msg}, PROTOCOL)
+end
+
+local function broadcastMsg(msg)
+    rednet.broadcast({proto = PROTOCOL, data = msg}, PROTOCOL)
+end
+
+local function handleMessage(id, raw)
+    if type(raw) == "table" and raw.proto == PROTOCOL then
+        local msg = raw.data or raw
+        if isBanned(id) then return end
+        local t = msg.type
+        if handlers[t] then
+            handlers[t](id, msg)
+        end
     end
+end
 end
 
 -- ============================================================
@@ -237,7 +249,7 @@ commands.kick = function(args)
     local c = clients[id]
     local name = c and c.name or tostring(id)
     clients[id] = nil
-    rednet.send(id, {proto = PROTOCOL, type = "kick", reason = "Kicked by admin"}, PROTOCOL)
+    sendMsg(id, {type = "kick", reason = "Kicked by admin"})
     log("[KICK] " .. name .. " (" .. id .. ")")
     print("  Kicked " .. name .. ".")
 end
@@ -252,7 +264,7 @@ commands.ban = function(args)
     local c = clients[id]
     local name = c and c.name or tostring(id)
     clients[id] = nil
-    rednet.send(id, {proto = PROTOCOL, type = "kick", reason = "Banned"}, PROTOCOL)
+    sendMsg(id, {type = "kick", reason = "Banned"})
     log("[BAN] " .. name .. " (" .. id .. ")")
     print("  Banned " .. name .. ".")
 end
@@ -348,14 +360,16 @@ log("  Type 'help' for commands.")
 log("")
 
 local function serverLoop()
-    while running do
-        local timer = os.startTimer(2)
-        local event, p1, p2, p3 = os.pullEvent()
-        if event == "rednet_message" then
-            local id, msg = p1, p2
-            if type(msg) == "table" and msg.proto == PROTOCOL then
-                handleMessage(id, msg)
-            end
+while running do
+    local timer = os.startTimer(2)
+    local event, p1, p2, p3 = os.pullEvent()
+    if event == "rednet_message" then
+        local id, raw = p1, p2
+        handleMessage(id, raw)
+    elseif event == "timer" and p1 == timer then
+        cleanupClients()
+    end
+end
         elseif event == "timer" and p1 == timer then
             cleanupClients()
         end
