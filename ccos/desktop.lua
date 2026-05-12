@@ -287,34 +287,6 @@ function D._drawFull()
         end
     end
 
-        -- Draw visible items
-        local firstItem = D.startMenuScroll + 1
-        local lastItem = math.min(totalItems, maxVisible + D.startMenuScroll)
-        local iy = my + 4
-        if needsScroll then iy = iy + 14 end  -- scroll arrow area padding
-
-        for idx = firstItem, lastItem do
-            if idx <= #D.programs then
-                local prog = D.programs[idx]
-                local hit = D.mouse.x >= sx+24 and D.mouse.x < sx+mw-8 and D.mouse.y >= iy and D.mouse.y < iy+itemH
-                if hit then R.fillRect(sx+24, iy, mw-32, itemH, K.DBLUE) end
-                R.drawText(sx+28, iy+2, prog.name, hit and K.WHITE or K.BLACK, hit and K.DBLUE or K.GRAY)
-            elseif idx == #D.programs + 1 then
-                -- Separator
-                R.drawLine(sx+24, iy+math.floor(itemH/2), sx+mw-8, iy+math.floor(itemH/2), K.DGRAY)
-            elseif idx == #D.programs + 2 then
-                local hit = D.mouse.x >= sx+24 and D.mouse.x < sx+mw-8 and D.mouse.y >= iy and D.mouse.y < iy+itemH
-                if hit then R.fillRect(sx+24, iy, mw-32, itemH, K.DBLUE) end
-                R.drawText(sx+28, iy+2, "Reboot", hit and K.WHITE or K.BLACK, hit and K.DBLUE or K.GRAY)
-            elseif idx == #D.programs + 3 then
-                local hit = D.mouse.x >= sx+24 and D.mouse.x < sx+mw-8 and D.mouse.y >= iy and D.mouse.y < iy+itemH
-                if hit then R.fillRect(sx+24, iy, mw-32, itemH, K.DBLUE) end
-                R.drawText(sx+28, iy+2, "Shutdown", hit and K.WHITE or K.BLACK, hit and K.DBLUE or K.GRAY)
-            end
-            iy = iy + itemH
-        end
-    end
-
     R.endDraw()
 end
 
