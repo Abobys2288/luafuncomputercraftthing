@@ -16,8 +16,11 @@ local function appNetBrowse()
     -- Find server
     local serverId = net.lookup("server")
     if not serverId then
-        D.inputDialog("Server", "Enter server ID or leave blank:", "", function(id)
-            if id then serverId = tonumber(id) end
+        D.inputDialog("Server", "Enter server ID:", "", function(id)
+            if id then
+                serverId = tonumber(id)
+                D.markDirty()
+            end
         end)
     end
 

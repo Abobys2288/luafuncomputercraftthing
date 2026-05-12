@@ -29,7 +29,7 @@ if not initModem() then
     return
 end
 
-rednet.host(PROTOCOL, HOST_NAME)
+rednet.host(PROTOCOL, "server")
 
 -- ============================================================
 -- DATA
