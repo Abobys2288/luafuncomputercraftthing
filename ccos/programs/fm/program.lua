@@ -84,17 +84,15 @@ local function appFM()
                         D.markDirty()
                     end
                 end)
-            elseif mx >= 96 and mx < 136 then
-                local it = items[sel]
-                if it and it ~= ".." then
-                    local fp = path=="/" and ("/"..it) or (path.."/"..it)
-                    if fs.exists(fp) then fs.delete(fp) end
-                    refresh()
-                    D.markDirty()
-                        end
-                    end
-                end
-                return
+        elseif mx >= 96 and mx < 136 then
+            local it = items[sel]
+            if it and it ~= ".." then
+                local fp = path=="/" and ("/"..it) or (path.."/"..it)
+                if fs.exists(fp) then fs.delete(fp) end
+                refresh()
+                D.markDirty()
+            end
+            return
         end
         local lh = math.floor((win.ch-24)/8)
         for i=1, lh do
