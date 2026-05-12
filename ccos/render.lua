@@ -71,13 +71,6 @@ function R.init()
         BUTTON_FACE=25, BUTTON_HI=26, DEEP_NAVY=27, BTNFACE_DARK=28,
         DARK_GREEN_BG=29, W95_DESKTOP=30, LIGHT_BG=2,
     }
-
-    if R.hasDrawPixels then
-        R._charBuf = {}
-        for row = 1, 8 do
-            R._charBuf[row] = {0, 0, 0, 0, 0, 0}
-        end
-    end
 end
 
 -- Freeze/unfreeze display during batch drawing
@@ -243,7 +236,7 @@ R.FONT = {
     ["}"]={12,2,2,1,2,2,12},
 }
 
--- drawText optimized with drawPixels per character (1 call per char instead of 35 setPixel calls)
+-- Pixel font 5x7 drawing
 function R.drawText(x, y, text, fg, bg)
     if R.mode == 0 then
         R.display.setCursorPos(x, y)
@@ -255,59 +248,22 @@ function R.drawText(x, y, text, fg, bg)
         if R.isColor then R.display.setTextColor(colors.white); R.display.setBackgroundColor(colors.black) end
         return
     end
-        if R.hasDrawPixels and R._charBuf and bg ~= nil then
-        local cx = x
-        local buf = R._charBuf
-        for i = 1, #text do
-            local ch = text:sub(i,i):upper()
-            local glyph = R.FONT[ch] or R.FONT["?"]
-            for row = 1, 7 do
-                local bits = glyph[row]
-                local rd = buf[row]
-                for col = 4, 0, -1 do
-                    local mask = 2^col
-                    rd[5-col] = (math.floor(bits / mask) % 2 == 1) and fg or bg
-                end
-                rd[6] = bg
-            end
-            buf[8][1]=bg; buf[8][2]=bg; buf[8][3]=bg
-            buf[8][4]=bg; buf[8][5]=bg; buf[8][6]=bg
-            R.display.drawPixels(cx-1, y-1, buf)
-            cx = cx + 6
-        end
-                rd[6] = bg
-            end
-            buf[8][1]=bg; buf[8][2]=bg; buf[8][3]=bg
-            buf[8][4]=bg; buf[8][5]=bg; buf[8][6]=bg
-            R.display.drawPixels(cx-1, y-1, buf)
-            cx = cx + 6
-        end
-    else
-        local cx = x
-        for i = 1, #text do
-            local ch = text:sub(i,i):upper()
-            local glyph = R.FONT[ch] or R.FONT["?"]
-            for row = 1, 7 do
-                local bits = glyph[row]
-                for col = 4, 0, -1 do
-                    local mask = 2^col
-                    if math.floor(bits / mask) % 2 == 1 then
-                        R.setPixel(cx+(4-col), y+row-1, fg)
-                    elseif bg then
-                        R.setPixel(cx+(4-col), y+row-1, bg)
-                    end
+    local cx = x
+    for i = 1, #text do
+        local ch = text:sub(i,i):upper()
+        local glyph = R.FONT[ch] or R.FONT["?"]
+        for row = 1, 7 do
+            local bits = glyph[row]
+            for col = 4, 0, -1 do
+                local mask = 2^col
+                if math.floor(bits / mask) % 2 == 1 then
+                    R.setPixel(cx+(4-col), y+row-1, fg)
+                elseif bg then
+                    R.setPixel(cx+(4-col), y+row-1, bg)
                 end
             end
-            cx = cx + 6
         end
-                end
-            end
-            cx = cx + 6
-        end
-                end
-            end
-            cx = cx + 6
-        end
+        cx = cx + 6
     end
 end
 
