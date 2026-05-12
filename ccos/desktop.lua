@@ -235,20 +235,27 @@ end
 
 function D.loadPrograms()
     D.programs = {}
+    D.loadErrors = {}
     if not fs.isDir("/ccos/programs") then D.rebuildIconCache(); return end
     for _, name in ipairs(fs.list("/ccos/programs")) do
         local path = "/ccos/programs/" .. name .. "/program.lua"
         if fs.exists(path) then
             local ok, prog = pcall(function()
                 local fn, err = loadfile(path)
-                if not fn then error("loadfile: " .. tostring(err)) end
+                if not fn then error("loadfile failed: " .. tostring(err)) end
                 return fn()
             end)
             if ok and prog and prog.name and prog.run then
                 table.insert(D.programs, prog)
+                print("[CCOS] Loaded program: " .. prog.name)
             else
-                print("[CCOS] Failed to load program '" .. name .. "': " .. tostring(prog))
+                local errMsg = tostring(prog)
+                print("[CCOS] Failed to load '" .. name .. "': " .. errMsg)
+                table.insert(D.loadErrors, {name = name, error = errMsg})
             end
+        else
+            print("[CCOS] Missing program.lua in: " .. name)
+            table.insert(D.loadErrors, {name = name, error = "Missing program.lua"})
         end
     end
     D.rebuildIconCache()
@@ -572,7 +579,14 @@ function D.drop() D.dragWin=nil; D.resizeWin=nil; D.startMenuDragY=nil; D.startM
 -- ============================================================
 function D.run()
     local ok, err = pcall(function()
-        R.init(); D.loadPrograms(); D.loadConfig(); local running=true; local lastTimer=nil; D.markDirty()
+        R.init(); D.loadPrograms(); 
+        -- Show load errors if any
+        if D.loadErrors and #D.loadErrors > 0 then
+            for _, err in ipairs(D.loadErrors) do
+                D.showError("Load Error: " .. err.name, err.error)
+            end
+        end
+        D.loadConfig(); local running=true; local lastTimer=nil; D.markDirty()
         while running do
             D.drawAll()
             if lastTimer then os.cancelTimer(lastTimer) end
