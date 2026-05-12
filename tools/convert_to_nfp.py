@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 """
-    CCOS NFP Converter
-    ==================
-    Converts any image (PNG/JPG/BMP/etc.) to NFP pixel format.
+    CCOS NFP Converter v2
+    =====================
+    Converts any image to NFP or NFP256 format.
 
     Usage:
-        python convert_to_nfp.py input.png --size 64 48 --output out.nfp
-        python convert_to_nfp.py input.png --fit-cc --output out.nfp
-        python convert_to_nfp.py input.png --ccos --output out.nfp
+        python convert_to_nfp.py input.png --size 64 48 -o out.nfp
+        python convert_to_nfp.py input.png --256 --size 64 48 -o out.nfp256
+        python convert_to_nfp.py input.png --ccos --dither -o out.nfp
 
     Formats:
-        --fit-cc     Standard 16-color ComputerCraft palette (default)
-        --ccos       32-color CCOS extended palette (matches render.lua)
+        .nfp      32-color text (1 char/pixel, backward compatible)
+        .nfp256   256-color hex (2 hex chars/pixel, uses full palette)
 
-    The output .nfp file can be opened in CCOS Image Viewer.
+    The 256-color palette in render.lua:
+        0-31:   W95 colors
+        32-215: 6x6x6 RGB cube (R,G,B each: 0,51,102,153,204,255)
+        216-255: Grayscale
 """
 
 import sys
@@ -30,73 +33,47 @@ except ImportError:
 # Palettes
 # ============================================================
 
-# Standard CC 16-color palette (paintutils / NPaintPro standard)
-# Each char -> (R, G, B)
-CC16_PALETTE = {
-    '0': (240, 240, 240),   # white
-    '1': (242, 178,  51),   # orange
-    '2': (229, 127, 216),   # magenta
-    '3': (153, 217, 234),   # lightBlue
-    '4': (222, 222, 108),   # yellow
-    '5': (127, 204,  25),   # lime
-    '6': (242, 178, 204),   # pink
-    '7': ( 76,  76,  76),   # gray
-    '8': (153, 153, 153),   # lightGray
-    '9': ( 76, 153, 178),   # cyan
-    'a': (127,  63, 178),   # purple
-    'b': ( 51, 102, 204),   # blue
-    'c': (127, 102,  76),   # brown
-    'd': ( 87, 166,  78),   # green
-    'e': (204,  76,  76),   # red
-    'f': ( 25,  25,  25),   # black
-}
+# 32-color text palette (single character per pixel)
+NFP32_KEYS = "0123456789abcdefghijklmnopqrstuv"
+NFP32_PALETTE = {}
+# 0-31: original W95 colors
+w95 = [
+    (0,0,0), (255,255,255), (192,192,192), (223,223,223),
+    (128,128,128), (0,0,192), (0,0,128), (0,192,192),
+    (128,224,255), (0,192,0), (0,128,0), (255,0,0),
+    (128,0,0), (255,255,0), (255,192,0), (128,64,0),
+    (128,0,128), (255,128,255), (64,64,64), (0,84,168),
+    (128,158,200), (0,0,255), (240,240,240), (32,32,32),
+    (160,160,160), (200,200,200), (248,248,248), (0,0,64),
+    (48,48,48), (0,128,0), (0,128,128), (192,192,192),
+]
+for i, c in enumerate(w95):
+    NFP32_PALETTE[NFP32_KEYS[i]] = c
 
-# CCOS 32-color palette (matches render.lua PALETTE indices 0-31)
-# We map each to a single character for our extended .nfp format
-CCOS32_PALETTE = {
-    '0': (  0,   0,   0),   # 0  BLACK
-    '1': (255, 255, 255),   # 1  WHITE
-    '2': (192, 192, 192),   # 2  GRAY
-    '3': (223, 223, 223),   # 3  LIGHT_GRAY
-    '4': (128, 128, 128),   # 4  DARK_GRAY
-    '5': (  0,   0, 192),   # 5  BLUE
-    '6': (  0,   0, 128),   # 6  DARK_BLUE
-    '7': (  0, 192, 192),   # 7  CYAN
-    '8': (128, 224, 255),   # 8  LIGHT_BLUE
-    '9': (  0, 192,   0),   # 9  GREEN
-    'a': (  0, 128,   0),   # 10 DARK_GREEN
-    'b': (255,   0,   0),   # 11 RED
-    'c': (128,   0,   0),   # 12 DARK_RED
-    'd': (255, 255,   0),   # 13 YELLOW
-    'e': (255, 192,   0),   # 14 ORANGE
-    'f': (128,  64,   0),   # 15 BROWN
-    'g': (128,   0, 128),   # 16 PURPLE
-    'h': (255, 128, 255),   # 17 PINK
-    'i': ( 64,  64,  64),   # 18 DARK_TITLE_INACTIVE
-    'j': (  0,  84, 168),   # 19 W95_TITLE_BLUE
-    'k': (128, 158, 200),   # 20 W95_TITLE_INACTIVE
-    'l': (  0,   0, 255),   # 21 PURE_BLUE
-    'm': (240, 240, 240),   # 22 ALMOST_WHITE
-    'n': ( 32,  32,  32),   # 23 NEAR_BLACK
-    'o': (160, 160, 160),   # 24 MID_GRAY
-    'p': (200, 200, 200),   # 25 BUTTON_FACE
-    'q': (248, 248, 248),   # 26 BUTTON_HIGHLIGHT
-    'r': (  0,   0,  64),   # 27 DEEP_NAVY
-    's': ( 48,  48,  48),   # 28 BTNFACE_DARK
-    't': (  0, 128,   0),   # 29 DARK_GREEN_BG
-    'u': (  0, 128, 128),   # 30 W95_DESKTOP
-    'v': (192, 192, 192),   # 31 LIGHT_BG
-}
+# 256-color palette for .nfp256 hex encoding
+PALETTE256 = {}
+# 0-31: W95 colors
+for i, c in enumerate(w95):
+    PALETTE256[i] = c
+# 32-215: 6x6x6 RGB cube
+idx = 32
+for r in range(6):
+    for g in range(6):
+        for b in range(6):
+            PALETTE256[idx] = (r*51, g*51, b*51)
+            idx += 1
+# 216-255: grayscale
+for i in range(40):
+    v = int(i * 255 / 39)
+    PALETTE256[216 + i] = (v, v, v)
 
 
 def color_distance(c1, c2):
-    """Euclidean distance in RGB space."""
     return sum((a - b) ** 2 for a, b in zip(c1, c2))
 
 
 def find_closest(rgb, palette):
-    """Find the palette key with minimum color distance."""
-    best_key = '0'
+    best_key = 0
     best_dist = float('inf')
     for key, color in palette.items():
         d = color_distance(rgb, color)
@@ -107,16 +84,9 @@ def find_closest(rgb, palette):
 
 
 def floyd_steinberg_dither(img, palette):
-    """
-    Apply Floyd-Steinberg dithering to reduce color banding.
-    img: PIL Image (RGB)
-    Returns a 2D list of palette keys.
-    """
     width, height = img.size
-    # Convert to mutable list of [R, G, B] floats
     pixels = [[list(img.getpixel((x, y))) for x in range(width)] for y in range(height)]
-    out = [[' ' for _ in range(width)] for _ in range(height)]
-
+    out = [[0 for _ in range(width)] for _ in range(height)]
     for y in range(height):
         for x in range(width):
             old = pixels[y][x]
@@ -124,8 +94,6 @@ def floyd_steinberg_dither(img, palette):
             new = palette[key]
             out[y][x] = key
             error = [old[i] - new[i] for i in range(3)]
-
-            # Diffuse error
             if x + 1 < width:
                 for i in range(3):
                     pixels[y][x + 1][i] += error[i] * 7 / 16
@@ -142,7 +110,6 @@ def floyd_steinberg_dither(img, palette):
 
 
 def nearest_neighbor(img, palette):
-    """Simple nearest-neighbor conversion (no dithering)."""
     width, height = img.size
     out = []
     for y in range(height):
@@ -154,27 +121,15 @@ def nearest_neighbor(img, palette):
     return out
 
 
-def convert_image(image_path, output_path, size=None, fit_cc=True, dither=False):
-    """Main conversion function."""
+def convert_image(image_path, output_path, size=None, use256=False, dither=False):
     img = Image.open(image_path).convert('RGB')
     orig_w, orig_h = img.size
 
-    # Pick palette
-    if fit_cc:
-        palette = CC16_PALETTE
-        print(f"Palette: CC 16-color (standard)")
-    else:
-        palette = CCOS32_PALETTE
-        print(f"Palette: CCOS 32-color (extended)")
-
-    # Resize
     if size:
         target_w, target_h = size
     else:
-        # Default: clamp to typical CC monitor size
         target_w = min(orig_w, 128)
         target_h = min(orig_h, 96)
-        # Keep aspect ratio
         ratio = min(target_w / orig_w, target_h / orig_h)
         target_w = int(orig_w * ratio)
         target_h = int(orig_h * ratio)
@@ -185,7 +140,15 @@ def convert_image(image_path, output_path, size=None, fit_cc=True, dither=False)
     else:
         print(f"Size: {orig_w}x{orig_h}")
 
-    # Convert
+    ext = Path(output_path).suffix.lower()
+
+    if use256 or ext == '.nfp256':
+        palette = PALETTE256
+        print("Palette: 256-color (full)")
+    else:
+        palette = NFP32_PALETTE
+        print("Palette: 32-color")
+
     if dither:
         print("Dithering: Floyd-Steinberg")
         pixels = floyd_steinberg_dither(img, palette)
@@ -193,35 +156,38 @@ def convert_image(image_path, output_path, size=None, fit_cc=True, dither=False)
         print("Quantization: nearest neighbor")
         pixels = nearest_neighbor(img, palette)
 
-    # Write NFP
-    lines = [''.join(row) for row in pixels]
-    Path(output_path).write_text('\n'.join(lines), encoding='utf-8')
-    print(f"Saved: {output_path} ({target_w}x{target_h})")
+    # Write output
+    if use256 or ext == '.nfp256':
+        # 2 hex chars per pixel
+        lines = []
+        for row in pixels:
+            lines.append(''.join(f'{v:02x}' for v in row))
+        Path(output_path).write_text('\n'.join(lines), encoding='utf-8')
+        print(f"Saved: {output_path} ({target_w}x{target_h}, 256-color)")
+    else:
+        # Build reverse lookup for 32-color: index -> char
+        idx_to_char = {v: k for k, v in enumerate(NFP32_KEYS)}
+        lines = []
+        for row in pixels:
+            lines.append(''.join(idx_to_char.get(v, '0') for v in row))
+        Path(output_path).write_text('\n'.join(lines), encoding='utf-8')
+        print(f"Saved: {output_path} ({target_w}x{target_h}, 32-color)")
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Convert images to NFP format for CCOS')
+    parser = argparse.ArgumentParser(description='Convert images to NFP for CCOS')
     parser.add_argument('input', help='Input image file')
-    parser.add_argument('-o', '--output', default='out.nfp', help='Output .nfp file')
-    parser.add_argument('-s', '--size', nargs=2, type=int, metavar=('W', 'H'),
-                        help='Target size in pixels')
-    parser.add_argument('--ccos', action='store_true',
-                        help='Use CCOS 32-color palette instead of CC 16-color')
-    parser.add_argument('--dither', action='store_true',
-                        help='Apply Floyd-Steinberg dithering')
+    parser.add_argument('-o', '--output', default='out.nfp', help='Output file')
+    parser.add_argument('-s', '--size', nargs=2, type=int, metavar=('W', 'H'), help='Target size')
+    parser.add_argument('--256', dest='use256', action='store_true', help='Use 256-color hex format (.nfp256)')
+    parser.add_argument('--dither', action='store_true', help='Apply Floyd-Steinberg dithering')
     args = parser.parse_args()
 
     if not Path(args.input).exists():
         print(f"ERROR: File not found: {args.input}")
         sys.exit(1)
 
-    convert_image(
-        args.input,
-        args.output,
-        size=args.size,
-        fit_cc=not args.ccos,
-        dither=args.dither
-    )
+    convert_image(args.input, args.output, size=args.size, use256=args.use256, dither=args.dither)
 
 
 if __name__ == '__main__':

@@ -9,49 +9,54 @@ R.display = term.native() or term
 R.mode = 0
 R.PAL = {}
 
--- Full 32-color W95 palette (indices 0-31)
-local PALETTE = {
-    {0,0,0},           -- 0  BLACK
-    {255,255,255},     -- 1  WHITE
-    {192,192,192},     -- 2  GRAY (window bg)
-    {223,223,223},     -- 3  LIGHT_GRAY
-    {128,128,128},     -- 4  DARK_GRAY
-    {0,0,192},         -- 5  BLUE
-    {0,0,128},         -- 6  DARK_BLUE (active title)
-    {0,192,192},       -- 7  CYAN
-    {128,224,255},     -- 8  LIGHT_BLUE
-    {0,192,0},         -- 9  GREEN
-    {0,128,0},         -- 10 DARK_GREEN
-    {255,0,0},         -- 11 RED
-    {128,0,0},         -- 12 DARK_RED
-    {255,255,0},       -- 13 YELLOW
-    {255,192,0},       -- 14 ORANGE
-    {128,64,0},        -- 15 BROWN
-    {128,0,128},       -- 16 PURPLE
-    {255,128,255},     -- 17 PINK
-    {64,64,64},        -- 18 DARK_TITLE_INACTIVE
-    {0,84,168},        -- 19 W95_TITLE_BLUE (active title)
-    {128,158,200},     -- 20 W95_TITLE_INACTIVE
-    {0,0,255},         -- 21 PURE_BLUE
-    {240,240,240},     -- 22 ALMOST_WHITE
-    {32,32,32},        -- 23 NEAR_BLACK
-    {160,160,160},     -- 24 MID_GRAY
-    {200,200,200},     -- 25 BUTTON_FACE
-    {248,248,248},     -- 26 BUTTON_HIGHLIGHT
-    {0,0,64},          -- 27 DEEP_NAVY
-    {48,48,48},        -- 28 BTNFACE_DARK
-    {0,128,0},         -- 29 DARK_GREEN_BG
-    {0,128,128},       -- 30 W95_DESKTOP (teal)
-    {192,192,192},     -- 31 LIGHT_BG (same as GRAY)
+-- ============================================================
+-- 256-color CCOS palette (indices 0-255)
+-- ============================================================
+local PALETTE = {}
+
+-- 0-31: Original W95 palette
+local W95 = {
+    {0,0,0}, {255,255,255}, {192,192,192}, {223,223,223},
+    {128,128,128}, {0,0,192}, {0,0,128}, {0,192,192},
+    {128,224,255}, {0,192,0}, {0,128,0}, {255,0,0},
+    {128,0,0}, {255,255,0}, {255,192,0}, {128,64,0},
+    {128,0,128}, {255,128,255}, {64,64,64}, {0,84,168},
+    {128,158,200}, {0,0,255}, {240,240,240}, {32,32,32},
+    {160,160,160}, {200,200,200}, {248,248,248}, {0,0,64},
+    {48,48,48}, {0,128,0}, {0,128,128}, {192,192,192},
 }
+for i, c in ipairs(W95) do
+    PALETTE[i-1] = c
+end
+
+-- 32-215: 6×6×6 RGB color cube (indices 32-215)
+-- R, G, B each: 0, 51, 102, 153, 204, 255
+local idx = 32
+for r = 0, 5 do
+    for g = 0, 5 do
+        for b = 0, 5 do
+            PALETTE[idx] = {r*51, g*51, b*51}
+            idx = idx + 1
+        end
+    end
+end
+
+-- 216-255: 40 grayscale + extra
+for i = 0, 39 do
+    local v = math.floor(i * 255 / 39)
+    PALETTE[216 + i] = {v, v, v}
+end
 
 function R.init()
     if R.hasGraphics then
         R.display.setGraphicsMode(2)
-        for i, c in ipairs(PALETTE) do
-            pcall(function()
-                R.display.setPaletteColor(i-1, c[1]/255, c[2]/255, c[3]/255)
-            end)
+        for i = 0, 255 do
+            local c = PALETTE[i]
+            if c then
+                pcall(function()
+                    R.display.setPaletteColor(i, c[1]/255, c[2]/255, c[3]/255)
+                end)
+            end
         end
         R.w, R.h = R.display.getSize(1)
         R.mode = 2
@@ -61,6 +66,7 @@ function R.init()
         R.w, R.h = R.display.getSize()
     end
 
+    -- Named shortcuts for common colors (0-31 still valid)
     R.PAL = {
         BLACK=0, WHITE=1, GRAY=2, LIGHT_GRAY=3, DARK_GRAY=4,
         BLUE=5, DARK_BLUE=6, CYAN=7, LIGHT_BLUE=8,
@@ -71,6 +77,15 @@ function R.init()
         BUTTON_FACE=25, BUTTON_HI=26, DEEP_NAVY=27, BTNFACE_DARK=28,
         DARK_GREEN_BG=29, W95_DESKTOP=30, LIGHT_BG=2,
     }
+    -- Make any palette index accessible as PAL[32], PAL[100], etc.
+    setmetatable(R.PAL, {
+        __index = function(t, k)
+            if type(k) == "number" and k >= 0 and k <= 255 then
+                return k
+            end
+            return nil
+        end
+    })
 end
 
 -- ============================================================
@@ -125,10 +140,8 @@ end
 
 -- ============================================================
 -- BSOD (Blue Screen of Death)
--- Forces text mode for maximum reliability after crash
 -- ============================================================
 function R.bsod(errorCode, message)
-    -- Switch back to text mode (safe even if graphics was active)
     if R.hasGraphics then
         pcall(function() (term.native() or term).setGraphicsMode(0) end)
     end
@@ -157,7 +170,7 @@ function R.setPixel(x, y, color)
     R.display.setPixel(x-1, y-1, color)
 end
 
--- fillRect optimized with drawPixels (1 API call instead of w*h setPixel calls)
+-- fillRect optimized with drawPixels
 function R.fillRect(x, y, w, h, color)
     if R.mode == 0 or w <= 0 or h <= 0 then return end
     if x < 1 then w = w + x - 1; x = 1 end
@@ -176,7 +189,7 @@ function R.fillRect(x, y, w, h, color)
     end
 end
 
--- drawLine optimized: horizontal/vertical lines use fillRect
+-- drawLine optimized
 function R.drawLine(x1, y1, x2, y2, color)
     if R.mode == 0 then return end
     if y1 == y2 then
@@ -199,7 +212,7 @@ function R.drawLine(x1, y1, x2, y2, color)
     end
 end
 
--- drawRect optimized: 4 fillRect calls
+-- drawRect
 function R.drawRect(x, y, w, h, color)
     if R.mode == 0 or w <= 0 or h <= 0 then return end
     R.fillRect(x, y, w, 1, color)

@@ -79,4 +79,10 @@ function api.joinPath(base, name)
     return base .. "/" .. name
 end
 
+function api.showError(title, message)
+    if _G.desktop and _G.desktop.showError then
+        _G.desktop.showError(title or "Error", message or "Unknown error")
+    end
+end
+
 return api

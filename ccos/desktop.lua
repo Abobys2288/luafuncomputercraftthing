@@ -108,6 +108,9 @@ end
 
 D.startMenuDragY = nil
 D.startMenuDragScroll = nil
+D.dragAppWin = nil  -- window receiving internal drag (pan, etc.)
+D.dragAppOX = 0
+D.dragAppOY = 0
 
 D.markDirty = function() D.dirty = true end
 D.markContentDirty = function(win) D._contentWin = win end
@@ -499,6 +502,12 @@ function D.click(mx,my,btn)
         if not w.maximized and mx>=w.cx+w.cw-8 and my>=w.cy+w.ch-8 then
             D.resizeWin=w; D.resizeOX=w.cw-(mx-w.cx); D.resizeOY=w.ch-(my-w.cy); return nil
         end
+        -- App-level drag (pan, etc.) if window has onDrag
+        if w.onDrag then
+            D.dragAppWin = w
+            D.dragAppOX = mx
+            D.dragAppOY = my
+        end
         if w.onClick then pcall(w.onClick,w,mx-w.cx-3,my-w.cy-18) end; return nil
     end
     -- Desktop icons (cached layout)
@@ -525,7 +534,17 @@ function D.drag(mx,my)
         end
         return
     end
-    local w=D.dragWin; if not w then
+    -- App-level drag (pan inside window content)
+    local w = D.dragAppWin
+    if w then
+        local dx = mx - D.dragAppOX
+        local dy = my - D.dragAppOY
+        D.dragAppOX = mx
+        D.dragAppOY = my
+        if w.onDrag then pcall(w.onDrag, w, dx, dy) end
+        return
+    end
+    w=D.dragWin; if not w then
         w=D.resizeWin; if not w then return end
         local nw = mx - w.cx + D.resizeOX
         local nh = my - w.cy + D.resizeOY
@@ -538,7 +557,7 @@ function D.drag(mx,my)
     D.markDirty()
 end
 
-function D.drop() D.dragWin=nil; D.resizeWin=nil; D.startMenuDragY=nil; D.startMenuDragScroll=nil end
+function D.drop() D.dragWin=nil; D.resizeWin=nil; D.startMenuDragY=nil; D.startMenuDragScroll=nil; D.dragAppWin=nil end
 
 -- ============================================================
 -- MAIN LOOP
