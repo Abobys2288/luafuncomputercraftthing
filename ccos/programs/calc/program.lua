@@ -48,8 +48,10 @@ local function appCalc()
     end
 
     w.onClick = function(win, mx, my)
-        local startX = 3 + math.floor((win.cw - 4*btnW - 12) / 2)
-        local startY = win.ch - 5*btnH - 20
+        -- mx,my are relative to content area (0,0 = top-left of content)
+        -- Must match onDraw coordinates
+        local startX = math.floor((win.cw - 4*btnW - 18) / 2)
+        local startY = win.ch - 5*btnH - 41
 
         for row = 1, 5 do
             for col = 1, 4 do
