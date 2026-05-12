@@ -1,8 +1,8 @@
 -- CCOS Program: Chat
--- Simple network chat between CCOS computers
+-- Server-based network chat with heartbeat and background listener
 local D = _G._desktop
 local R = _G.ccos_render
-local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,BLUE=5,DBLUE=6,DESKTOP=30}
+local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,BLUE=5,DBLUE=6,DESKTOP=30,RED=11}
 
 local function appChat()
     local net = require("ccos.drivers.net")
@@ -13,10 +13,47 @@ local function appChat()
         return
     end
 
-    local messages = {"--- Chat started ---"}
+    -- 1. On startup: register name on server
+    local serverId = net.lookup("server")
+    local myName = net.hostName
+
+    if not serverId then
+        local done = false
+        D.inputDialog("Server", "Enter server computer ID:", "", function(id)
+            if id then serverId = tonumber(id) end
+            done = true
+        end)
+        while not done do
+            local e, a, b, c, d = os.pullEvent()
+            if e == "timer" then
+                D.drawAll()
+            elseif e == "mouse_click" then
+                D.mouse.x = b; D.mouse.y = c
+                D.click(b, c, a)
+            elseif e == "mouse_drag" then
+                D.mouse.x = b; D.mouse.y = c
+                D.drag(b, c)
+            elseif e == "mouse_up" then
+                D.drop()
+            elseif e == "key" then
+                if D.activeWin and D.activeWin.onKey then pcall(D.activeWin.onKey, D.activeWin, a, nil) end
+            elseif e == "char" then
+                if D.activeWin and D.activeWin.onKey then pcall(D.activeWin.onKey, D.activeWin, nil, a) end
+            end
+        end
+    end
+
+    if not serverId then
+        D.showError("Chat Error", "No server ID provided.")
+        return
+    end
+
+    net.register(serverId, myName)
+
+    local messages = {"--- Chat started ---", "--- Server: " .. serverId .. " ---"}
     local input = ""
     local sy = 0
-    local targetId = nil
+    local targetId = serverId
 
     local wx, wy, ww, wh = D.fitWin(260, 160)
     local w = D.createWindow("Chat", wx, wy, ww, wh)
@@ -57,7 +94,7 @@ local function appChat()
         elseif k==keys.enter then
             if input~="" and targetId then
                 table.insert(messages,"Me: "..input)
-                net.send(targetId,{type="chat",text=input,from=net.hostName})
+                net.send(targetId,{type="chat",text=input,from=myName})
                 input=""
                 local ml=math.floor((w.ch-28)/8); if #messages>ml then sy=#messages-ml end
                 D.markContentDirty(w)
@@ -67,12 +104,78 @@ local function appChat()
         elseif k==keys.escape then D.destroyWindow(w) end
     end
 
-    -- Background receive
-    local oldOnKey = w.onKey
-    w.onKey = function(win,k,ch)
-        if k==keys.escape then D.destroyWindow(win) return end
-        return oldOnKey(win,k,ch)
+    -- Background threads via parallel.waitForAny
+    local function uiPoll()
+        local uiTimer = os.startTimer(1)
+        while true do
+            local found = false
+            for _, win in ipairs(D.windows) do
+                if win.id == w.id then found = true; break end
+            end
+            if not found then return end
+
+            local e, a, b, c, d = os.pullEvent()
+            if e == "timer" then
+                if a == uiTimer then
+                    uiTimer = os.startTimer(1)
+                end
+                D.drawAll()
+            elseif e == "mouse_click" then
+                D.mouse.x = b; D.mouse.y = c
+                D.click(b, c, a)
+                D.drawAll()
+            elseif e == "mouse_drag" then
+                D.mouse.x = b; D.mouse.y = c
+                D.drag(b, c)
+                D.drawAll()
+            elseif e == "mouse_up" then
+                D.drop()
+                D.drawAll()
+            elseif e == "key" then
+                if D.activeWin and D.activeWin.onKey then pcall(D.activeWin.onKey, D.activeWin, a, nil) end
+                D.drawAll()
+            elseif e == "char" then
+                if D.activeWin and D.activeWin.onKey then pcall(D.activeWin.onKey, D.activeWin, nil, a) end
+                D.drawAll()
+            end
+        end
     end
+
+    local function netLoop()
+        while true do
+            local id, msg = net.receive(60)
+            if id and msg and type(msg) == "table" then
+                if msg.type == "chat" then
+                    table.insert(messages, msg.from .. ": " .. msg.text)
+                    local ml = math.floor((w.ch - 28) / 8)
+                    if #messages > ml then sy = #messages - ml end
+                    D.markContentDirty(w)
+                elseif msg.type == "kick" then
+                    D.showError("Kicked", msg.reason or "You have been kicked from the server")
+                    D.destroyWindow(w)
+                    return
+                end
+            end
+        end
+    end
+
+    local function heartbeatLoop()
+        local nextTimer = os.startTimer(10)
+        while true do
+            local e, tId = os.pullEvent("timer")
+            if e == "timer" and tId == nextTimer then
+                if serverId then net.heartbeat(serverId) end
+                nextTimer = os.startTimer(10)
+            end
+            local found = false
+            for _, win in ipairs(D.windows) do
+                if win.id == w.id then found = true; break end
+            end
+            if not found then return end
+        end
+    end
+
+    parallel.waitForAny(uiPoll, netLoop, heartbeatLoop)
 end
 
 return {name = "Chat", icon = "chat", run = appChat}

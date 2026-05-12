@@ -27,6 +27,29 @@ function net.isReady()
     return net.online
 end
 
+-- Register name on DNS server
+function net.register(serverId, name)
+    if not net.online then return false end
+    return net.send(serverId, {type = "register", name = name or net.hostName})
+end
+
+-- Resolve name via DNS server
+function net.resolve(serverId, name)
+    if not net.online then return nil end
+    net.send(serverId, {type = "resolve", name = name})
+    local id, msg = net.receive(2)
+    if id and msg and type(msg) == "table" and msg.type == "resolve_ok" then
+        return msg.id
+    end
+    return nil
+end
+
+-- Heartbeat to server (keep-alive)
+function net.heartbeat(serverId)
+    if not net.online then return false end
+    return net.send(serverId, {type = "heartbeat", name = net.hostName})
+end
+
 -- Broadcast to all computers
 function net.broadcast(msg)
     if not net.online then return false end
@@ -50,17 +73,17 @@ function net.receive(timeout)
     return nil
 end
 
--- Discover computers running CCOS
+-- Discover computers running CCOS (uses new server discover protocol)
 function net.discover(timeout)
     if not net.online then return {} end
-    net.broadcast({type = "ping", host = net.hostName})
+    net.broadcast({type = "discover", host = net.hostName})
     local found = {}
     local timer = os.startTimer(timeout or 0.5)
     while true do
         local event, p1, p2, p3 = os.pullEvent()
         if event == "rednet_message" then
             local id, msg = p1, p2
-            if type(msg) == "table" and msg.proto == net.protocol and msg.type == "pong" then
+            if type(msg) == "table" and msg.proto == net.protocol and msg.type == "discover_ok" then
                 found[id] = msg.host or ("PC_" .. id)
             end
         elseif event == "timer" and p1 == timer then
@@ -83,14 +106,15 @@ function net.lookup(serviceName)
     return rednet.lookup(net.protocol, serviceName)
 end
 
--- Auto-responder (run in parallel with parallel.waitForAny)
-function net.listenLoop()
+-- Background listener for chat + kick (non-blocking)
+-- callback: function(type, data) ... end
+function net.listenLoop(callback)
     if not net.online then return end
     while true do
         local id, msg = net.receive(999999)
         if id and msg and type(msg) == "table" then
-            if msg.type == "ping" then
-                net.send(id, {type = "pong", host = net.hostName})
+            if callback then
+                callback(msg.type, msg)
             end
         end
     end

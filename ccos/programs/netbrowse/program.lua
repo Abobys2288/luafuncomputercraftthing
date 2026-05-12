@@ -1,8 +1,8 @@
--- CCOS Program: Network Browser
--- Discovers and interacts with CCOS computers on rednet
+-- CCOS Program: Network Browser v2
+-- Discovers peers + DNS lookup via CCOS server
 local D = _G._desktop
 local R = _G.ccos_render
-local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,BLUE=5,DBLUE=6,DESKTOP=30}
+local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,BLUE=5,DBLUE=6,DESKTOP=30,RED=11}
 
 local function appNetBrowse()
     local net = require("ccos.drivers.net")
@@ -13,6 +13,14 @@ local function appNetBrowse()
         return
     end
 
+    -- Find server
+    local serverId = net.lookup("server")
+    if not serverId then
+        D.inputDialog("Server", "Enter server ID or leave blank:", "", function(id)
+            if id then serverId = tonumber(id) end
+        end)
+    end
+
     local peers = {}
     local sel = 1
     local scroll = 0
@@ -21,25 +29,44 @@ local function appNetBrowse()
     local function scan()
         status = "Scanning..."
         D.markDirty()
-        peers = net.discover(0.3)
-        sel = 1
-        scroll = 0
+        peers = net.discover(0.5)
+        sel = 1; scroll = 0
         status = "Found " .. #peers .. " peers"
         D.markDirty()
     end
 
-    local wx, wy, ww, wh = D.fitWin(220, 140)
+    local function dnsLookup(name)
+        if not serverId then
+            status = "No server"
+            D.markDirty()
+            return
+        end
+        status = "Lookup..."
+        D.markDirty()
+        local id = net.resolve(serverId, name)
+        if id then
+            peers[id] = name
+            status = "Found " .. name .. " -> " .. id
+            D.markDirty()
+        else
+            status = "Not found: " .. name
+            D.markDirty()
+        end
+    end
+
+    local wx, wy, ww, wh = D.fitWin(240, 160)
     local w = D.createWindow("Network", wx, wy, ww, wh)
 
     w.onDraw = function(_,cx,cy,cw,ch)
         R.drawButton(cx,cy,40,14,false)
         R.drawText(cx+4,cy+3,"Scan",K.BLACK,K.GRAY)
-        R.drawText(cx+50,cy+3,status,K.BLACK,K.GRAY)
+        R.drawButton(cx+44,cy,52,14,false)
+        R.drawText(cx+48,cy+3,"Lookup",K.BLACK,K.GRAY)
+        R.drawText(cx+100,cy+3,status,K.BLACK,K.GRAY)
         local lh = math.floor((ch-28)/8)
         local list = {}
         for id,name in pairs(peers) do table.insert(list,{id=id,name=name}) end
         table.sort(list,function(a,b) return a.id < b.id end)
-        -- Pre-scan hover to avoid dual highlight with keyboard selection
         local hasHit = false
         for i=1,lh do
             local idx=scroll+i; local p=list[idx]
@@ -61,7 +88,15 @@ local function appNetBrowse()
     end
 
     w.onClick = function(_,mx,my)
-        if my>=0 and my<14 and mx>=0 and mx<40 then scan(); return end
+        if my>=0 and my<14 then
+            if mx>=0 and mx<40 then scan(); return
+            elseif mx>=44 and mx<96 then
+                D.inputDialog("DNS Lookup", "Computer name:", "", function(name)
+                    if name then dnsLookup(name) end
+                end)
+                return
+            end
+        end
         local lh=math.floor((w.ch-28)/8)
         for i=1,lh do
             local iy=16+(i-1)*8
@@ -78,24 +113,13 @@ local function appNetBrowse()
         elseif k==keys.enter then
             local list={}; for id,name in pairs(peers) do table.insert(list,{id=id,name=name}) end; table.sort(list,function(a,b) return a.id<b.id end)
             local p=list[sel]; if p then
-                D.inputDialog("Message to "..p.name,"Enter message:","",function(msg)
+                D.inputDialog("Message to "..p.name,"Enter message:" ,"",function(msg)
                     if msg then net.send(p.id,{type="chat",text=msg,from=net.hostName}); status="Sent!"; D.markDirty() end
                 end)
             end
         elseif k==keys.escape then D.destroyWindow(w) end
     end
 
-    -- Auto-listener in background
-    local function bgListen()
-        while w.visible do
-            local ok,id,msg=pcall(net.receive,1)
-            if ok and id and msg and type(msg) == "table" and msg.type == "chat" then
-                status = msg.from .. ": " .. msg.text
-                D.markDirty()
-            end
-        end
-    end
-    -- Note: in real use, you'd need parallel.waitForAny. Here we just scan once at start.
     scan()
 end
 
