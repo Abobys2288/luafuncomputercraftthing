@@ -275,6 +275,7 @@ function D.createWindow(title, cx, cy, cw, ch)
 end
 
 function D.destroyWindow(w)
+    if w.onClose then pcall(w.onClose, w) end
     for i,v in ipairs(D.windows) do if v.id==w.id then table.remove(D.windows,i); break end end
     D.activeWin=D.windows[#D.windows]; w.visible=false; D.markDirty()
 end
@@ -637,6 +638,10 @@ function D.run()
             if lastTimer then os.cancelTimer(lastTimer) end
             lastTimer = os.startTimer(1)
             local e,a,b,c,d=os.pullEvent()
+            -- Background tasks
+            for _, task in ipairs(D.bgTasks or {}) do
+                pcall(task, e, a, b, c, d)
+            end
             if e=="timer" then
                 local t=os.time and os.time() or 0; local h=math.floor(t); local m=math.floor((t-h)*60); local nc=string.format("%02d:%02d",h,m); if nc~=D.clock then D.clock=nc; D.markClockDirty() end
             end
