@@ -55,11 +55,16 @@ function net.discover(timeout)
     if not net.online then return {} end
     net.broadcast({type = "ping", host = net.hostName})
     local found = {}
-    local start = os.clock()
-    while os.clock() - start < (timeout or 3) do
-        local id, msg = net.receive(0.5)
-        if id and msg and type(msg) == "table" and msg.type == "pong" then
-            found[id] = msg.host or ("PC_" .. id)
+    local timer = os.startTimer(timeout or 3)
+    while true do
+        local event, p1, p2, p3 = os.pullEvent()
+        if event == "rednet_message" then
+            local id, msg = p1, p2
+            if type(msg) == "table" and msg.proto == net.protocol and msg.type == "pong" then
+                found[id] = msg.host or ("PC_" .. id)
+            end
+        elseif event == "timer" and p1 == timer then
+            break
         end
     end
     return found

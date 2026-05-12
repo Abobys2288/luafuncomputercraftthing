@@ -102,6 +102,11 @@ function R.bsod(errorCode, message)
         pcall(function() (term.native() or term).setGraphicsMode(0) end)
     end
     local t = term.native() or term
+    -- Reset palette so standard colors render correctly after graphics mode
+    if t.setPaletteColor then
+        pcall(function() t.setPaletteColor(colors.blue, 0, 0, 1) end)
+        pcall(function() t.setPaletteColor(colors.white, 1, 1, 1) end)
+    end
     t.setBackgroundColor(colors.blue)
     t.setTextColor(colors.white)
     t.clear()

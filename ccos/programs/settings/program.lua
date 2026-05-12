@@ -51,7 +51,7 @@ local function appSettings()
     end
 
     w.onKey = function(win, k)
-        if k==keys.escape or k==keys.q then D.destroyWindow(win) end
+        if k==keys.escape then D.destroyWindow(win) end
     end
 end
 

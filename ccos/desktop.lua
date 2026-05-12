@@ -7,7 +7,7 @@
 local R = _G.ccos_render
 local D = {}; _G._desktop = D
 
-local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,BLUE=5,DBLUE=6,DESKTOP=30}
+local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,BLUE=5,DBLUE=6,RED=11,DESKTOP=30}
 
 D.windows = {}
 D.activeWin = nil
@@ -19,6 +19,9 @@ D.nextWinId = 1
 D.dragWin = nil
 D.dragOX = 0
 D.dragOY = 0
+D.resizeWin = nil
+D.resizeOX = 0
+D.resizeOY = 0
 D.mouse = {x=0,y=0}
 D.dirty = true
 D._contentWin = nil
@@ -29,14 +32,15 @@ D.markDirty = function() D.dirty = true end
 D.markContentDirty = function(win) D._contentWin = win end
 D.markClockDirty = function() D._clockDirty = true end
 D.startMenuScroll = 0
+D.startMenuSel = 1
 D.startMenuMaxVisible = 99
 
 -- ============================================================
 -- ERROR HANDLER
 -- ============================================================
 function D.showError(title, message)
-    local ww, wh = D.fitWin(240, 80)
-    local w = D.createWindow(title or "Error", ww, wy, ww, wh)
+    local wx, wy, ww, wh = D.fitWin(240, 80)
+    local w = D.createWindow(title or "Error", wx, wy, ww, wh)
     w.modal = true
     w.onDraw = function(_, cx, cy, cw, ch)
         R.fillRect(cx+2, cy+2, cw-4, ch-4, K.GRAY)
@@ -182,6 +186,10 @@ function D._drawFull()
         R.drawButton(x+ww-18,y+1,16,14,false); R.drawText(x+ww-13,y+4,"X",K.BLACK,K.GRAY)
         R.drawW95Raised(x,y,ww,hh); R.fillRect(x+2,y+17,ww-4,hh-19,K.GRAY)
         if w.onDraw then pcall(w.onDraw,w,x+3,y+18,ww-6,hh-21) end
+        -- Resize grip
+        if not w.maximized then
+            R.fillRect(x+ww-6, y+hh-6, 6, 6, K.DGRAY)
+        end
     end end
 
     -- Taskbar
@@ -211,19 +219,14 @@ function D._drawFull()
         local firstItem=D.startMenuScroll+1; local lastItem=math.min(totalItems,maxVisible+D.startMenuScroll)
         local iy=my+4; if needsScroll then iy=iy+14 end
         for idx=firstItem,lastItem do
-            if idx<=#D.programs then
-                local prog=D.programs[idx]; local hit=D.mouse.x>=sx+24 and D.mouse.x<sx+mw-8 and D.mouse.y>=iy and D.mouse.y<iy+itemH
-                if hit then R.fillRect(sx+24,iy,mw-32,itemH,K.DBLUE) end
-                R.drawText(sx+28,iy+2,prog.name,hit and K.WHITE or K.BLACK,hit and K.DBLUE or K.GRAY)
-            elseif idx==#D.programs+1 then
-                local hit=D.mouse.x>=sx+24 and D.mouse.x<sx+mw-8 and D.mouse.y>=iy and D.mouse.y<iy+itemH
-                if hit then R.fillRect(sx+24,iy,mw-32,itemH,K.DBLUE) end
-                R.drawText(sx+28,iy+2,"Reboot",hit and K.WHITE or K.BLACK,hit and K.DBLUE or K.GRAY)
-            elseif idx==#D.programs+2 then
-                local hit=D.mouse.x>=sx+24 and D.mouse.x<sx+mw-8 and D.mouse.y>=iy and D.mouse.y<iy+itemH
-                if hit then R.fillRect(sx+24,iy,mw-32,itemH,K.DBLUE) end
-                R.drawText(sx+28,iy+2,"Shutdown",hit and K.WHITE or K.BLACK,hit and K.DBLUE or K.GRAY)
-            end
+            local label = ""
+            if idx<=#D.programs then label = D.programs[idx].name
+            elseif idx==#D.programs+1 then label = "Reboot"
+            elseif idx==#D.programs+2 then label = "Shutdown" end
+            local hit=D.mouse.x>=sx+24 and D.mouse.x<sx+mw-8 and D.mouse.y>=iy and D.mouse.y<iy+itemH
+            local active = hit or (idx == D.startMenuSel)
+            if active then R.fillRect(sx+24,iy,mw-32,itemH,K.DBLUE) end
+            R.drawText(sx+28,iy+2,label,active and K.WHITE or K.BLACK,active and K.DBLUE or K.GRAY)
             iy=iy+itemH
         end
     end
@@ -253,7 +256,7 @@ function D.click(mx,my)
     local by=R.h-D.taskbarH
     -- Start button
     if mx>=2 and mx<56 and my>=by+2 and my<by+18 then
-        D.startMenuOpen=not D.startMenuOpen; if not D.startMenuOpen then D.startMenuScroll=0 end; D.markDirty(); return nil
+        D.startMenuOpen=not D.startMenuOpen; if D.startMenuOpen then D.startMenuSel=1; D.startMenuScroll=0 else D.startMenuScroll=0 end; D.markDirty(); return nil
     end
     -- Start menu
     if D.startMenuOpen then
@@ -265,6 +268,7 @@ function D.click(mx,my)
             local firstItem=D.startMenuScroll+1; local itemY=my2+4; if needsScroll then itemY=itemY+14 end
             for idx=firstItem,totalItems do
                 if my>=itemY and my<itemY+itemH then
+                    D.startMenuSel=idx
                     if idx<=#D.programs then D.startMenuOpen=false; D.startMenuScroll=0; D.markDirty(); D.safeRun(D.programs[idx].run)
                     elseif idx==#D.programs+1 then D.startMenuOpen=false; D.startMenuScroll=0; D.markDirty(); os.reboot()
                     elseif idx==#D.programs+2 then D.startMenuOpen=false; D.startMenuScroll=0; D.markDirty(); os.shutdown() end
@@ -296,6 +300,9 @@ function D.click(mx,my)
             if mx>=w.cx+w.cw-54 and mx<w.cx+w.cw-38 then w.minimized=true; D.markDirty(); return nil end
             if not w.maximized then D.dragWin=w; D.dragOX=mx-w.cx; D.dragOY=my-w.cy end; return nil
         end
+        if not w.maximized and mx>=w.cx+w.cw-8 and my>=w.cy+w.ch-8 then
+            D.resizeWin=w; D.resizeOX=w.cw-(mx-w.cx); D.resizeOY=w.ch-(my-w.cy); return nil
+        end
         if w.onClick then pcall(w.onClick,w,mx-w.cx-3,my-w.cy-18) end; return nil
     end
     -- Desktop icons
@@ -307,12 +314,20 @@ function D.click(mx,my)
 end
 
 function D.drag(mx,my)
-    local w=D.dragWin; if not w then return end
+    local w=D.dragWin; if not w then
+        w=D.resizeWin; if not w then return end
+        local nw = mx - w.cx + D.resizeOX
+        local nh = my - w.cy + D.resizeOY
+        w.cw = math.max(80, math.min(R.w - w.cx + 1, nw))
+        w.ch = math.max(40, math.min(R.h - D.taskbarH - w.cy + 1, nh))
+        D.markDirty()
+        return
+    end
     w.cx=mx-D.dragOX; w.cy=my-D.dragOY; if w.cy<1 then w.cy=1 end; local by=R.h-D.taskbarH; if w.cy+w.ch>by+1 then w.cy=by-w.ch+2 end
     D.markDirty()
 end
 
-function D.drop() D.dragWin=nil end
+function D.drop() D.dragWin=nil; D.resizeWin=nil end
 
 -- ============================================================
 -- MAIN LOOP
@@ -327,11 +342,31 @@ function D.run()
             elseif e=="mouse_drag" then D.mouse.x=b; D.mouse.y=c; D.drag(b,c)
             elseif e=="mouse_up" then D.drop()
             elseif e=="key" then
-                if D.startMenuOpen and a==keys.up then D.startMenuScroll=math.max(0,D.startMenuScroll-1); D.markDirty()
-                elseif D.startMenuOpen and a==keys.down then local totalItems=#D.programs+2; local by=R.h-D.taskbarH; local available=by-10; local mh=math.min(available,math.max(96,totalItems*12+6)); local maxVisible=math.floor((mh-8)/12); D.startMenuScroll=math.min(totalItems-maxVisible,D.startMenuScroll+1); D.markDirty()
+                if D.startMenuOpen then
+                    local totalItems=#D.programs+2
+                    local by=R.h-D.taskbarH; local available=by-10
+                    local mh=math.min(available,math.max(96,totalItems*12+6))
+                    local maxVisible=math.floor((mh-8)/12)
+                    if a==keys.up then
+                        D.startMenuSel = math.max(1, D.startMenuSel - 1)
+                        if D.startMenuSel <= D.startMenuScroll + 1 then D.startMenuScroll = math.max(0, D.startMenuSel - 1) end
+                        D.markDirty()
+                    elseif a==keys.down then
+                        D.startMenuSel = math.min(totalItems, D.startMenuSel + 1)
+                        if D.startMenuSel > D.startMenuScroll + maxVisible then D.startMenuScroll = math.min(totalItems - maxVisible, D.startMenuSel - maxVisible) end
+                        D.markDirty()
+                    elseif a==keys.enter then
+                        local idx = D.startMenuSel
+                        D.startMenuOpen=false; D.startMenuScroll=0; D.markDirty()
+                        if idx<=#D.programs then D.safeRun(D.programs[idx].run)
+                        elseif idx==#D.programs+1 then os.reboot()
+                        elseif idx==#D.programs+2 then os.shutdown() end
+                    elseif a==keys.escape then
+                        D.startMenuOpen=false; D.startMenuScroll=0; D.markDirty()
+                    end
                 elseif D.activeWin and D.activeWin.onKey then pcall(D.activeWin.onKey,D.activeWin,a,nil) end
             elseif e=="char" then if D.activeWin and D.activeWin.onKey then pcall(D.activeWin.onKey,D.activeWin,nil,a) end
-            elseif e=="timer" then local t=os.time and os.time() or 0; local h=math.floor(t); local m=math.floor((t-h)*60); local nc=string.format("%02d:%02d",h,m); if nc~=D.clock then D.clock=nc; D.markClockDirty() end; timer=os.startTimer(1) end
+            elseif e=="timer" and a==timer then local t=os.time and os.time() or 0; local h=math.floor(t); local m=math.floor((t-h)*60); local nc=string.format("%02d:%02d",h,m); if nc~=D.clock then D.clock=nc; D.markClockDirty() end; timer=os.startTimer(1) end
         end
         R.beginDraw(); R.clear(); R.fillRect(0,0,R.w,R.h,K.BLACK); R.drawText(10,10,"CCOS shutdown.",K.WHITE,K.BLACK); R.endDraw(); sleep(0.3); R.shutdown()
     end)

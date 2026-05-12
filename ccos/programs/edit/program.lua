@@ -119,7 +119,7 @@ local function appEdit(fp)
             cc = #(lines[cl] or "") + 1
             ensureHScroll()
             D.markContentDirty(win)
-        elseif k == keys.escape or k == keys.q then
+        elseif k == keys.escape then
             if mod then API.writeFile(fp, table.concat(lines, "\n")) end
             D.destroyWindow(win)
         end
