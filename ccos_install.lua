@@ -231,15 +231,15 @@ local function main()
         sleep(0.05)
     end
 
-    -- Download server script separately (goes to root, not /ccos/)
+    -- Download server script separately (goes to root)
     do
         local url = SERVER_URL
         local path = "/" .. SERVER_FILE
-        term.setCursorPos(fileX, listY + maxLines)
+        term.setCursorPos(bx + 3, by + bh - 5)
         set(colors.black, colors.lightGray)
-        term.write(SERVER_FILE)
+        term.write("Server: " .. SERVER_FILE)
         local ok2, err2 = downloadFile(url, path)
-        term.setCursorPos(bx + bw - 8, listY + maxLines)
+        term.setCursorPos(bx + bw - 8, by + bh - 5)
         if ok2 then
             set(colors.black, colors.lime)
             term.write("[OK]")
@@ -248,8 +248,10 @@ local function main()
             set(colors.black, colors.red)
             term.write("[ERR]")
             failed = failed + 1
+            table.insert(logLines, SERVER_FILE .. ": " .. tostring(err2))
         end
         reset()
+        progress(pbX, pbY, pbW, total, total)
     end
 
     local statusY = by + bh - 4
