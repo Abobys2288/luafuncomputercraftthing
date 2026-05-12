@@ -3,66 +3,65 @@
 -- Supports: CC 16-color (0-f) and CCOS 32-color (0-v)
 local D = _G._desktop
 local R = _G.ccos_render
-local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,BLUE=5,DBLUE=6,DESKTOP=30}
+local P = R.PAL
 
 -- Standard CC 16-color paintutils mapping
 local CC16_MAP = {
-    ['0'] = K.WHITE,      -- white
-    ['1'] = K.GRAY,       -- orange (closest)
-    ['2'] = K.GRAY,       -- magenta (closest)
-    ['3'] = K.LIGHT_BLUE, -- lightBlue
-    ['4'] = K.YELLOW,     -- yellow
-    ['5'] = K.GREEN,      -- lime
-    ['6'] = K.PINK,       -- pink
-    ['7'] = K.DARK_GRAY,  -- gray
-    ['8'] = K.LIGHT_GRAY, -- lightGray
-    ['9'] = K.CYAN,       -- cyan
-    ['a'] = K.PURPLE,     -- purple
-    ['b'] = K.BLUE,       -- blue
-    ['c'] = K.BROWN,      -- brown
-    ['d'] = K.DARK_GREEN, -- green
-    ['e'] = K.RED,        -- red
-    ['f'] = K.BLACK,      -- black
+    ['0'] = P.WHITE,
+    ['1'] = P.ORANGE,
+    ['2'] = P.MAGENTA,
+    ['3'] = P.LIGHT_BLUE,
+    ['4'] = P.YELLOW,
+    ['5'] = P.LIME,
+    ['6'] = P.PINK,
+    ['7'] = P.GRAY,
+    ['8'] = P.LIGHT_GRAY,
+    ['9'] = P.CYAN,
+    ['a'] = P.PURPLE,
+    ['b'] = P.BLUE,
+    ['c'] = P.BROWN,
+    ['d'] = P.GREEN,
+    ['e'] = P.RED,
+    ['f'] = P.BLACK,
 }
 
 -- CCOS 32-color extended mapping (matches convert_to_nfp.py --ccos)
 local CCOS32_MAP = {
-    ['0'] = K.BLACK,
-    ['1'] = K.WHITE,
-    ['2'] = K.GRAY,
-    ['3'] = K.LIGHT_GRAY,
-    ['4'] = K.DARK_GRAY,
-    ['5'] = K.BLUE,
-    ['6'] = K.DARK_BLUE,
-    ['7'] = K.CYAN,
-    ['8'] = K.LIGHT_BLUE,
-    ['9'] = K.GREEN,
-    ['a'] = K.DARK_GREEN,
-    ['b'] = K.RED,
-    ['c'] = K.DARK_RED,
-    ['d'] = K.YELLOW,
-    ['e'] = K.ORANGE,
-    ['f'] = K.BROWN,
-    ['g'] = K.PURPLE,
-    ['h'] = K.PINK,
-    ['i'] = K.DARK_TITLE or K.DARK_GRAY,
-    ['j'] = K.W95_TITLE_BLUE or K.BLUE,
-    ['k'] = K.W95_TITLE_INACTIVE or K.LIGHT_GRAY,
-    ['l'] = K.PURE_BLUE or K.BLUE,
-    ['m'] = K.ALMOST_WHITE or K.WHITE,
-    ['n'] = K.NEAR_BLACK or K.BLACK,
-    ['o'] = K.MID_GRAY or K.GRAY,
-    ['p'] = K.BUTTON_FACE or K.GRAY,
-    ['q'] = K.BUTTON_HI or K.LIGHT_GRAY,
-    ['r'] = K.DEEP_NAVY or K.DARK_BLUE,
-    ['s'] = K.BTNFACE_DARK or K.DARK_GRAY,
-    ['t'] = K.DARK_GREEN_BG or K.DARK_GREEN,
-    ['u'] = K.W95_DESKTOP or K.CYAN,
-    ['v'] = K.LIGHT_BG or K.GRAY,
+    ['0'] = P.BLACK,
+    ['1'] = P.WHITE,
+    ['2'] = P.GRAY,
+    ['3'] = P.LIGHT_GRAY,
+    ['4'] = P.DARK_GRAY,
+    ['5'] = P.BLUE,
+    ['6'] = P.DARK_BLUE,
+    ['7'] = P.CYAN,
+    ['8'] = P.LIGHT_BLUE,
+    ['9'] = P.GREEN,
+    ['a'] = P.DARK_GREEN,
+    ['b'] = P.RED,
+    ['c'] = P.DARK_RED,
+    ['d'] = P.YELLOW,
+    ['e'] = P.ORANGE,
+    ['f'] = P.BROWN,
+    ['g'] = P.PURPLE,
+    ['h'] = P.PINK,
+    ['i'] = P.DARK_TITLE,
+    ['j'] = P.W95_TITLE_BLUE,
+    ['k'] = P.W95_TITLE_INACTIVE,
+    ['l'] = P.PURE_BLUE,
+    ['m'] = P.ALMOST_WHITE,
+    ['n'] = P.NEAR_BLACK,
+    ['o'] = P.MID_GRAY,
+    ['p'] = P.BUTTON_FACE,
+    ['q'] = P.BUTTON_HI,
+    ['r'] = P.DEEP_NAVY,
+    ['s'] = P.BTNFACE_DARK,
+    ['t'] = P.DARK_GREEN_BG,
+    ['u'] = P.W95_DESKTOP,
+    ['v'] = P.LIGHT_BG,
 }
 
 local function detectFormat(content)
-    -- If content contains chars > 'f', it's CCOS 32-color
     for i = 1, #content do
         local ch = content:sub(i,i)
         if ch > 'f' and ch <= 'v' then
@@ -102,7 +101,7 @@ local function appImageViewer(fp)
             local row = {}
             for x = 1, #line do
                 local ch = line:sub(x,x)
-                table.insert(row, colorMap[ch] or K.BLACK)
+                table.insert(row, colorMap[ch] or P.BLACK)
             end
             table.insert(pixels, row)
             imgW = math.max(imgW, #row)
@@ -121,19 +120,19 @@ local function appImageViewer(fp)
 
     w.onDraw = function(_,cx,cy,cw,ch)
         R.drawButton(cx,cy,36,14,false)
-        R.drawText(cx+2,cy+3,"Open",K.BLACK,K.GRAY)
+        R.drawText(cx+2,cy+3,"Open",P.BLACK,P.GRAY)
         R.drawButton(cx+42,cy,36,14,false)
-        R.drawText(cx+46,cy+3,"+",K.BLACK,K.GRAY)
+        R.drawText(cx+46,cy+3,"+",P.BLACK,P.GRAY)
         R.drawButton(cx+80,cy,36,14,false)
-        R.drawText(cx+84,cy+3,"-",K.BLACK,K.GRAY)
-        R.drawText(cx+120,cy+3,imgW.."x"..imgH.." @"..scale.."x",K.BLACK,K.GRAY)
-        R.drawText(cx+120,cy+11,formatName,K.DBLUE,K.GRAY)
+        R.drawText(cx+84,cy+3,"-",P.BLACK,P.GRAY)
+        R.drawText(cx+120,cy+3,imgW.."x"..imgH.." @"..scale.."x",P.BLACK,P.GRAY)
+        R.drawText(cx+120,cy+11,formatName,P.DBLUE,P.GRAY)
 
         local viewX, viewY = cx+2, cy+28
         local viewW, viewH = cw-4, ch-40
 
         if #pixels == 0 then
-            R.drawText(viewX+10, viewY+10, "No image loaded", K.BLACK, K.GRAY)
+            R.drawText(viewX+10, viewY+10, "No image loaded", P.BLACK, P.GRAY)
             return
         end
 
@@ -141,7 +140,7 @@ local function appImageViewer(fp)
             for x = 1, math.min(imgW, math.floor(viewW/scale)) do
                 local row = pixels[y + oy]
                 if row then
-                    local color = row[x + ox] or K.BLACK
+                    local color = row[x + ox] or P.BLACK
                     R.fillRect(viewX + (x-1)*scale, viewY + (y-1)*scale, scale, scale, color)
                 end
             end
