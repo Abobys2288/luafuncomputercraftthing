@@ -74,7 +74,9 @@ end
 
 function D.destroyWindow(w)
     for i,v in ipairs(D.windows) do if v.id==w.id then table.remove(D.windows,i) break end end
-    D.activeWin = D.windows[#D.windows] D.markDirty()
+    D.activeWin = D.windows[#D.windows]
+    w.visible = false
+    D.markDirty()
 end
 
 function D.bringToFront(w)
@@ -282,23 +284,22 @@ function D.appFM()
         R.drawText(cx+2,cy+ch-10," "..path,K.BLACK)
     end
     w.onClick = function(win,mx,my)
-        local cx,cy = win.cx,win.cy
-        if my >= cy and my < cy+14 then
-            if mx >= cx and mx < cx+40 then
+        if my >= 0 and my < 14 then
+            if mx >= 0 and mx < 40 then
                 -- NEW FILE
                 local name = simpleInput("New File", "Enter filename:", "newfile.txt")
                 if name then
                     local fp = path=="/" and ("/"..name) or (path.."/"..name)
                     writeFile(fp,"") refresh() D.markDirty()
                 end
-            elseif mx >= cx+42 and mx < cx+94 then
+            elseif mx >= 42 and mx < 94 then
                 -- NEW DIR
                 local name = simpleInput("New Folder", "Enter folder name:", "newdir")
                 if name then
                     local fp = path=="/" and ("/"..name) or (path.."/"..name)
                     fs.makeDir(fp) refresh() D.markDirty()
                 end
-            elseif mx >= cx+96 and mx < cx+136 then
+            elseif mx >= 96 and mx < 136 then
                 -- DELETE
                 local it = items[sel]
                 if it and it ~= ".." then
@@ -312,15 +313,14 @@ function D.appFM()
         local lh = math.floor((win.ch-24)/8)
         for i=1,lh do
             local idx = scroll + i
-            local iy = cy + 16 + (i-1)*8
+            local iy = 16 + (i-1)*8
             if my >= iy-1 and my < iy+8 then sel=idx D.markDirty() return end
         end
     end
     w.onDoubleClick = function(win,mx,my)
-        local cx,cy = win.cx,win.cy
         local lh = math.floor((win.ch-24)/8)
         for i=1,lh do
-            local idx=scroll+i local iy=cy+16+(i-1)*8
+            local idx=scroll+i local iy=16+(i-1)*8
             if my >= iy-1 and my < iy+8 then
                 local it = items[idx]
                 if it then
@@ -376,8 +376,8 @@ function D.appEdit(fp)
         R.drawText(cx+2,cy+ch-10,getFileName(fp)..(mod and " *" or ""),K.BLACK)
     end
     w.onClick = function(win,mx,my)
-        if my >= win.cy+1 and my < win.cy+15 then
-            if mx >= win.cx and mx < win.cx+36 then
+        if my >= 0 and my < 14 then
+            if mx >= 0 and mx < 36 then
                 writeFile(fp,table.concat(lines,"\n"))
                 mod = false D.markDirty()
             end
@@ -452,8 +452,8 @@ function D.appShell()
         R.drawText(cx+2,cy+ch-10,"> "..inp,K.BLACK)
     end
     w.onKey = function(win,k,ch)
-        if ch then inp = inp..ch
-        elseif k==keys.backspace then inp=inp:sub(1,-2)
+        if ch then inp = inp..ch D.markDirty()
+        elseif k==keys.backspace then inp=inp:sub(1,-2) D.markDirty()
         elseif k==keys.enter then
             table.insert(out,"> "..inp)
             local cmd = inp inp = ""
@@ -472,8 +472,9 @@ function D.appShell()
             end
             local ml = math.floor((w.ch-16)/8)
             if #out > ml then sy = #out - ml end
-        elseif k==keys.up then if sy>0 then sy=sy-1 end
-        elseif k==keys.down then local ml=math.floor((w.ch-16)/8) if sy < #out-ml then sy=sy+1 end
+            D.markDirty()
+        elseif k==keys.up then if sy>0 then sy=sy-1 end D.markDirty()
+        elseif k==keys.down then local ml=math.floor((w.ch-16)/8) if sy < #out-ml then sy=sy+1 end D.markDirty()
         elseif k==keys.q then D.destroyWindow(win) end
     end
 end
@@ -495,6 +496,13 @@ function D.run()
             elseif act=="edit" then D.appEdit()
             elseif act=="settings" then D.appSettings()
             elseif act=="shell" then D.appShell() end
+        elseif e=="mouse_double_click" then
+            D.mouse.x=b D.mouse.y=c
+            local w = D.winAt(b,c)
+            if w then
+                D.bringToFront(w)
+                if w.onDoubleClick then pcall(w.onDoubleClick,w,b-w.cx-3,c-w.cy-18) end
+            end
         elseif e=="mouse_drag" then D.mouse.x=b D.mouse.y=c D.drag(b,c)
         elseif e=="mouse_up" then D.drop()
         elseif e=="key" then
