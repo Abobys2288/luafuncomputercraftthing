@@ -114,7 +114,9 @@ function D.drawAll()
         local act = D.activeWin and D.activeWin.id == w.id
         R.fillRect(x,y,ww,18,act and K.DBLUE or K.GRAY)
         R.drawText(x+4,y+4,w.title,act and K.WHITE or K.LGRAY)
-        R.drawButton(x+ww-18,y+1,16,14,false) R.drawText(x+ww-13,y+4,"X",K.BLACK)
+        R.drawButton(x+ww-54,y+1,16,14,false) R.drawText(x+ww-49,y+4,"_",K.BLACK)  -- Minimize
+        R.drawButton(x+ww-36,y+1,16,14,false) R.drawText(x+ww-31,y+4,"[]",K.BLACK)  -- Maximize
+        R.drawButton(x+ww-18,y+1,16,14,false) R.drawText(x+ww-13,y+4,"X",K.BLACK)  -- Close
         R.drawW95Raised(x,y,ww,hh)
         R.fillRect(x+2,y+17,ww-4,hh-19,K.GRAY)
         if w.onDraw then pcall(w.onDraw,w,x+3,y+18,ww-6,hh-21) end
@@ -347,7 +349,7 @@ function D.appFM()
             end
         elseif k==keys.backspace then path=getDir(path) sel=1 scroll=0 refresh() D.markDirty()
         elseif k==keys.f5 then refresh() D.markDirty()
-        elseif k==keys.escape or k==keys.q then D.destroyWindow(win) end
+        elseif k==keys.escape then D.destroyWindow(win) end
     end
 end
 
@@ -475,7 +477,7 @@ function D.appShell()
             D.markDirty()
         elseif k==keys.up then if sy>0 then sy=sy-1 end D.markDirty()
         elseif k==keys.down then local ml=math.floor((w.ch-16)/8) if sy < #out-ml then sy=sy+1 end D.markDirty()
-        elseif k==keys.q then D.destroyWindow(win) end
+        elseif k==keys.escape then D.destroyWindow(win) end
     end
 end
 
