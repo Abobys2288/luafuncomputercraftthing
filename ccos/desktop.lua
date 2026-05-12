@@ -41,8 +41,6 @@ function D.fitWin(ww, wh)
 end
 
 D.programs = {}
-D.startMenuScroll = 0
-D.startMenuMaxVisible = 99
 
 -- Load all programs from /ccos/programs/
 function D.loadPrograms()
@@ -394,23 +392,6 @@ function D.click(mx,my)
         else
             D.startMenuOpen = false
             D.startMenuScroll = 0
-            D.markDirty()
-        end
-    end
-                iy = iy + 14
-            end
-            iy = iy + 3  -- separator
-            -- Extra items
-            if mx >= 26 and mx < 2+mw-4 and my >= iy and my < iy+12 then
-                D.startMenuOpen = false; D.markDirty(); os.reboot()
-            end
-            iy = iy + 14
-            if mx >= 26 and mx < 2+mw-4 and my >= iy and my < iy+12 then
-                D.startMenuOpen = false; D.markDirty(); os.shutdown()
-            end
-            return nil
-        else
-            D.startMenuOpen = false
             D.markDirty()
         end
     end
