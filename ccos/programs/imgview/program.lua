@@ -118,14 +118,14 @@ local function appImageViewer(fp)
         R.drawText(cx+48,cy+3,"+",P.BLACK,P.GRAY)
         R.drawButton(cx+74,cy,28,14,false)
         R.drawText(cx+78,cy+3,"-",P.BLACK,P.GRAY)
-        R.drawText(cx+110,cy+3,status,P.DBLUE,P.GRAY)
+        R.drawText(cx+110,cy+3,status,P.DARK_BLUE,P.GRAY)
 
         local viewX, viewY = cx+2, cy+28
         local viewW, viewH = cw-4, ch-40
 
         if #pixels == 0 then
             R.drawText(viewX+4, viewY+4, "No image loaded.", P.BLACK, P.GRAY)
-            R.drawText(viewX+4, viewY+16, "Click Open or drop .nfp file.", P.DGRAY, P.GRAY)
+            R.drawText(viewX+4, viewY+16, "Click Open or drop .nfp file.", P.DARK_GRAY, P.GRAY)
             return
         end
 
