@@ -36,7 +36,6 @@ local function appFM()
         R.drawButton(cx+96, cy, 40, 14, false)
         R.drawText(cx+100, cy+3, "Delete", K.BLACK, K.GRAY)
         local lh = math.floor((ch-24)/8)
-        -- Pre-scan hover to avoid dual highlight with keyboard selection
         local hasHover = false
         for i=1, lh do
             local idx = scroll + i
@@ -84,15 +83,16 @@ local function appFM()
                         D.markDirty()
                     end
                 end)
-        elseif mx >= 96 and mx < 136 then
-            local it = items[sel]
-            if it and it ~= ".." then
-                local fp = path=="/" and ("/"..it) or (path.."/"..it)
-                if fs.exists(fp) then fs.delete(fp) end
-                refresh()
-                D.markDirty()
+            elseif mx >= 96 and mx < 136 then
+                local it = items[sel]
+                if it and it ~= ".." then
+                    local fp = path=="/" and ("/"..it) or (path.."/"..it)
+                    if fs.exists(fp) then fs.delete(fp) end
+                    refresh()
+                    D.markDirty()
+                end
+                return
             end
-            return
         end
         local lh = math.floor((win.ch-24)/8)
         for i=1, lh do
@@ -116,7 +116,6 @@ local function appFM()
                 return
             end
         end
-        -- Fallback to edit if no specific viewer found
         for _, prog in ipairs(D.programs) do
             if prog.icon == "edit" then
                 prog.run(filePath)
@@ -135,18 +134,14 @@ local function appFM()
                 if it then
                     if it == ".." then
                         path = API.getDir(path)
-                        sel = 1
-                        scroll = 0
-                        refresh()
-                        D.markDirty()
+                        sel = 1; scroll = 0
+                        refresh(); D.markDirty()
                     elseif it:sub(1,1)=="/" then
                         local np = path=="/" and it or (path..it)
                         if fs.isDir(np) then
                             path = np
-                            sel = 1
-                            scroll = 0
-                            refresh()
-                            D.markDirty()
+                            sel = 1; scroll = 0
+                            refresh(); D.markDirty()
                         end
                     else
                         openFile(path=="/" and ("/"..it) or (path.."/"..it))
@@ -178,20 +173,15 @@ local function appFM()
                 else
                     openFile(path=="/" and ("/"..it) or (path.."/"..it))
                 end
-                sel = 1
-                scroll = 0
-                refresh()
-                D.markDirty()
+                sel = 1; scroll = 0
+                refresh(); D.markDirty()
             end
         elseif k==keys.backspace then
             path = API.getDir(path)
-            sel = 1
-            scroll = 0
-            refresh()
-            D.markDirty()
+            sel = 1; scroll = 0
+            refresh(); D.markDirty()
         elseif k==keys.f5 then
-            refresh()
-            D.markDirty()
+            refresh(); D.markDirty()
         elseif k==keys.escape then
             D.destroyWindow(win)
         end
