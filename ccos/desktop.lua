@@ -37,20 +37,23 @@ D.rebuildIconCache = function()
     local by = R.h - D.taskbarH
     local iw, ih = 48, 42
     local cols = math.max(1, math.floor((R.w - 10) / (iw + 10)))
+    local rowHeight = ih + 8
     for i, prog in ipairs(D.programs) do
         local col = (i - 1) % cols
-        local row = math.floor((i - 1) / cols)
-        local ix, iy = 8 + col * (iw + 10), 8 + row * (ih + 8)
-        if iy + ih > by then break end
-        local lab = prog.name
-        if #lab > 8 then lab = lab:sub(1, 7) .. ".." end
-        table.insert(D.iconCache, {
-            prog = prog,
-            ix = ix, iy = iy,
-            iw = iw, ih = ih,
-            lab = lab,
-            hover = false
-        })
+        local row = math.floor((i - 1) / cols) - D.iconScrollY
+        local ix, iy = 8 + col * (iw + 10), 8 + row * rowHeight
+        if iy > by then break end -- fully below screen, stop
+        if iy + ih >= 0 then
+            local lab = prog.name
+            if #lab > 8 then lab = lab:sub(1, 7) .. ".." end
+            table.insert(D.iconCache, {
+                prog = prog,
+                ix = ix, iy = iy,
+                iw = iw, ih = ih,
+                lab = lab,
+                hover = false
+            })
+        end
     end
     D.lastIconCacheW = R.w
     D.lastIconCacheH = R.h
@@ -111,6 +114,8 @@ D.startMenuDragScroll = nil
 D.dragAppWin = nil  -- window receiving internal drag (pan, etc.)
 D.dragAppOX = 0
 D.dragAppOY = 0
+
+D.iconScrollY = 0
 
 D.markDirty = function() D.dirty = true end
 D.markContentDirty = function(win) D._contentWin = win end
@@ -235,11 +240,14 @@ function D.loadPrograms()
         local path = "/ccos/programs/" .. name .. "/program.lua"
         if fs.exists(path) then
             local ok, prog = pcall(function()
-                local fn = loadfile(path)
-                return fn and fn()
+                local fn, err = loadfile(path)
+                if not fn then error("loadfile: " .. tostring(err)) end
+                return fn()
             end)
             if ok and prog and prog.name and prog.run then
                 table.insert(D.programs, prog)
+            else
+                print("[CCOS] Failed to load program '" .. name .. "': " .. tostring(prog))
             end
         end
     end
@@ -577,6 +585,33 @@ function D.run()
             elseif e=="mouse_double_click" then D.mouse.x=b; D.mouse.y=c; local w=D.winAt(b,c); if w then D.bringToFront(w); if w.onDoubleClick then pcall(w.onDoubleClick,w,b-w.cx-3,c-w.cy-18) end end
             elseif e=="mouse_drag" then D.mouse.x=b; D.mouse.y=c; D.drag(b,c)
             elseif e=="mouse_up" then D.drop()
+            elseif e=="mouse_scroll" then
+                D.mouse.x=b; D.mouse.y=c
+                if D.startMenuOpen then
+                    local mw, mh, my2, sx, innerY, innerH, maxVisible, totalItems, itemH, pad, needsScroll = D._startMenuMetrics()
+                    if needsScroll then
+                        if a > 0 then
+                            D.startMenuScroll = math.max(0, D.startMenuScroll - math.floor(maxVisible/3))
+                        else
+                            D.startMenuScroll = math.min(totalItems - maxVisible, D.startMenuScroll + math.floor(maxVisible/3))
+                        end
+                        D.markDirty()
+                    end
+                else
+                    -- Desktop icon scroll
+                    local by = R.h - D.taskbarH
+                    local totalRows = math.ceil(#D.programs / math.max(1, math.floor((R.w - 10) / 58)))
+                    local visibleRows = math.max(1, math.floor((by - 8) / 50))
+                    if totalRows > visibleRows then
+                        if a > 0 then
+                            D.iconScrollY = math.max(0, D.iconScrollY - 1)
+                        else
+                            D.iconScrollY = math.min(totalRows - visibleRows, D.iconScrollY + 1)
+                        end
+                        D.rebuildIconCache()
+                        D.markDirty()
+                    end
+                end
             elseif e=="key" then
                 if D.startMenuOpen then
                     local mw, mh, my, sx, innerY, innerH, maxVisible, totalItems, itemH, pad, needsScroll = D._startMenuMetrics()
