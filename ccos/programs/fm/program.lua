@@ -286,7 +286,7 @@ local function appFM()
             R.fillRect(cx + cw - 5, barY, 3, barH, K.DGRAY)
         end
 
-        drawText(cx + 4, footerY, status .. "  Enter=open  F2=rename  Del=delete", K.DGRAY, K.GRAY, cw - 8)
+        drawText(cx + 4, footerY, status .. "  Enter=open  R=rename  Del=delete", K.DGRAY, K.GRAY, cw - 8)
     end
 
     w.onClick = function(_, mx, my)
@@ -313,7 +313,7 @@ local function appFM()
         showContext(mx, my)
     end
 
-    w.onKey = function(_, k)
+    w.onKey = function(_, k, ch)
         local rows = math.max(1, math.floor((w.ch - 21 - 58) / 8))
         if k == keys.up and sel > 1 then
             sel = sel - 1; if sel <= scroll then scroll = math.max(0, scroll - 1) end; D.markContentDirty(w)
@@ -325,10 +325,19 @@ local function appFM()
             sel = math.min(#items, sel + rows); scroll = math.min(math.max(0, #items - rows), scroll + rows); D.markContentDirty(w)
         elseif k == keys.enter then activate()
         elseif k == keys.backspace then goUp()
-        elseif k == keys.f2 then renameSelected()
+        elseif ch == "r" or ch == "R" or k == keys.f2 then renameSelected()
         elseif k == keys.delete then deleteSelected()
         elseif k == keys.f5 then refresh(); D.markDirty()
         elseif k == keys.escape then API.close(w) end
+    end
+
+    w.onScroll = function(_, dir)
+        local rows = math.max(1, math.floor((w.ch - 21 - 58) / 8))
+        local maxScroll = math.max(0, #items - rows)
+        if dir < 0 then scroll = math.max(0, scroll - 3)
+        else scroll = math.min(maxScroll, scroll + 3) end
+        sel = math.max(1, math.min(#items, math.max(sel, scroll + 1)))
+        D.markContentDirty(w)
     end
 end
 

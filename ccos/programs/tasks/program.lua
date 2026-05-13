@@ -9,13 +9,16 @@ local function appTasks()
     local wx, wy, ww, wh = D.fitWin(200, 140)
     local w = D.createWindow("Task Manager", wx, wy, ww, wh)
 
-    w.onDraw = function(win, cx, cy, cw, ch)
+    local function visibleWindows()
         local visible = {}
         for _, win2 in ipairs(D.windows) do
-            if win2.visible and not win2.minimized then
-                table.insert(visible, win2)
-            end
+            if win2.visible and not win2.minimized then table.insert(visible, win2) end
         end
+        return visible
+    end
+
+    w.onDraw = function(win, cx, cy, cw, ch)
+        local visible = visibleWindows()
 
         local lh = math.floor((ch-20)/8)
         for i = 1, lh do
@@ -37,12 +40,7 @@ local function appTasks()
     end
 
     w.onClick = function(win, mx, my)
-        local visible = {}
-        for _, win2 in ipairs(D.windows) do
-            if win2.visible and not win2.minimized then
-                table.insert(visible, win2)
-            end
-        end
+        local visible = visibleWindows()
 
         local lh = math.floor((win.ch-20)/8)
         for i = 1, lh do
@@ -59,12 +57,7 @@ local function appTasks()
     end
 
     w.onKey = function(win, k, ch)
-        local visible = {}
-        for _, win2 in ipairs(D.windows) do
-            if win2.visible and not win2.minimized then
-                table.insert(visible, win2)
-            end
-        end
+        local visible = visibleWindows()
 
         if k == keys.up and sel > 1 then
             sel = sel - 1
@@ -85,6 +78,16 @@ local function appTasks()
             sel = math.min(sel, #visible)
             D.markDirty()
         end
+    end
+
+    w.onScroll = function(win, dir)
+        local visible = visibleWindows()
+        local lh = math.max(1, math.floor((win.ch - 20) / 8))
+        local maxScroll = math.max(0, #visible - lh)
+        if dir < 0 then scroll = math.max(0, scroll - 3)
+        else scroll = math.min(maxScroll, scroll + 3) end
+        sel = math.max(1, math.min(#visible, math.max(sel, scroll + 1)))
+        D.markContentDirty(win)
     end
 end
 

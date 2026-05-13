@@ -314,6 +314,76 @@ R.FONT = {
     ["}"]={12,2,2,1,2,2,12},
 }
 
+R.CYR_UPPER = {
+    ["а"]="А", ["б"]="Б", ["в"]="В", ["г"]="Г", ["д"]="Д", ["е"]="Е", ["ё"]="Ё",
+    ["ж"]="Ж", ["з"]="З", ["и"]="И", ["й"]="Й", ["к"]="К", ["л"]="Л", ["м"]="М",
+    ["н"]="Н", ["о"]="О", ["п"]="П", ["р"]="Р", ["с"]="С", ["т"]="Т", ["у"]="У",
+    ["ф"]="Ф", ["х"]="Х", ["ц"]="Ц", ["ч"]="Ч", ["ш"]="Ш", ["щ"]="Щ", ["ъ"]="Ъ",
+    ["ы"]="Ы", ["ь"]="Ь", ["э"]="Э", ["ю"]="Ю", ["я"]="Я",
+}
+
+local CYR_FONT = {
+    ["А"]={14,17,17,31,17,17,17}, ["Б"]={31,16,16,30,17,17,30},
+    ["В"]={30,17,17,30,17,17,30}, ["Г"]={31,16,16,16,16,16,16},
+    ["Д"]={14,17,17,17,17,31,17}, ["Е"]={31,16,16,30,16,16,31},
+    ["Ё"]={10,0,31,16,30,16,31},  ["Ж"]={21,21,14,4,14,21,21},
+    ["З"]={30,1,1,14,1,1,30},    ["И"]={17,19,21,21,21,25,17},
+    ["Й"]={10,4,17,19,21,25,17}, ["К"]={17,18,20,24,20,18,17},
+    ["Л"]={7,9,17,17,17,17,17},  ["М"]={17,27,21,21,17,17,17},
+    ["Н"]={17,17,17,31,17,17,17}, ["О"]={14,17,17,17,17,17,14},
+    ["П"]={31,17,17,17,17,17,17}, ["Р"]={30,17,17,30,16,16,16},
+    ["С"]={14,17,16,16,16,17,14}, ["Т"]={31,4,4,4,4,4,4},
+    ["У"]={17,17,10,4,8,16,14},  ["Ф"]={4,14,21,21,14,4,4},
+    ["Х"]={17,17,10,4,10,17,17}, ["Ц"]={17,17,17,17,17,31,1},
+    ["Ч"]={17,17,17,15,1,1,1},   ["Ш"]={17,17,17,21,21,21,31},
+    ["Щ"]={17,17,17,21,21,31,1}, ["Ъ"]={24,8,8,14,9,9,14},
+    ["Ы"]={17,17,17,25,21,21,25}, ["Ь"]={16,16,16,30,17,17,30},
+    ["Э"]={14,17,1,7,1,17,14},   ["Ю"]={17,18,20,28,20,18,17},
+    ["Я"]={15,17,17,15,5,9,17},
+}
+for ch, glyph in pairs(CYR_FONT) do R.FONT[ch] = glyph end
+
+function R.utf8Chars(text)
+    text = tostring(text or "")
+    local chars = {}
+    local i = 1
+    while i <= #text do
+        local b = text:byte(i) or 0
+        local len = 1
+        if b >= 240 then len = 4
+        elseif b >= 224 then len = 3
+        elseif b >= 192 then len = 2 end
+        table.insert(chars, text:sub(i, i + len - 1))
+        i = i + len
+    end
+    return chars
+end
+
+function R.utf8Len(text)
+    return #R.utf8Chars(text)
+end
+
+function R.utf8Sub(text, first, last)
+    local chars = R.utf8Chars(text)
+    first = first or 1
+    last = last or #chars
+    local out = {}
+    for i = first, math.min(last, #chars) do out[#out + 1] = chars[i] end
+    return table.concat(out)
+end
+
+function R.utf8Pop(text)
+    local chars = R.utf8Chars(text)
+    table.remove(chars)
+    return table.concat(chars)
+end
+
+function R.fontKey(ch)
+    if not ch or ch == "" then return "?" end
+    if #ch == 1 then return ch:upper() end
+    return R.CYR_UPPER[ch] or ch
+end
+
 -- Pixel font 5x7 drawing
 function R.drawText(x, y, text, fg, bg)
     if R.mode == 0 then
@@ -327,8 +397,8 @@ function R.drawText(x, y, text, fg, bg)
         return
     end
     local cx = x
-    for i = 1, #text do
-        local ch = text:sub(i,i):upper()
+    for _, raw in ipairs(R.utf8Chars(text)) do
+        local ch = R.fontKey(raw)
         local glyph = R.FONT[ch] or R.FONT["?"]
         for row = 1, 7 do
             local bits = glyph[row]
@@ -346,16 +416,19 @@ function R.drawText(x, y, text, fg, bg)
 end
 
 function R.textWidth(text)
-    return #(tostring(text or "")) * 6
+    return R.utf8Len(text) * 6
 end
 
 function R.clipText(text, maxW)
     text = tostring(text or "")
     local maxChars = math.max(0, math.floor((maxW or 0) / 6))
-    if #text <= maxChars then return text end
+    local chars = R.utf8Chars(text)
+    if #chars <= maxChars then return text end
     if maxChars <= 0 then return "" end
     if maxChars <= 2 then return string.rep(".", maxChars) end
-    return text:sub(1, maxChars - 2) .. ".."
+    local out = {}
+    for i = 1, maxChars - 2 do out[#out + 1] = chars[i] end
+    return table.concat(out) .. ".."
 end
 
 function R.drawTextClipped(x, y, text, fg, bg, maxW)

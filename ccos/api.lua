@@ -72,6 +72,27 @@ function api.clipText(text, maxW)
     return text:sub(1, maxChars - 2) .. ".."
 end
 
+function api.utf8Chars(text)
+    local renderer = api.getRenderer()
+    if renderer and renderer.utf8Chars then return renderer.utf8Chars(text) end
+    text = tostring(text or "")
+    local chars = {}
+    for i = 1, #text do chars[#chars + 1] = text:sub(i, i) end
+    return chars
+end
+
+function api.utf8Len(text)
+    local renderer = api.getRenderer()
+    if renderer and renderer.utf8Len then return renderer.utf8Len(text) end
+    return #tostring(text or "")
+end
+
+function api.utf8Pop(text)
+    local renderer = api.getRenderer()
+    if renderer and renderer.utf8Pop then return renderer.utf8Pop(text) end
+    return tostring(text or ""):sub(1, -2)
+end
+
 function api.drawText(x, y, text, fg, bg, maxW)
     local renderer = api.getRenderer()
     if not renderer or not renderer.drawText then return end
@@ -285,6 +306,15 @@ function api.chooseFile(options, callback)
         elseif k == keys.pageUp then sel = math.max(1, sel - rows); scroll = math.max(0, scroll - rows); api.redrawContent(win)
         elseif k == keys.pageDown then sel = math.min(#items, sel + rows); scroll = math.min(math.max(0, #items - rows), scroll + rows); api.redrawContent(win)
         end
+    end
+
+    win.onScroll = function(_, dir)
+        local rows = math.max(1, math.floor((win.ch - 21 - 52) / 8))
+        local maxScroll = math.max(0, #items - rows)
+        if dir < 0 then scroll = math.max(0, scroll - 3)
+        else scroll = math.min(maxScroll, scroll + 3) end
+        sel = math.max(1, math.min(#items, math.max(sel, scroll + 1)))
+        api.redrawContent(win)
     end
 
     return win

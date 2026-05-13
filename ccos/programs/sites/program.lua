@@ -38,7 +38,11 @@ end
 local function appSitesBrowser()
     local net = require("ccos.drivers.net")
     local online = net.init()
-    local serverId = online and net.lookup("server") or nil
+    local function lookupSiteServer()
+        if type(net.lookupSiteServer) == "function" then return net.lookupSiteServer() end
+        return (type(net.lookup) == "function" and (net.lookup("siteserver") or net.lookup("server"))) or nil
+    end
+    local serverId = online and lookupSiteServer() or nil
     local status = online and (serverId and "Ready" or "No server") or "No modem"
     local address = ""
     local title = "Sites"
@@ -54,7 +58,7 @@ local function appSitesBrowser()
 
     local function ensureServer()
         if not online then status = "No modem"; return false end
-        serverId = serverId or net.lookup("server")
+        serverId = serverId or lookupSiteServer()
         if not serverId then status = "No server"; return false end
         return true
     end
@@ -199,6 +203,15 @@ local function appSitesBrowser()
         elseif k == keys.pageUp then sy = math.max(0, sy - rows); API.redrawContent(w)
         elseif k == keys.pageDown then sy = math.min(math.max(0, #lines - rows), sy + rows); API.redrawContent(w)
         end
+    end
+
+    w.onScroll = function(_, dir)
+        local rows = math.max(1, math.floor((w.ch - 21 - 64) / 8))
+        local maxScroll = math.max(0, #lines - rows)
+        if dir < 0 then sy = math.max(0, sy - 3)
+        else sy = math.min(maxScroll, sy + 3) end
+        if mode == "list" then sel = math.max(1, math.min(#siteList, math.max(sel, sy + 1))) end
+        API.redrawContent(w)
     end
 
     if serverId then listSites() end

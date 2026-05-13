@@ -37,6 +37,12 @@ local function joinLines(lines)
     return table.concat(lines, "\n")
 end
 
+local function popChar(text)
+    if API and API.utf8Pop then return API.utf8Pop(text) end
+    if R and R.utf8Pop then return R.utf8Pop(text) end
+    return tostring(text or ""):sub(1, -2)
+end
+
 local function safeName(name)
     name = tostring(name or ""):lower():gsub("%s+", "-"):gsub("[^%w%-%_]", "")
     if name == "" then name = "site" .. os.getComputerID() end
@@ -46,7 +52,11 @@ end
 local function appSites()
     local net = require("ccos.drivers.net")
     local online = net.init()
-    local serverId = online and net.lookup("server") or nil
+    local function lookupSiteServer()
+        if type(net.lookupSiteServer) == "function" then return net.lookupSiteServer() end
+        return (type(net.lookup) == "function" and (net.lookup("siteserver") or net.lookup("server"))) or nil
+    end
+    local serverId = online and lookupSiteServer() or nil
     local siteName = safeName(os.getComputerLabel() or ("site" .. os.getComputerID()))
     local siteTitle = os.getComputerLabel() or siteName
     local status = online and (serverId and "Ready" or "No server") or "No modem"
@@ -78,6 +88,33 @@ local function appSites()
         return false
     end
 
+    local function requestSiteResolve(name)
+        if type(net.siteResolve) == "function" then return net.siteResolve(serverId, name) end
+        if type(net.send) ~= "function" or type(net.receive) ~= "function" then return nil end
+        net.send(serverId, {type = "site_resolve", name = name})
+        local _, msg = net.receive(3)
+        if type(msg) == "table" and msg.type == "site_resolve_ok" then return msg.id end
+        return nil
+    end
+
+    local function requestSiteContent(hostId, name)
+        if type(net.siteGet) == "function" then return net.siteGet(hostId, name, "index.txt") end
+        if type(net.send) ~= "function" or type(net.receive) ~= "function" then return nil end
+        net.send(hostId, {type = "site_get", name = name, path = "index.txt"})
+        local _, msg = net.receive(5)
+        if type(msg) == "table" and msg.type == "site_content" then return msg.content, msg.title end
+        return nil
+    end
+
+    local function requestSiteList()
+        if type(net.siteList) == "function" then return net.siteList(serverId) or {} end
+        if type(net.send) ~= "function" or type(net.receive) ~= "function" then return {} end
+        net.send(serverId, {type = "site_list"})
+        local _, msg = net.receive(3)
+        if type(msg) == "table" and msg.type == "site_list_resp" then return msg.sites or {} end
+        return {}
+    end
+
     local function savePage()
         API.writeFile(PAGE_PATH, joinLines(lines))
         status = "Saved " .. PAGE_PATH
@@ -86,7 +123,7 @@ local function appSites()
 
     local function registerSite()
         if not online then status = "No modem"; API.redrawContent(w); return end
-        serverId = serverId or net.lookup("server")
+        serverId = serverId or lookupSiteServer()
         if not serverId then status = "No server"; API.redrawContent(w); return end
         savePage()
         publishRegistration()
@@ -97,13 +134,13 @@ local function appSites()
 
     local function openSite(name)
         if not online then status = "No modem"; API.redrawContent(w); return end
-        serverId = serverId or net.lookup("server")
+        serverId = serverId or lookupSiteServer()
         if not serverId then status = "No server"; API.redrawContent(w); return end
         status = "Resolving " .. name .. "..."
         API.redrawContent(w)
-        local hostId = net.siteResolve(serverId, name)
+        local hostId = requestSiteResolve(name)
         if not hostId then status = "Site not found"; API.redrawContent(w); return end
-        local content, title = net.siteGet(hostId, name, "index.txt")
+        local content, title = requestSiteContent(hostId, name)
         if content then
             viewTitle = title or name
             viewLines = splitLines(content)
@@ -118,9 +155,9 @@ local function appSites()
 
     local function listSites()
         if not online then status = "No modem"; API.redrawContent(w); return end
-        serverId = serverId or net.lookup("server")
+        serverId = serverId or lookupSiteServer()
         if not serverId then status = "No server"; API.redrawContent(w); return end
-        local sites = net.siteList(serverId)
+        local sites = requestSiteList()
         viewLines = {}
         if #sites == 0 then
             viewLines = {"No registered sites."}
@@ -236,7 +273,10 @@ local function appSites()
             cc = math.min(#(lines[cl] or "") + 1, cc + 1); API.redrawContent(w)
         elseif mode == "edit" and k == keys.backspace then
             local line = lines[cl] or ""
-            if cc > 1 then lines[cl] = line:sub(1, cc - 2) .. line:sub(cc); cc = cc - 1
+            if cc > 1 then
+                local before = line:sub(1, cc - 1)
+                lines[cl] = popChar(before) .. line:sub(cc)
+                cc = math.max(1, cc - 1)
             elseif cl > 1 then
                 local prevLen = #(lines[cl - 1] or "")
                 lines[cl - 1] = (lines[cl - 1] or "") .. line
@@ -254,6 +294,15 @@ local function appSites()
             if cl > sy + rows then sy = sy + 1 end
             API.redrawContent(w)
         end
+    end
+
+    w.onScroll = function(_, dir)
+        local rows = math.max(1, math.floor((w.ch - 21 - 44) / 8))
+        local count = #(mode == "edit" and lines or viewLines)
+        local maxScroll = math.max(0, count - rows)
+        if dir < 0 then sy = math.max(0, sy - 3)
+        else sy = math.min(maxScroll, sy + 3) end
+        API.redrawContent(w)
     end
 end
 

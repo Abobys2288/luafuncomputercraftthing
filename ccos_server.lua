@@ -102,6 +102,7 @@ local function builtInPackages()
                         name = pkg.name,
                         title = pkg.title or pkg.name,
                         desc = pkg.desc or "",
+                        icon = pkg.icon,
                         files = pkg.files,
                     })
                 end

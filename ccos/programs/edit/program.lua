@@ -4,6 +4,12 @@ local R = _G.ccos_render
 local API = _G.ccos_api
 local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,BLUE=5,DBLUE=6,DESKTOP=30}
 
+local function popChar(text)
+    if API and API.utf8Pop then return API.utf8Pop(text) end
+    if R and R.utf8Pop then return R.utf8Pop(text) end
+    return tostring(text or ""):sub(1, -2)
+end
+
 local function appEdit(fp)
     fp = fp or "/untitled.txt"
     local lines = {}
@@ -67,7 +73,7 @@ local function appEdit(fp)
         elseif k == keys.backspace then
             if cc > 1 then
                 local l = lines[cl] or ""
-                lines[cl] = l:sub(1, cc - 2) .. l:sub(cc)
+                lines[cl] = popChar(l:sub(1, cc - 1)) .. l:sub(cc)
                 cc = cc - 1
             elseif cl > 1 then
                 local pl = #(lines[cl - 1] or "")
@@ -123,6 +129,14 @@ local function appEdit(fp)
             if mod then API.writeFile(fp, table.concat(lines, "\n")) end
             D.destroyWindow(win)
         end
+    end
+
+    w.onScroll = function(_, dir)
+        local eh = math.max(1, math.floor((w.ch - 21 - 24) / 8))
+        if dir < 0 then sy = math.max(0, sy - 3)
+        else sy = math.min(math.max(0, #lines - eh), sy + 3) end
+        cl = math.max(1, math.min(#lines, math.max(cl, sy + 1)))
+        D.markContentDirty(w)
     end
 end
 

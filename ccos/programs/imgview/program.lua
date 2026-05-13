@@ -232,6 +232,13 @@ local function appImageViewer(initialPath)
         API.redrawContent(win)
     end
 
+    win.onScroll = function(_, dir)
+        if #pixels == 0 then return end
+        local step = math.max(1, math.floor(8 / scale))
+        if dir < 0 then oy = oy - step else oy = oy + step end
+        API.redrawContent(win)
+    end
+
     win.onKey = function(_, k, ch)
         local step = math.max(1, math.floor(4 / scale))
         if ch == "o" or ch == "O" then openDialog()

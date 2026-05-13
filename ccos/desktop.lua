@@ -76,6 +76,126 @@ D.programs = {}
 D.iconCache = {}
 D.lastIconCacheW = 0
 D.lastIconCacheH = 0
+D.loadedIcons = {}
+D.inputLayout = "EN"
+D.ctrlDown = false
+D.skipNextCharAt = nil
+D.dragPreviewX = nil
+D.dragPreviewY = nil
+D._lastDragDraw = 0
+
+local NFP32_KEYS = "0123456789abcdefghijklmnopqrstuv"
+local NFP32_MAP = {}
+for i = 1, #NFP32_KEYS do NFP32_MAP[NFP32_KEYS:sub(i, i)] = i - 1 end
+
+local RU_LOWER = {
+    q="й", w="ц", e="у", r="к", t="е", y="н", u="г", i="ш", o="щ", p="з",
+    ["["]="х", ["]"]="ъ", a="ф", s="ы", d="в", f="а", g="п", h="р", j="о",
+    k="л", l="д", [";"]="ж", ["'"]="э", z="я", x="ч", c="с", v="м", b="и",
+    n="т", m="ь", [","]="б", ["."]="ю", ["`"]="ё",
+}
+local RU_UPPER = {
+    q="Й", w="Ц", e="У", r="К", t="Е", y="Н", u="Г", i="Ш", o="Щ", p="З",
+    ["["]="Х", ["]"]="Ъ", a="Ф", s="Ы", d="В", f="А", g="П", h="Р", j="О",
+    k="Л", l="Д", [";"]="Ж", ["'"]="Э", z="Я", x="Ч", c="С", v="М", b="И",
+    n="Т", m="Ь", [","]="Б", ["."]="Ю", ["`"]="Ё",
+}
+
+local function isCtrlKey(k)
+    return k == keys.leftCtrl or k == keys.rightCtrl
+end
+
+function D.translateChar(ch)
+    if D.inputLayout ~= "RU" then return ch end
+    if not ch or ch == "" then return ch end
+    local lower = ch:lower()
+    local isUpper = ch ~= lower
+    return (isUpper and RU_UPPER[lower]) or RU_LOWER[lower] or ch
+end
+
+local function utf8Pop(text)
+    if R and R.utf8Pop then return R.utf8Pop(text) end
+    return tostring(text or ""):sub(1, -2)
+end
+
+local function readNfpIcon(path)
+    if not path or not fs.exists(path) or fs.isDir(path) then return nil end
+    local f = fs.open(path, "r")
+    if not f then return nil end
+    local ext = (path:match("%.([^%.]+)$") or ""):lower()
+    local pixels, imgW = {}, 0
+    while true do
+        local line = f.readLine()
+        if not line then break end
+        if line ~= "" then
+            local row = {}
+            if ext == "nfp256" then
+                for i = 1, #line, 2 do
+                    row[#row + 1] = tonumber(line:sub(i, i + 1), 16) or 0
+                end
+            else
+                for i = 1, #line do
+                    row[#row + 1] = NFP32_MAP[line:sub(i, i):lower()] or 0
+                end
+            end
+            pixels[#pixels + 1] = row
+            imgW = math.max(imgW, #row)
+        end
+    end
+    f.close()
+    if #pixels == 0 or imgW == 0 then return nil end
+    return {pixels = pixels, w = imgW, h = #pixels, path = path}
+end
+
+function D.iconPathsFor(prog)
+    local paths = {}
+    local icon = prog and prog.icon
+    if prog and prog.iconPath then paths[#paths + 1] = prog.iconPath end
+    if type(icon) == "string" and icon:find("/") then paths[#paths + 1] = icon end
+    if prog and prog._dirName then
+        paths[#paths + 1] = "/ccos/programs/" .. prog._dirName .. "/icon.nfp256"
+        paths[#paths + 1] = "/ccos/programs/" .. prog._dirName .. "/icon.nfp"
+    end
+    if type(icon) == "string" and not icon:find("/") then
+        paths[#paths + 1] = "/ccos/icons/" .. icon .. ".nfp256"
+        paths[#paths + 1] = "/ccos/icons/" .. icon .. ".nfp"
+    end
+    paths[#paths + 1] = "/ccos/icons/app.nfp256"
+    return paths
+end
+
+function D.loadIcon(prog)
+    local key = tostring((prog and (prog.iconPath or prog.icon or prog.name)) or "app")
+    if D.loadedIcons[key] ~= nil then return D.loadedIcons[key] end
+    for _, path in ipairs(D.iconPathsFor(prog or {})) do
+        local img = readNfpIcon(path)
+        if img then D.loadedIcons[key] = img; return img end
+    end
+    D.loadedIcons[key] = false
+    return nil
+end
+
+function D.drawProgramIcon(prog, x, y, w, h)
+    local icon = D.loadIcon(prog)
+    if icon then
+        local dw = math.min(icon.w, w)
+        local dh = math.min(icon.h, h)
+        local ox = x + math.floor((w - dw) / 2)
+        local oy = y + math.floor((h - dh) / 2)
+        for py = 1, dh do
+            local row = icon.pixels[py]
+            if row then
+                for px = 1, dw do
+                    local color = row[px]
+                    if color and color ~= 254 then R.setPixel(ox + px - 1, oy + py - 1, color) end
+                end
+            end
+        end
+        return true
+    end
+    R.drawText(x + math.floor((w - 6) / 2), y + math.floor((h - 7) / 2), (prog.name or "?"):sub(1, 1):upper(), K.DBLUE, nil)
+    return false
+end
 
 D.rebuildIconCache = function()
     D.iconCache = {}
@@ -283,6 +403,7 @@ end
 
 function D.loadPrograms()
 D.programs = {}
+D.loadedIcons = {}
 D.contextMenu = nil
 D._speaker = nil
 
@@ -317,6 +438,7 @@ end
                 return fn()
             end)
             if ok and prog and prog.name and prog.run then
+                prog._dirName = name
                 table.insert(D.programs, prog)
                 print("[CCOS] Loaded program: " .. prog.name)
             else
@@ -364,7 +486,7 @@ function D.inputDialog(title,prompt,default,callback)
     end
     w.onKey=function(win,k,ch)
         if ch then input=input..ch; D.markContentDirty(win)
-        elseif k==keys.backspace then input=input:sub(1,-2); D.markContentDirty(win)
+        elseif k==keys.backspace then input=utf8Pop(input); D.markContentDirty(win)
         elseif k==keys.enter then local r=input~="" and input or nil; D.destroyWindow(w); if callback then callback(r) end
         elseif k==keys.escape then D.destroyWindow(w); if callback then callback(nil) end end
     end
@@ -408,12 +530,12 @@ function D._drawFull()
         if hover then
             R.fillRect(ic.ix - 2, ic.iy - 2, ic.iw + 4, ic.ih + 4, K.DBLUE)
             R.fillRect(ic.ix, ic.iy, ic.iw, 24, K.LGRAY); R.drawW95Sunken(ic.ix, ic.iy, ic.iw, 24)
-            R.drawText(ic.ix + math.floor((ic.iw - 6) / 2), ic.iy + 7, ic.prog.name:sub(1, 1):upper(), K.DBLUE, K.LGRAY)
-            R.drawText(ic.ix + math.floor((ic.iw - #ic.lab * 6) / 2), ic.iy + 28, ic.lab, K.WHITE, K.DBLUE)
+            D.drawProgramIcon(ic.prog, ic.ix, ic.iy + 4, ic.iw, 16)
+            R.drawText(ic.ix + math.floor((ic.iw - R.textWidth(ic.lab)) / 2), ic.iy + 28, ic.lab, K.WHITE, K.DBLUE)
         else
             R.fillRect(ic.ix, ic.iy, ic.iw, 24, K.LGRAY); R.drawW95Sunken(ic.ix, ic.iy, ic.iw, 24)
-            R.drawText(ic.ix + math.floor((ic.iw - 6) / 2), ic.iy + 7, ic.prog.name:sub(1, 1):upper(), K.DBLUE, K.LGRAY)
-            R.drawText(ic.ix + math.floor((ic.iw - #ic.lab * 6) / 2), ic.iy + 28, ic.lab, K.WHITE, K.DESKTOP)
+            D.drawProgramIcon(ic.prog, ic.ix, ic.iy + 4, ic.iw, 16)
+            R.drawText(ic.ix + math.floor((ic.iw - R.textWidth(ic.lab)) / 2), ic.iy + 28, ic.lab, K.WHITE, K.DESKTOP)
         end
     end
 
@@ -429,15 +551,21 @@ function D._drawFull()
         drawWindowChrome(w, x, y, ww, hh, act)
     end end
 
+    if D.dragWin and D.dragPreviewX and D.dragPreviewY then
+        R.drawDragOutline(D.dragPreviewX, D.dragPreviewY, D.dragWin.cw, D.dragWin.ch)
+    end
+
     -- Taskbar
     R.fillRect(0,by,R.w,D.taskbarH,K.GRAY); R.drawLine(0,by,R.w-1,by,K.WHITE)
     drawButtonText(2,by+2,54,16,"Start",D.startMenuOpen)
-    local bx=60; for _,w in ipairs(D.windows) do local bw=math.min(100,R.w-bx-55); if bw<25 then break end
+    local layoutX = math.max(60, R.w - 76)
+    local bx=60; for _,w in ipairs(D.windows) do local bw=math.min(100,layoutX-bx-4); if bw<25 then break end
         local active=D.activeWin and D.activeWin.id==w.id; R.drawButton(bx,by+3,bw,14,active)
         local t=#w.title>12 and w.title:sub(1,10)..".." or w.title; if w.minimized then t="("..t..")" end
         drawTextClip(bx+4,by+6,t,active and K.WHITE or K.BLACK,active and K.GRAY or K.GRAY,bw-8)
         bx=bx+bw+2
     end
+    R.drawW95Sunken(layoutX,by+3,24,14); R.drawText(layoutX+4,by+6,D.inputLayout,K.BLACK,K.GRAY)
     R.drawW95Sunken(R.w-48,by+3,44,14); R.drawText(R.w-44,by+6,D.clock,K.BLACK,K.GRAY)
 
     -- Start Menu
@@ -634,7 +762,12 @@ function D.click(mx,my,btn)
                 D.markDirty(); return nil
             end
             if w.cw >= 62 and mx>=w.cx+w.cw-54 and mx<w.cx+w.cw-38 then w.minimized=true; D.markDirty(); return nil end
-            if not w.maximized then D.dragWin=w; D.dragOX=mx-w.cx; D.dragOY=my-w.cy end; return nil
+            if not w.maximized then
+                D.dragWin=w; D.dragOX=mx-w.cx; D.dragOY=my-w.cy
+                D.dragPreviewX=w.cx; D.dragPreviewY=w.cy
+                D._lastDragDraw=0
+            end
+            return nil
         end
         if not w.maximized and mx>=w.cx+w.cw-8 and my>=w.cy+w.ch-8 then
             D.resizeWin=w; D.resizeOX=w.cw-(mx-w.cx); D.resizeOY=w.ch-(my-w.cy); return nil
@@ -699,14 +832,39 @@ function D.drag(mx,my)
         w.cw = math.max(math.min(80, R.w), math.min(R.w - w.cx + 1, nw))
         w.ch = math.max(math.min(40, R.h - D.taskbarH), math.min(R.h - D.taskbarH - w.cy + 1, nh))
         D.clampWindow(w)
-        D.markDirty()
+        local now = os.clock()
+        if now - (D._lastDragDraw or 0) > 0.06 then
+            D._lastDragDraw = now
+            D.markDirty()
+        end
         return
     end
-    w.cx=mx-D.dragOX; w.cy=my-D.dragOY; D.clampWindow(w)
-    D.markDirty()
+    local by = math.max(20, R.h - D.taskbarH)
+    local px = mx - D.dragOX
+    local py = my - D.dragOY
+    px = math.max(1, math.min(px, math.max(1, R.w - w.cw + 1)))
+    py = math.max(1, math.min(py, math.max(1, by - w.ch + 1)))
+    D.dragPreviewX = px
+    D.dragPreviewY = py
+    local now = os.clock()
+    if now - (D._lastDragDraw or 0) > 0.06 then
+        D._lastDragDraw = now
+        D.markDirty()
+    end
 end
 
-function D.drop() D.dragWin=nil; D.resizeWin=nil; D.startMenuDragY=nil; D.startMenuDragScroll=nil; D.dragAppWin=nil end
+function D.drop()
+    if D.dragWin and D.dragPreviewX and D.dragPreviewY then
+        D.dragWin.cx = D.dragPreviewX
+        D.dragWin.cy = D.dragPreviewY
+        D.clampWindow(D.dragWin)
+        D.markDirty()
+    elseif D.resizeWin then
+        D.markDirty()
+    end
+    D.dragWin=nil; D.resizeWin=nil; D.startMenuDragY=nil; D.startMenuDragScroll=nil; D.dragAppWin=nil
+    D.dragPreviewX=nil; D.dragPreviewY=nil
+end
 
 -- ============================================================
 -- MAIN LOOP
@@ -742,7 +900,7 @@ function D.run()
                 if D.startMenuOpen then
                     local mw, mh, my2, sx, innerY, innerH, maxVisible, totalItems, itemH, pad, needsScroll = D._startMenuMetrics()
                     if needsScroll then
-                        if a > 0 then
+                        if a < 0 then
                             D.startMenuScroll = math.max(0, D.startMenuScroll - math.floor(maxVisible/3))
                         else
                             D.startMenuScroll = math.min(totalItems - maxVisible, D.startMenuScroll + math.floor(maxVisible/3))
@@ -750,22 +908,43 @@ function D.run()
                         D.markDirty()
                     end
                 else
-                    -- Desktop icon scroll
-                    local by = R.h - D.taskbarH
-                    local totalRows = math.ceil(#D.programs / math.max(1, math.floor((R.w - 10) / 58)))
-                    local visibleRows = math.max(1, math.floor((by - 8) / 50))
-                    if totalRows > visibleRows then
-                        if a > 0 then
-                            D.iconScrollY = math.max(0, D.iconScrollY - 1)
-                        else
-                            D.iconScrollY = math.min(totalRows - visibleRows, D.iconScrollY + 1)
+                    local handled = false
+                    local w = D.winAt(b, c)
+                    if w and w.onScroll then
+                        D.bringToFront(w)
+                        handled = true
+                        pcall(w.onScroll, w, a, b - w.cx - 3, c - w.cy - 18)
+                    end
+                    if not handled then
+                        -- Desktop icon scroll
+                        local by = R.h - D.taskbarH
+                        local totalRows = math.ceil(#D.programs / math.max(1, math.floor((R.w - 10) / 58)))
+                        local visibleRows = math.max(1, math.floor((by - 8) / 50))
+                        if totalRows > visibleRows then
+                            if a < 0 then
+                                D.iconScrollY = math.max(0, D.iconScrollY - 1)
+                            else
+                                D.iconScrollY = math.min(totalRows - visibleRows, D.iconScrollY + 1)
+                            end
+                            D.rebuildIconCache()
+                            D.markDirty()
                         end
-                        D.rebuildIconCache()
-                        D.markDirty()
                     end
                 end
             elseif e=="key" then
-                if D.startMenuOpen then
+                local consumedKey = false
+                if isCtrlKey(a) then
+                    D.ctrlDown = true
+                    consumedKey = true
+                elseif D.ctrlDown and a == keys.space then
+                    D.inputLayout = D.inputLayout == "RU" and "EN" or "RU"
+                    D.skipNextCharAt = os.clock()
+                    D.markDirty()
+                    consumedKey = true
+                end
+                if consumedKey then
+                    -- handled by desktop input layer
+                elseif D.startMenuOpen then
                     local mw, mh, my, sx, innerY, innerH, maxVisible, totalItems, itemH, pad, needsScroll = D._startMenuMetrics()
                     if a==keys.up then
                         D.startMenuSel = math.max(1, D.startMenuSel - 1)
@@ -785,8 +964,15 @@ function D.run()
                         D.startMenuOpen=false; D.startMenuScroll=0; D.markDirty()
                     end
                 elseif D.activeWin and D.activeWin.onKey then pcall(D.activeWin.onKey,D.activeWin,a,nil) end
+            elseif e=="key_up" then
+                if isCtrlKey(a) then D.ctrlDown = false end
             elseif e=="char" then
-                if not D.startMenuOpen and D.activeWin and D.activeWin.onKey then pcall(D.activeWin.onKey,D.activeWin,nil,a) end
+                if D.skipNextCharAt and os.clock() - D.skipNextCharAt < 0.15 then
+                    D.skipNextCharAt = nil
+                elseif not D.startMenuOpen and D.activeWin and D.activeWin.onKey then
+                    D.skipNextCharAt = nil
+                    pcall(D.activeWin.onKey,D.activeWin,nil,D.translateChar(a))
+                end
             end
         end
         R.beginDraw(); R.clear(); R.fillRect(0,0,R.w,R.h,K.BLACK); R.drawText(10,10,"CCOS shutdown.",K.WHITE,K.BLACK); R.endDraw(); sleep(0.3); R.shutdown()

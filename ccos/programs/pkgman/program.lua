@@ -8,6 +8,7 @@ local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,DBLUE=19,RED=11,GREEN=9}
 local REPO = "Abobys2288/luafuncomputercraftthing"
 local BRANCH = "main"
 local BASE_URL = "https://raw.githubusercontent.com/" .. REPO .. "/" .. BRANCH .. "/ccos/programs/"
+local ICON_URL = "https://raw.githubusercontent.com/" .. REPO .. "/" .. BRANCH .. "/ccos/icons/"
 local MANIFEST_URL = "https://raw.githubusercontent.com/" .. REPO .. "/" .. BRANCH .. "/ccos/packages.lua"
 
 local function clip(text, w)
@@ -45,20 +46,20 @@ local function loadLocalManifest()
         end
     end
     return {
-        {name="fm", title="File Manager", desc="Browse files"},
-        {name="edit", title="Text Editor", desc="Edit text files"},
-        {name="settings", title="System Info", desc="System settings"},
-        {name="shell", title="Shell", desc="Terminal emulator"},
-        {name="calc", title="Calculator", desc="Calculator app"},
-        {name="tasks", title="Task Manager", desc="Manage windows"},
-        {name="netbrowse", title="Network Browser", desc="Browse network"},
-        {name="chat", title="Chat", desc="Network chat"},
-        {name="pkgman", title="Packages", desc="Install packages"},
-        {name="imgview", title="Image Viewer", desc="View images"},
-        {name="music", title="Music", desc="Speaker player"},
-        {name="fastfetch", title="Fastfetch", desc="System overview"},
-        {name="sites", title="Sites Browser", desc="Browse pages"},
-        {name="sitebuilder", title="Site Builder", desc="Create and host pages"},
+        {name="fm", title="File Manager", desc="Browse files", icon="files"},
+        {name="edit", title="Text Editor", desc="Edit text files", icon="edit"},
+        {name="settings", title="System Info", desc="System settings", icon="settings"},
+        {name="shell", title="Shell", desc="Terminal emulator", icon="shell"},
+        {name="calc", title="Calculator", desc="Calculator app", icon="calc"},
+        {name="tasks", title="Task Manager", desc="Manage windows", icon="tasks"},
+        {name="netbrowse", title="Network Browser", desc="Browse network", icon="net"},
+        {name="chat", title="Chat", desc="Network chat", icon="chat"},
+        {name="pkgman", title="Packages", desc="Install packages", icon="pkg"},
+        {name="imgview", title="Image Viewer", desc="View images", icon="img"},
+        {name="music", title="Music", desc="Speaker player", icon="music"},
+        {name="fastfetch", title="Fastfetch", desc="System overview", icon="fastfetch"},
+        {name="sites", title="Sites Browser", desc="Browse pages", icon="sites"},
+        {name="sitebuilder", title="Site Builder", desc="Create and host pages", icon="sitebuild"},
     }
 end
 
@@ -136,6 +137,13 @@ local function appPkgMan()
             local content = response.readAll()
             response.close()
             local okWrite, err = writePackage({name=pkg.name, content=content})
+            if okWrite and pkg.icon and http then
+                local okIcon, iconResp = pcall(http.get, ICON_URL .. pkg.icon .. ".nfp256")
+                if okIcon and iconResp then
+                    API.writeFile("/ccos/icons/" .. pkg.icon .. ".nfp256", iconResp.readAll())
+                    iconResp.close()
+                end
+            end
             status = okWrite and "Installed: " .. pkg.name or tostring(err)
         else
             status = "Download failed"
@@ -248,6 +256,15 @@ local function appPkgMan()
             if pkg then if installed[pkg.name] then removePackage(pkg) else installBuiltIn(pkg) end end
         elseif k == keys.delete then removePackage(packages[sel])
         elseif k == keys.escape then API.close(w) end
+    end
+
+    w.onScroll = function(_, dir)
+        local rows = math.max(1, math.floor((w.ch - 21 - 34) / 8))
+        local maxScroll = math.max(0, #packages - rows)
+        if dir < 0 then scroll = math.max(0, scroll - 3)
+        else scroll = math.min(maxScroll, scroll + 3) end
+        sel = math.max(1, math.min(#packages, math.max(sel, scroll + 1)))
+        D.markContentDirty(w)
     end
 
     fetchList()

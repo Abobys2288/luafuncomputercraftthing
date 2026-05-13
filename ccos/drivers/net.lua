@@ -109,6 +109,11 @@ function net.lookup(serviceName)
     return rednet.lookup(net.protocol, serviceName)
 end
 
+function net.lookupSiteServer()
+    if not net.online then return nil end
+    return rednet.lookup(net.protocol, "siteserver") or rednet.lookup(net.protocol, "server")
+end
+
 function net.requestPackageList(serverId)
     if not net.online then return nil end
     net.send(serverId, {type = "pkg_list"})

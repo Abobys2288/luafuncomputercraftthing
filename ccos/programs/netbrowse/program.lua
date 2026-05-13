@@ -29,12 +29,19 @@ local function appNetBrowse()
     local scroll = 0
     local status = "Press F5 to scan"
 
+    local function buildList()
+        local list = {}
+        for id, name in pairs(peers) do table.insert(list, {id = id, name = name}) end
+        table.sort(list, function(a, b) return a.id < b.id end)
+        return list
+    end
+
     local function scan()
         status = "Scanning..."
         D.markDirty()
         peers = net.discover(0.5)
         sel = 1; scroll = 0
-        status = "Found " .. #peers .. " peers"
+        status = "Found " .. #buildList() .. " peers"
         D.markDirty()
     end
 
@@ -67,9 +74,7 @@ local function appNetBrowse()
         R.drawText(cx+48,cy+3,"Lookup",K.BLACK,K.GRAY)
         R.drawText(cx+100,cy+3,status,K.BLACK,K.GRAY)
         local lh = math.floor((ch-28)/8)
-        local list = {}
-        for id,name in pairs(peers) do table.insert(list,{id=id,name=name}) end
-        table.sort(list,function(a,b) return a.id < b.id end)
+        local list = buildList()
         local hasHit = false
         for i=1,lh do
             local idx=scroll+i; local p=list[idx]
@@ -111,16 +116,26 @@ local function appNetBrowse()
         if k==keys.f5 then scan()
         elseif k==keys.up and sel>1 then sel=sel-1; if sel<=scroll then scroll=scroll-1 end; D.markContentDirty(w)
         elseif k==keys.down then
-            local list={}; for id,name in pairs(peers) do table.insert(list,{id=id}) end
+            local list=buildList()
             if sel<#list then sel=sel+1; local lh=math.floor((w.ch-28)/8); if sel>scroll+lh then scroll=scroll+1 end; D.markContentDirty(w) end
         elseif k==keys.enter then
-            local list={}; for id,name in pairs(peers) do table.insert(list,{id=id,name=name}) end; table.sort(list,function(a,b) return a.id<b.id end)
+            local list=buildList()
             local p=list[sel]; if p then
                 D.inputDialog("Message to "..p.name,"Enter message:" ,"",function(msg)
                     if msg then net.send(p.id,{type="chat",text=msg,from=net.hostName}); status="Sent!"; D.markDirty() end
                 end)
             end
         elseif k==keys.escape then D.destroyWindow(w) end
+    end
+
+    w.onScroll = function(_, dir)
+        local list = buildList()
+        local lh = math.max(1, math.floor((w.ch - 28) / 8))
+        local maxScroll = math.max(0, #list - lh)
+        if dir < 0 then scroll = math.max(0, scroll - 3)
+        else scroll = math.min(maxScroll, scroll + 3) end
+        sel = math.max(1, math.min(#list, math.max(sel, scroll + 1)))
+        D.markContentDirty(w)
     end
 
     scan()

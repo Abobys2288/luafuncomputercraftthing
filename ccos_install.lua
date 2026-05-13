@@ -21,6 +21,22 @@ local FILES = {
     "kernel.lua",
     "gui.lua",
     "bootlogo.nfp256",
+    -- Icons
+    "icons/app.nfp256",
+    "icons/files.nfp256",
+    "icons/edit.nfp256",
+    "icons/settings.nfp256",
+    "icons/shell.nfp256",
+    "icons/calc.nfp256",
+    "icons/tasks.nfp256",
+    "icons/net.nfp256",
+    "icons/chat.nfp256",
+    "icons/pkg.nfp256",
+    "icons/img.nfp256",
+    "icons/music.nfp256",
+    "icons/fastfetch.nfp256",
+    "icons/sites.nfp256",
+    "icons/sitebuild.nfp256",
     -- Programs
     "programs/fm/program.lua",
     "programs/edit/program.lua",
@@ -39,11 +55,17 @@ local FILES = {
     "drivers/net.lua",
 }
 
-local SERVER_FILE = "ccos_server.lua"
-local SERVER_URL = "https://raw.githubusercontent.com/" .. REPO .. "/" .. BRANCH .. "/" .. SERVER_FILE
-local SERVER_TARGETS = {
-    "/ccos/server.lua",
-    "/" .. SERVER_FILE,
+local SERVER_DOWNLOADS = {
+    {
+        label = "Main server",
+        url = "https://raw.githubusercontent.com/" .. REPO .. "/" .. BRANCH .. "/ccos_server.lua",
+        targets = {"/ccos/server.lua", "/ccos_server.lua"},
+    },
+    {
+        label = "Sites server",
+        url = "https://raw.githubusercontent.com/" .. REPO .. "/" .. BRANCH .. "/ccos_siteserver.lua",
+        targets = {"/ccos/site_server.lua", "/ccos_siteserver.lua"},
+    },
 }
 
 -- ============================================================
@@ -181,7 +203,9 @@ local function main()
         return
     end
 
-    local total = #FILES + #SERVER_TARGETS
+    local serverTargetCount = 0
+    for _, server in ipairs(SERVER_DOWNLOADS) do serverTargetCount = serverTargetCount + #server.targets end
+    local total = #FILES + serverTargetCount
     local success, failed = 0, 0
     local logLines = {}
     local listY = by + 7
@@ -238,27 +262,34 @@ local function main()
         sleep(0.05)
     end
 
-    -- Download server script into CCOS and root compatibility path.
-    for j, path in ipairs(SERVER_TARGETS) do
-        local step = #FILES + j
-        progress(pbX, pbY, pbW, step, total)
-        term.setCursorPos(bx + 3, by + bh - 7 + j)
-        set(colors.black, colors.lightGray)
-        local label = j == 1 and "Server core" or "Server alias"
-        term.write((label .. ": " .. path):sub(1, bw - 12))
-        local ok2, err2 = downloadFile(SERVER_URL, path)
-        term.setCursorPos(bx + bw - 8, by + bh - 7 + j)
-        if ok2 then
-            set(colors.black, colors.lime)
-            term.write("[OK]")
-            success = success + 1
-        else
-            set(colors.black, colors.red)
-            term.write("[ERR]")
-            failed = failed + 1
-            table.insert(logLines, path .. ": " .. tostring(err2))
+    -- Download server scripts into CCOS and root compatibility paths.
+    local serverStep = #FILES
+    local serverLine = 0
+    for _, server in ipairs(SERVER_DOWNLOADS) do
+        for _, path in ipairs(server.targets) do
+            serverStep = serverStep + 1
+            serverLine = serverLine + 1
+            progress(pbX, pbY, pbW, serverStep, total)
+            local rowY = listY + ((serverLine - 1) % maxLines)
+            term.setCursorPos(bx + 3, rowY)
+            term.write(string.rep(" ", bw - 6))
+            term.setCursorPos(bx + 3, rowY)
+            set(colors.black, colors.lightGray)
+            term.write((server.label .. ": " .. path):sub(1, bw - 12))
+            local ok2, err2 = downloadFile(server.url, path)
+            term.setCursorPos(bx + bw - 8, rowY)
+            if ok2 then
+                set(colors.black, colors.lime)
+                term.write("[OK]")
+                success = success + 1
+            else
+                set(colors.black, colors.red)
+                term.write("[ERR]")
+                failed = failed + 1
+                table.insert(logLines, path .. ": " .. tostring(err2))
+            end
+            reset()
         end
-        reset()
     end
 
     local statusY = by + bh - 4

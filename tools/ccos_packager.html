@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CCOS Packager</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #111318;
+    --panel: #1b1f27;
+    --panel2: #232936;
+    --line: #384150;
+    --text: #e8edf5;
+    --muted: #9aa7b8;
+    --accent: #4db6ac;
+    --accent2: #7aa2f7;
+    --warn: #ffcb6b;
+    --bad: #ff6b7a;
+    --good: #9ece6a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.35 system-ui, Segoe UI, sans-serif;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    background: #181c24;
+  }
+  h1 { margin: 0; font-size: 18px; font-weight: 650; }
+  main {
+    display: grid;
+    grid-template-columns: minmax(280px, 1fr) minmax(280px, 420px);
+    gap: 12px;
+    padding: 12px;
+    min-height: calc(100vh - 53px);
+  }
+  section {
+    min-width: 0;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px;
+    background: var(--panel2);
+    border-bottom: 1px solid var(--line);
+    flex-wrap: wrap;
+  }
+  .bar strong { margin-right: auto; }
+  .form {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    padding: 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
+  input, select, button, textarea {
+    font: inherit;
+    color: var(--text);
+  }
+  input, select {
+    width: 100%;
+    padding: 7px 8px;
+    background: #11151d;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+  button {
+    padding: 7px 10px;
+    background: #273043;
+    border: 1px solid #46536a;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  button.primary { background: #1d5f61; border-color: #398b8d; }
+  button:hover { border-color: var(--accent); }
+  .editor {
+    position: relative;
+    height: min(62vh, 620px);
+    min-height: 360px;
+    background: #0d1117;
+    overflow: hidden;
+  }
+  #highlight, #code {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    padding: 12px;
+    border: 0;
+    white-space: pre;
+    overflow: auto;
+    tab-size: 4;
+    font: 13px/1.45 Consolas, "Cascadia Mono", monospace;
+  }
+  #highlight { pointer-events: none; color: var(--text); }
+  #code {
+    resize: none;
+    background: transparent;
+    color: transparent;
+    caret-color: var(--text);
+    outline: none;
+  }
+  #code::selection { background: rgba(77, 182, 172, .35); color: transparent; }
+  .kw { color: #c792ea; }
+  .str { color: #c3e88d; }
+  .num { color: #f78c6c; }
+  .com { color: #697386; }
+  .api { color: #82aaff; }
+  .right {
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+  }
+  .pane { padding: 10px; border-bottom: 1px solid var(--line); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  #output {
+    width: 100%;
+    height: 210px;
+    background: #0d1117;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px;
+    resize: vertical;
+    font: 12px/1.35 Consolas, monospace;
+  }
+  .apiList {
+    overflow: auto;
+    padding: 10px;
+  }
+  .apiList code {
+    display: block;
+    padding: 5px 0;
+    color: var(--accent2);
+    border-bottom: 1px solid rgba(255,255,255,.05);
+  }
+  .hint { color: var(--muted); font-size: 12px; }
+  .status { color: var(--good); min-height: 18px; }
+  @media (max-width: 880px) {
+    main { grid-template-columns: 1fr; }
+    .form { grid-template-columns: 1fr; }
+    .editor { height: 56vh; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>CCOS Packager</h1>
+  <span class="hint">Build .ccpkg files and convert images to NFP/NFP256</span>
+</header>
+<main>
+  <section>
+    <div class="bar">
+      <strong>Lua package</strong>
+      <input id="luaFile" type="file" accept=".lua,.txt">
+      <button id="build" class="primary">Build .ccpkg</button>
+      <button id="downloadPkg">Download</button>
+      <button id="copyPkg">Copy</button>
+    </div>
+    <div class="form">
+      <label>Package name<input id="pkgName" value="myapp" spellcheck="false"></label>
+      <label>Title<input id="pkgTitle" value="My App" spellcheck="false"></label>
+      <label>Description<input id="pkgDesc" value="CCOS application" spellcheck="false"></label>
+    </div>
+    <div class="editor">
+      <pre id="highlight" aria-hidden="true"></pre>
+      <textarea id="code" spellcheck="false">local API = _G.ccos_api
+local R = API.getRenderer()
+
+local function run()
+    local x, y, w, h = API.fitWindow(220, 120)
+    local win = API.window("My App", x, y, w, h)
+    win.onDraw = function(_, cx, cy, cw, ch)
+        API.drawText(cx + 4, cy + 4, "Hello from CCOS", 0, 2, cw - 8)
+    end
+    win.onKey = function(_, key)
+        if key == keys.escape then API.close(win) end
+    end
+end
+
+return {name = "My App", icon = "app", run = run}</textarea>
+    </div>
+  </section>
+
+  <section class="right">
+    <div class="pane">
+      <div class="bar" style="padding:0 0 8px 0;background:transparent;border:0">
+        <strong>Image converter</strong>
+        <button id="convertImg" class="primary">Convert</button>
+        <button id="downloadImg">Download</button>
+      </div>
+      <div class="grid2">
+        <label>Image<input id="imgFile" type="file" accept="image/*"></label>
+        <label>Format<select id="imgFormat"><option value="nfp256">nfp256</option><option value="nfp">nfp</option></select></label>
+        <label>Width<input id="imgW" type="number" min="1" max="256" value="32"></label>
+        <label>Height<input id="imgH" type="number" min="1" max="256" value="32"></label>
+      </div>
+      <p class="hint">NFP256 writes two hex digits per pixel. Palette matches CCOS render.lua.</p>
+      <div id="status" class="status"></div>
+    </div>
+
+    <div class="pane">
+      <label>Generated output<textarea id="output" spellcheck="false"></textarea></label>
+    </div>
+
+    <div class="apiList">
+      <strong>CCOS API quick list</strong>
+      <code>API.window(title, x, y, w, h)</code>
+      <code>API.close(win)</code>
+      <code>API.redrawContent(win)</code>
+      <code>API.fitWindow(w, h)</code>
+      <code>API.getRenderer()</code>
+      <code>API.drawText(x, y, text, fg, bg, maxW)</code>
+      <code>API.drawButton(x, y, w, h, text, pressed)</code>
+      <code>API.chooseFile(options, callback)</code>
+      <code>API.readFile(path) / API.writeFile(path, text)</code>
+      <code>API.listFiles(path) / API.isDir(path)</code>
+      <code>API.joinPath(base, name) / API.getDir(path)</code>
+      <code>net.init(), net.lookup(name), net.send(id, msg)</code>
+      <code>net.siteRegister(serverId, name, title)</code>
+      <code>net.siteList(serverId), net.siteResolve(serverId, name)</code>
+      <code>win.onDraw(win, cx, cy, cw, ch)</code>
+      <code>win.onKey(win, key, char)</code>
+      <code>win.onClick(win, mx, my)</code>
+      <code>win.onScroll(win, dir, mx, my)</code>
+    </div>
+  </section>
+</main>
+
+<script>
+const code = document.getElementById("code");
+const hi = document.getElementById("highlight");
+const out = document.getElementById("output");
+const statusEl = document.getElementById("status");
+let lastImageText = "";
+
+const keywords = new Set("and break do else elseif end false for function if in local nil not or repeat return then true until while".split(" "));
+const apiWords = new Set("API ccos_api window close redraw redrawContent fitWindow getRenderer drawText drawButton chooseFile readFile writeFile listFiles isDir joinPath getDir getFileName net init lookup lookupSiteServer send receive siteRegister siteList siteResolve siteGet keys fs rednet colors term".split(" "));
+
+function esc(s) {
+  return s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+}
+
+function highlightLua(src) {
+  const tokenRe = /(--\[\[[\s\S]*?\]\]|--[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b\d+(?:\.\d+)?\b|\b[A-Za-z_][A-Za-z0-9_]*\b)/g;
+  let pos = 0;
+  let html = "";
+  src.replace(tokenRe, (m, _g, idx) => {
+    html += esc(src.slice(pos, idx));
+    let cls = "";
+    if (m.startsWith("--")) cls = "com";
+    else if (m[0] === '"' || m[0] === "'") cls = "str";
+    else if (/^\d/.test(m)) cls = "num";
+    else if (keywords.has(m)) cls = "kw";
+    else if (apiWords.has(m)) cls = "api";
+    html += cls ? `<span class="${cls}">${esc(m)}</span>` : esc(m);
+    pos = idx + m.length;
+    return m;
+  });
+  html += esc(src.slice(pos));
+  return html + "\n";
+}
+
+function syncHighlight() {
+  hi.innerHTML = highlightLua(code.value);
+  hi.scrollTop = code.scrollTop;
+  hi.scrollLeft = code.scrollLeft;
+}
+
+code.addEventListener("input", syncHighlight);
+code.addEventListener("scroll", syncHighlight);
+syncHighlight();
+
+document.getElementById("luaFile").addEventListener("change", async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  code.value = await file.text();
+  syncHighlight();
+});
+
+function luaString(s) {
+  let level = 0;
+  while (s.includes("]" + "=".repeat(level) + "]")) level++;
+  const eq = "=".repeat(level);
+  return `[${eq}[${s}]${eq}]`;
+}
+
+function buildPackage() {
+  const name = document.getElementById("pkgName").value.trim() || "app";
+  const title = document.getElementById("pkgTitle").value.trim() || name;
+  const desc = document.getElementById("pkgDesc").value.trim() || "";
+  const pkg =
+`return {
+  name = ${luaString(name)},
+  title = ${luaString(title)},
+  desc = ${luaString(desc)},
+  files = {
+    ["program.lua"] = ${luaString(code.value)}
+  }
+}
+`;
+  out.value = pkg;
+  statusEl.textContent = "Package generated.";
+  return pkg;
+}
+
+document.getElementById("build").onclick = buildPackage;
+document.getElementById("copyPkg").onclick = async () => {
+  if (!out.value) buildPackage();
+  await navigator.clipboard.writeText(out.value);
+  statusEl.textContent = "Copied.";
+};
+document.getElementById("downloadPkg").onclick = () => {
+  const text = out.value || buildPackage();
+  const name = (document.getElementById("pkgName").value.trim() || "app").replace(/[^a-z0-9_-]/gi, "_");
+  downloadText(name + ".ccpkg", text);
+};
+
+const w95 = [
+  [8,10,14],[248,249,252],[202,206,214],[232,235,240],[108,116,128],[42,82,146],[28,56,110],[0,154,162],
+  [135,211,232],[36,160,90],[24,112,66],[218,64,64],[132,35,35],[236,215,76],[222,160,58],[128,82,42],
+  [118,72,156],[230,138,210],[70,76,86],[35,92,154],[126,153,194],[66,112,220],[241,243,246],[28,31,36],
+  [158,165,176],[216,220,226],[252,253,255],[20,36,74],[52,58,68],[30,122,72],[25,120,126],[198,203,212]
+];
+const nfp32Keys = "0123456789abcdefghijklmnopqrstuv";
+const pal32 = w95.map((rgb, i) => ({ key: nfp32Keys[i], rgb }));
+const pal256 = [];
+w95.forEach((rgb, i) => pal256[i] = rgb);
+let idx = 32;
+for (let r = 0; r < 6; r++) for (let g = 0; g < 6; g++) for (let b = 0; b < 6; b++) pal256[idx++] = [r*51, g*51, b*51];
+for (let i = 0; i < 40; i++) { const v = Math.floor(i * 255 / 39); pal256[216 + i] = [v, v, v]; }
+
+function dist(a, b) {
+  const dr = a[0] - b[0], dg = a[1] - b[1], db = a[2] - b[2];
+  return dr*dr + dg*dg + db*db;
+}
+
+function closest(rgb, format) {
+  if (format === "nfp") {
+    let best = pal32[0], bestD = Infinity;
+    for (const item of pal32) {
+      const d = dist(rgb, item.rgb);
+      if (d < bestD) { bestD = d; best = item; }
+    }
+    return best.key;
+  }
+  let best = 0, bestD = Infinity;
+  for (let i = 0; i < pal256.length; i++) {
+    const d = dist(rgb, pal256[i]);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best.toString(16).padStart(2, "0");
+}
+
+async function convertImage() {
+  const file = document.getElementById("imgFile").files[0];
+  if (!file) { statusEl.textContent = "Choose an image first."; return; }
+  const format = document.getElementById("imgFormat").value;
+  const width = Math.max(1, Math.min(256, Number(document.getElementById("imgW").value) || 32));
+  const height = Math.max(1, Math.min(256, Number(document.getElementById("imgH").value) || 32));
+  const img = new Image();
+  img.src = URL.createObjectURL(file);
+  await img.decode();
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(img, 0, 0, width, height);
+  const data = ctx.getImageData(0, 0, width, height).data;
+  const lines = [];
+  for (let y = 0; y < height; y++) {
+    let line = "";
+    for (let x = 0; x < width; x++) {
+      const p = (y * width + x) * 4;
+      const rgb = [data[p], data[p+1], data[p+2]];
+      line += closest(rgb, format);
+    }
+    lines.push(line);
+  }
+  lastImageText = lines.join("\n");
+  out.value = lastImageText;
+  statusEl.textContent = `Converted ${width}x${height} ${format}.`;
+}
+
+document.getElementById("convertImg").onclick = convertImage;
+document.getElementById("downloadImg").onclick = () => {
+  if (!lastImageText && out.value) lastImageText = out.value;
+  const format = document.getElementById("imgFormat").value;
+  downloadText("image." + format, lastImageText || "");
+};
+
+function downloadText(name, text) {
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 500);
+}
+</script>
+</body>
+</html>
