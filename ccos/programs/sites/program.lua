@@ -59,19 +59,46 @@ local function appSitesBrowser()
         return true
     end
 
+    local function requestSiteList()
+        if type(net.siteList) == "function" then return net.siteList(serverId) or {} end
+        if type(net.send) ~= "function" or type(net.receive) ~= "function" then return {} end
+        net.send(serverId, {type = "site_list"})
+        local _, msg = net.receive(3)
+        if type(msg) == "table" and msg.type == "site_list_resp" then return msg.sites or {} end
+        return {}
+    end
+
+    local function requestSiteResolve(name)
+        if type(net.siteResolve) == "function" then return net.siteResolve(serverId, name) end
+        if type(net.send) ~= "function" or type(net.receive) ~= "function" then return nil end
+        net.send(serverId, {type = "site_resolve", name = name})
+        local _, msg = net.receive(3)
+        if type(msg) == "table" and msg.type == "site_resolve_ok" then return msg.id end
+        return nil
+    end
+
+    local function requestSiteContent(hostId, name)
+        if type(net.siteGet) == "function" then return net.siteGet(hostId, name, "index.txt") end
+        if type(net.send) ~= "function" or type(net.receive) ~= "function" then return nil end
+        net.send(hostId, {type = "site_get", name = name, path = "index.txt"})
+        local _, msg = net.receive(5)
+        if type(msg) == "table" and msg.type == "site_content" then return msg.content, msg.title end
+        return nil
+    end
+
     local function openSite(name)
         name = safeName(name)
         if name == "" then status = "Enter site name"; API.redrawContent(w); return end
         if not ensureServer() then API.redrawContent(w); return end
         status = "Resolving " .. name .. "..."
         API.redrawContent(w)
-        local hostId = net.siteResolve(serverId, name)
+        local hostId = requestSiteResolve(name)
         if not hostId then
             status = "Site not found: " .. name
             API.redrawContent(w)
             return
         end
-        local content, gotTitle = net.siteGet(hostId, name, "index.txt")
+        local content, gotTitle = requestSiteContent(hostId, name)
         if content then
             address = name
             title = gotTitle or name
@@ -87,7 +114,7 @@ local function appSitesBrowser()
 
     local function listSites()
         if not ensureServer() then API.redrawContent(w); return end
-        siteList = net.siteList(serverId)
+        siteList = requestSiteList()
         table.sort(siteList, function(a, b) return tostring(a.name) < tostring(b.name) end)
         lines = {}
         if #siteList == 0 then

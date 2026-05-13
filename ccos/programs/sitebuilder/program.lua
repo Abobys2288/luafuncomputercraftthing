@@ -68,6 +68,16 @@ local function appSites()
     local w = API.window("Site Builder", wx, wy, ww, wh)
     if not w then return end
 
+    local function publishRegistration()
+        if type(net.siteRegister) == "function" then
+            return net.siteRegister(serverId, siteName, siteTitle)
+        end
+        if type(net.send) == "function" then
+            return net.send(serverId, {type = "site_register", name = siteName, title = siteTitle, host = net.hostName})
+        end
+        return false
+    end
+
     local function savePage()
         API.writeFile(PAGE_PATH, joinLines(lines))
         status = "Saved " .. PAGE_PATH
@@ -79,7 +89,7 @@ local function appSites()
         serverId = serverId or net.lookup("server")
         if not serverId then status = "No server"; API.redrawContent(w); return end
         savePage()
-        net.siteRegister(serverId, siteName, siteTitle)
+        publishRegistration()
         lastRegister = os.clock()
         status = "Registered site:" .. siteName
         API.redrawContent(w)
@@ -129,7 +139,7 @@ local function appSites()
     local bgTask = function(e, a, b)
         if e == "timer" then
             if online and serverId and os.clock() - lastRegister > 20 then
-                net.siteRegister(serverId, siteName, siteTitle)
+                publishRegistration()
                 lastRegister = os.clock()
             end
         elseif e == "rednet_message" then
