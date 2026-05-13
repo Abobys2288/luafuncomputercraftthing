@@ -177,6 +177,20 @@
     font-size: 12px;
   }
 
+  .field-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .field-hint {
+    color: var(--soft);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
   input[type="number"],
   input[type="text"] {
     width: 100%;
@@ -195,13 +209,64 @@
     box-shadow: 0 0 0 3px var(--focus);
   }
 
-  input[type="file"] {
-    width: 100%;
-    min-height: 36px;
+  #sourceFile { display: none; }
+
+  .file-picker {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px;
+    align-items: stretch;
+    min-height: 44px;
     padding: 6px;
-    border: 1px solid var(--line);
-    border-radius: 7px;
-    background: var(--field);
+    border: 1px dashed #5b5f55;
+    border-radius: 8px;
+    background: #12140f;
+  }
+
+  .file-picker:hover {
+    border-color: var(--accent);
+    background: #151914;
+  }
+
+  .file-picker:focus-within,
+  .file-picker.drag {
+    border-color: var(--accent);
+    background: #151914;
+    box-shadow: 0 0 0 3px var(--focus);
+  }
+
+  .file-picker.drag {
+    border-style: solid;
+  }
+
+  .file-picker button {
+    min-width: 112px;
+    align-self: stretch;
+  }
+
+  .file-name {
+    display: grid;
+    align-content: center;
+    min-width: 0;
+    padding: 0 8px;
+    color: var(--text);
+    font-size: 13px;
+    overflow: hidden;
+  }
+
+  .file-name strong,
+  .file-name span {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .file-name span {
+    margin-top: 2px;
+    color: var(--muted);
+    font-size: 11px;
   }
 
   .segment {
@@ -527,15 +592,28 @@
       <strong>Convert</strong>
     </div>
     <div class="body">
-      <label class="field full">Source image or video
-        <input id="sourceFile" type="file" accept="image/*,video/*">
-      </label>
+      <div class="field full">
+        <div class="field-label">Source image or video</div>
+        <div id="fileDropZone" class="file-picker">
+          <button id="filePickButton" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16"/><path d="M12 4v12"/><path d="m7 9 5-5 5 5"/></svg>
+            Choose
+          </button>
+          <div class="file-name">
+            <strong id="fileName">No source selected</strong>
+            <span id="fileMeta">PNG, JPG, GIF, MP4, WebM</span>
+          </div>
+          <input id="sourceFile" type="file" accept="image/*,video/*">
+        </div>
+      </div>
 
       <div class="form-grid">
-        <label class="field">Width
+        <label class="field">
+          <span class="field-top"><span>Width</span><span id="widthLimit" class="field-hint">max 512</span></span>
           <input id="widthInput" type="number" min="1" max="512" step="1" value="128">
         </label>
-        <label class="field">Height
+        <label class="field">
+          <span class="field-top"><span>Height</span><span id="heightLimit" class="field-hint">max 512</span></span>
           <input id="heightInput" type="number" min="1" max="512" step="1" value="96">
         </label>
       </div>
@@ -1496,8 +1574,14 @@ for (let i = 0; i < 40; i++) {
 const els = {
   status: document.getElementById("status"),
   file: document.getElementById("sourceFile"),
+  filePick: document.getElementById("filePickButton"),
+  fileDrop: document.getElementById("fileDropZone"),
+  fileName: document.getElementById("fileName"),
+  fileMeta: document.getElementById("fileMeta"),
   width: document.getElementById("widthInput"),
   height: document.getElementById("heightInput"),
+  widthLimit: document.getElementById("widthLimit"),
+  heightLimit: document.getElementById("heightLimit"),
   fps: document.getElementById("fpsInput"),
   loop: document.getElementById("loopInput"),
   duration: document.getElementById("durationInput"),
@@ -1964,6 +2048,17 @@ function formatBytes(bytes) {
   return (bytes / (1024 * 1024)).toFixed(2) + " MB";
 }
 
+function setFileSummary(name, meta) {
+  els.fileName.textContent = name || "No source selected";
+  els.fileMeta.textContent = meta || "PNG, JPG, GIF, MP4, WebM";
+}
+
+function describeLoadedSource(file, durationSeconds) {
+  const size = sourceNaturalWidth() + " x " + sourceNaturalHeight();
+  const duration = durationSeconds > 0 ? " | " + durationSeconds.toFixed(2) + "s" : "";
+  return sourceKind.toUpperCase() + " " + size + duration + " | " + formatBytes(file.size);
+}
+
 function sanitizeBaseName(name) {
   const base = (name || "converted").replace(/\.[^.]+$/, "");
   return (base || "converted").replace(/[^a-z0-9_-]+/gi, "_").replace(/^_+|_+$/g, "") || "converted";
@@ -2011,8 +2106,7 @@ function invalidateOutput(message) {
 
 function refreshSourcePreviewFromInputs() {
   if (!sourceMedia) return;
-  const width = clampDimension(els.width.value);
-  const height = clampDimension(els.height.value);
+  const { width, height } = normalizeDimensions();
   drawSourcePreview(sourceMedia, width, height);
   els.metricSize.textContent = width + " x " + height;
 }
@@ -2027,17 +2121,47 @@ function sourceNaturalHeight() {
   return sourceMedia.naturalHeight || sourceMedia.videoHeight || sourceMedia.height || 0;
 }
 
+function sourceMaxWidth() {
+  return Math.max(1, sourceNaturalWidth() || 512);
+}
+
+function sourceMaxHeight() {
+  return Math.max(1, sourceNaturalHeight() || 512);
+}
+
+function updateDimensionLimits() {
+  const maxWidth = sourceMaxWidth();
+  const maxHeight = sourceMaxHeight();
+  els.width.max = maxWidth;
+  els.height.max = maxHeight;
+  els.widthLimit.textContent = "max " + maxWidth;
+  els.heightLimit.textContent = "max " + maxHeight;
+}
+
+function clampDimension(value, axis = "width") {
+  const max = axis === "height" ? sourceMaxHeight() : sourceMaxWidth();
+  return Math.max(1, Math.min(max, Math.round(Number(value) || 1)));
+}
+
+function normalizeDimensions() {
+  const width = clampDimension(els.width.value, "width");
+  const height = clampDimension(els.height.value, "height");
+  els.width.value = width;
+  els.height.value = height;
+  return { width, height };
+}
+
 function fitSize(maxWidth, maxHeight) {
   if (!sourceMedia) {
-    els.width.value = maxWidth;
-    els.height.value = maxHeight;
+    els.width.value = clampDimension(maxWidth, "width");
+    els.height.value = clampDimension(maxHeight, "height");
     return;
   }
   const naturalWidth = sourceNaturalWidth() || maxWidth;
   const naturalHeight = sourceNaturalHeight() || maxHeight;
   const ratio = Math.min(maxWidth / naturalWidth, maxHeight / naturalHeight, 1);
-  els.width.value = Math.max(1, Math.floor(naturalWidth * ratio));
-  els.height.value = Math.max(1, Math.floor(naturalHeight * ratio));
+  els.width.value = clampDimension(Math.floor(naturalWidth * ratio), "width");
+  els.height.value = clampDimension(Math.floor(naturalHeight * ratio), "height");
 }
 
 function syncRatio(changed) {
@@ -2045,16 +2169,14 @@ function syncRatio(changed) {
   const naturalWidth = sourceNaturalWidth() || 1;
   const naturalHeight = sourceNaturalHeight() || 1;
   if (changed === "width") {
-    const width = clampDimension(els.width.value);
-    els.height.value = Math.max(1, Math.round(width * naturalHeight / naturalWidth));
+    const width = clampDimension(els.width.value, "width");
+    els.width.value = width;
+    els.height.value = clampDimension(Math.round(width * naturalHeight / naturalWidth), "height");
   } else {
-    const height = clampDimension(els.height.value);
-    els.width.value = Math.max(1, Math.round(height * naturalWidth / naturalHeight));
+    const height = clampDimension(els.height.value, "height");
+    els.height.value = height;
+    els.width.value = clampDimension(Math.round(height * naturalWidth / naturalHeight), "width");
   }
-}
-
-function clampDimension(value) {
-  return Math.max(1, Math.min(512, Math.round(Number(value) || 1)));
 }
 
 function renderSwatches() {
@@ -2249,16 +2371,17 @@ function quantizeFrame(imageData, width, height, mode) {
     : quantizeNearest(imageData, width, height, mode);
 }
 
-async function handleFileChange() {
-  const file = els.file.files[0];
+async function loadSelectedFile(file) {
   if (!file) return;
   try {
     setStatus("Loading source...");
+    setFileSummary(file.name, "Loading " + formatBytes(file.size) + "...");
     sourceImage = null;
     sourceMedia = null;
     sourceFile = file;
     sourceFileName = file.name;
     sourceKind = detectSourceKind(file);
+    updateDimensionLimits();
     clearGeneratedResult();
     els.sourceCanvas.hidden = true;
     els.sourceEmpty.hidden = false;
@@ -2269,6 +2392,7 @@ async function handleFileChange() {
       sourceImage = await loadImageFromFile(file);
       sourceMedia = sourceImage;
     }
+    updateDimensionLimits();
     let detectedDuration = 0;
     if (sourceKind === "video") {
       detectedDuration = Number.isFinite(sourceMedia.duration) ? sourceMedia.duration : 0;
@@ -2281,18 +2405,26 @@ async function handleFileChange() {
       els.duration.value = 0;
     }
     fitSize(128, 96);
-    const width = clampDimension(els.width.value);
-    const height = clampDimension(els.height.value);
+    const { width, height } = normalizeDimensions();
     if (sourceKind === "video") await seekVideo(sourceMedia, 0);
     drawSourcePreview(sourceMedia, width, height);
     els.metricSize.textContent = width + " x " + height;
     els.previewNote.textContent = sourceNaturalWidth() + " x " + sourceNaturalHeight() + " " + sourceKind +
       (detectedDuration > 0 ? "  " + detectedDuration.toFixed(2) + "s" : "");
+    setFileSummary(file.name, describeLoadedSource(file, detectedDuration));
     updateOutputName(selectedFormat());
     setStatus("Loaded " + file.name, "good");
   } catch (error) {
+    sourceImage = null;
+    sourceMedia = null;
+    updateDimensionLimits();
+    setFileSummary(file.name, "Could not load source | " + formatBytes(file.size));
     setStatus(error.message, "bad");
   }
+}
+
+async function handleFileChange() {
+  await loadSelectedFile(els.file.files[0]);
 }
 
 async function convert() {
@@ -2301,10 +2433,7 @@ async function convert() {
     return;
   }
 
-  const width = clampDimension(els.width.value);
-  const height = clampDimension(els.height.value);
-  els.width.value = width;
-  els.height.value = height;
+  const { width, height } = normalizeDimensions();
 
   const format = selectedFormat();
   setStatus("Converting...");
@@ -2382,7 +2511,30 @@ function downloadOutput() {
   setStatus("Downloaded " + outputFileName, "good");
 }
 
+function useDroppedFile(file) {
+  if (!file) return;
+  if (typeof DataTransfer === "function") {
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    els.file.files = transfer.files;
+  }
+  loadSelectedFile(file);
+}
+
+els.filePick.addEventListener("click", () => els.file.click());
 els.file.addEventListener("change", handleFileChange);
+els.fileDrop.addEventListener("dragover", event => {
+  event.preventDefault();
+  els.fileDrop.classList.add("drag");
+});
+els.fileDrop.addEventListener("dragleave", event => {
+  if (!els.fileDrop.contains(event.relatedTarget)) els.fileDrop.classList.remove("drag");
+});
+els.fileDrop.addEventListener("drop", event => {
+  event.preventDefault();
+  els.fileDrop.classList.remove("drag");
+  useDroppedFile(event.dataTransfer.files[0]);
+});
 els.fit.addEventListener("click", () => {
   fitSize(128, 96);
   if (sourceMedia) {
@@ -2400,6 +2552,8 @@ els.width.addEventListener("input", () => {
   if (sourceMedia) {
     refreshSourcePreviewFromInputs();
     invalidateOutput("Size changed; convert again");
+  } else {
+    normalizeDimensions();
   }
 });
 els.height.addEventListener("input", () => {
@@ -2408,6 +2562,8 @@ els.height.addEventListener("input", () => {
   if (sourceMedia) {
     refreshSourcePreviewFromInputs();
     invalidateOutput("Size changed; convert again");
+  } else {
+    normalizeDimensions();
   }
 });
 els.ratio.addEventListener("change", () => {
@@ -2438,6 +2594,7 @@ els.output.addEventListener("input", () => {
   els.metricBytes.textContent = formatBytes(bytesOf(outputText));
 });
 
+updateDimensionLimits();
 renderSwatches();
 </script>
 </body>
