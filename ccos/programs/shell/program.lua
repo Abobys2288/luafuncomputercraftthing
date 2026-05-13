@@ -130,8 +130,17 @@ local function appShell()
         local cmd = tostring(table.remove(args, 1) or ""):lower()
 
         if cmd == "help" then
-            add("commands: help clear pwd cd ls dir cat type mkdir rm del mv ren cp copy")
-            add("          wget label id programs open lua echo reboot shutdown exit")
+            add("commands:", K.CYAN)
+            local helpLines = {
+                "help clear cls exit",
+                "pwd cd ls dir",
+                "cat type echo lua",
+                "mkdir rm del mv ren cp copy",
+                "wget label id programs open",
+                "reboot shutdown",
+                "scroll: mouse wheel / PgUp / PgDn / Home / End",
+            }
+            for _, helpLine in ipairs(helpLines) do add("  " .. helpLine, K.LGRAY) end
         elseif cmd == "clear" or cmd == "cls" then
             out = {}
             sy = 0

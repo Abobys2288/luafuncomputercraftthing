@@ -89,6 +89,131 @@ local NFP32_KEYS = "0123456789abcdefghijklmnopqrstuv"
 local NFP32_MAP = {}
 for i = 1, #NFP32_KEYS do NFP32_MAP[NFP32_KEYS:sub(i, i)] = i - 1 end
 
+local B64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local B64_MAP = {}
+for i = 1, #B64_CHARS do B64_MAP[B64_CHARS:sub(i, i)] = i - 1 end
+
+local function base64Bytes(text)
+    local out, i = {}, 1
+    while i <= #text do
+        local c1 = B64_MAP[text:sub(i, i)] or 0
+        local c2 = B64_MAP[text:sub(i + 1, i + 1)] or 0
+        local c3s, c4s = text:sub(i + 2, i + 2), text:sub(i + 3, i + 3)
+        local c3, c4 = B64_MAP[c3s] or 0, B64_MAP[c4s] or 0
+        local n = c1 * 262144 + c2 * 4096 + c3 * 64 + c4
+        out[#out + 1] = math.floor(n / 65536) % 256
+        if c3s ~= "=" and c3s ~= "" then out[#out + 1] = math.floor(n / 256) % 256 end
+        if c4s ~= "=" and c4s ~= "" then out[#out + 1] = n % 256 end
+        i = i + 4
+    end
+    return out
+end
+
+local function fitNfpRow(row, width)
+    for i = #row + 1, width do row[i] = 0 end
+    for i = width + 1, #row do row[i] = nil end
+    return row
+end
+
+local function blankNfpRow(width)
+    local row = {}
+    for i = 1, width do row[i] = 0 end
+    return row
+end
+
+local function decodeLegacyNfpcLine(line, mode)
+    local pixelLen = (mode == 256) and 2 or 1
+    local row, i = {}, 1
+    local decode = mode == 256
+        and function(s) return tonumber(s, 16) or 0 end
+        or function(s) return NFP32_MAP[s:lower()] or 0 end
+    while i <= #line do
+        if line:sub(i, i) == "~" then
+            i = i + 1
+            local ps = line:sub(i, i + pixelLen - 1)
+            i = i + pixelLen
+            local cnt = tonumber(line:sub(i, i + 1), 16) or 1
+            i = i + 2
+            local v = decode(ps)
+            for _ = 1, cnt do row[#row + 1] = v end
+        else
+            row[#row + 1] = decode(line:sub(i, i + pixelLen - 1))
+            i = i + pixelLen
+        end
+    end
+    return row
+end
+
+local function unpackC2NfpRow(payload, mode, width)
+    local bytes = base64Bytes(payload)
+    local row = {}
+    if mode == 256 then
+        for i = 1, math.min(width, #bytes) do row[i] = bytes[i] end
+    else
+        local x = 1
+        for i = 1, #bytes do
+            local b = bytes[i]
+            row[x] = math.floor(b / 16) % 16
+            x = x + 1
+            if x <= width then row[x] = b % 16; x = x + 1 end
+            if x > width then break end
+        end
+    end
+    return fitNfpRow(row, width)
+end
+
+local function decodeC2NfpRow(line, mode, width, prevRow)
+    if line == "=" then return prevRow or blankNfpRow(width) end
+    if line:sub(1, 1) == "!" then return unpackC2NfpRow(line:sub(2), mode, width) end
+    return fitNfpRow(decodeLegacyNfpcLine(line, mode), width)
+end
+
+local function readC3BlobFromFile(f)
+    local marker = f.readLine() or ""
+    if marker:sub(1, 1) == "@" then
+        local count = tonumber(marker:sub(2)) or 0
+        local parts = {}
+        for i = 1, count do parts[i] = f.readLine() or "" end
+        return table.concat(parts)
+    end
+    return marker
+end
+
+local function decodeC3NfpFrame(payload, mode, width, height)
+    local bytes = base64Bytes(payload)
+    local total = width * height
+    local flat, pos, i = {}, 1, 1
+    while pos <= total and i <= #bytes do
+        local cmd = bytes[i] or 0
+        i = i + 1
+        local op = math.floor(cmd / 64)
+        local len = (cmd % 64) + 1
+        if op == 1 then
+            local src = pos - width
+            for _ = 1, len do flat[pos] = flat[src] or 0; pos = pos + 1; src = src + 1; if pos > total then break end end
+        elseif op == 2 then
+            local color = bytes[i] or 0
+            i = i + 1
+            for _ = 1, len do flat[pos] = color; pos = pos + 1; if pos > total then break end end
+        elseif op == 3 then
+            for _ = 1, len do flat[pos] = bytes[i] or 0; i = i + 1; pos = pos + 1; if pos > total then break end end
+        else
+            for _ = 1, len do flat[pos] = 0; pos = pos + 1; if pos > total then break end end
+        end
+    end
+    for p = 1, total do
+        if flat[p] == nil then flat[p] = 0 end
+        if mode ~= 256 then flat[p] = flat[p] % 32 end
+    end
+    local rows, p = {}, 1
+    for y = 1, height do
+        local row = {}
+        for x = 1, width do row[x] = flat[p] or 0; p = p + 1 end
+        rows[y] = row
+    end
+    return rows
+end
+
 local RU_LOWER = {
     q="й", w="ц", e="у", r="к", t="е", y="н", u="г", i="ш", o="щ", p="з",
     ["["]="х", ["]"]="ъ", a="ф", s="ы", d="в", f="а", g="п", h="р", j="о",
@@ -129,39 +254,29 @@ local function readNfpIcon(path)
     if ext == "nfpc" then
         local header = f.readLine()
         if not header or not header:match("^!NFPC") then f.close(); return nil end
-        local _, _, wStr, hStr, modeStr = header:find("^!NFPC%s+(%d+)%s+(%d+)%s+(%d+)")
+        local _, _, wStr, hStr, modeStr, codec = header:find("^!NFPC%s+(%d+)%s+(%d+)%s+(%d+)%s*(%S*)")
+        local imgH = tonumber(hStr) or 0
+        imgW = tonumber(wStr) or 0
         local mode = tonumber(modeStr) or 32
-        local pixelLen = (mode == 256) and 2 or 1
-        local decode
-        if mode == 256 then
-            decode = function(s) return tonumber(s, 16) or 0 end
+        if codec == "C3" then
+            pixels = decodeC3NfpFrame(readC3BlobFromFile(f), mode, imgW, imgH)
+        elseif codec == "C2" then
+            local prevRow = nil
+            for y = 1, imgH do
+                local line = f.readLine() or ""
+                local row = decodeC2NfpRow(line, mode, imgW, prevRow)
+                pixels[y] = row
+                prevRow = row
+            end
         else
-            decode = function(s) return NFP32_MAP[s:lower()] or 0 end
-        end
-        while true do
-            local line = f.readLine()
-            if not line then break end
-            if line ~= "" then
-                local row = {}
-                local i = 1
-                while i <= #line do
-                    if line:sub(i,i) == "~" then
-                        i = i + 1
-                        local ps = line:sub(i, i+pixelLen-1)
-                        i = i + pixelLen
-                        local chex = line:sub(i, i+1)
-                        i = i + 2
-                        local cnt = tonumber(chex, 16) or 1
-                        local v = decode(ps)
-                        for _=1,cnt do row[#row+1] = v end
-                    else
-                        local ps = line:sub(i, i+pixelLen-1)
-                        row[#row+1] = decode(ps)
-                        i = i + pixelLen
-                    end
+            while true do
+                local line = f.readLine()
+                if not line then break end
+                if line ~= "" then
+                    local row = decodeLegacyNfpcLine(line, mode)
+                    pixels[#pixels + 1] = row
+                    imgW = math.max(imgW, #row)
                 end
-                pixels[#pixels + 1] = row
-                imgW = math.max(imgW, #row)
             end
         end
     else
@@ -284,6 +399,9 @@ function D.loadConfig()
     f.close()
     local ok, cfg = pcall(textutils.unserialize, content)
     if ok and cfg then
+        if cfg.inputLayout == "RU" or cfg.inputLayout == "EN" then
+            D.inputLayout = cfg.inputLayout
+        end
         if cfg.windows then
             for _, cw in ipairs(cfg.windows) do
                 for _, prog in ipairs(D.programs) do
@@ -303,7 +421,7 @@ function D.loadConfig()
 end
 
 function D.saveConfig()
-    local cfg = {windows = {}}
+    local cfg = {windows = {}, inputLayout = D.inputLayout}
     for _, w in ipairs(D.windows) do
         if w.visible and not w.modal then
             table.insert(cfg.windows, {

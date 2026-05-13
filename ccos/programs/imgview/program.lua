@@ -73,6 +73,192 @@ local function parseNfp32(line, stats)
     return row
 end
 
+local B64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local B64_MAP = {}
+for i = 1, #B64_CHARS do
+    B64_MAP[B64_CHARS:sub(i, i)] = i - 1
+end
+
+local function base64Bytes(text)
+    local out = {}
+    local i = 1
+    while i <= #text do
+        local c1 = B64_MAP[text:sub(i, i)] or 0
+        local c2 = B64_MAP[text:sub(i + 1, i + 1)] or 0
+        local c3s = text:sub(i + 2, i + 2)
+        local c4s = text:sub(i + 3, i + 3)
+        local c3 = B64_MAP[c3s] or 0
+        local c4 = B64_MAP[c4s] or 0
+        local n = c1 * 262144 + c2 * 4096 + c3 * 64 + c4
+        out[#out + 1] = math.floor(n / 65536) % 256
+        if c3s ~= "=" and c3s ~= "" then out[#out + 1] = math.floor(n / 256) % 256 end
+        if c4s ~= "=" and c4s ~= "" then out[#out + 1] = n % 256 end
+        i = i + 4
+    end
+    return out
+end
+
+local function decodeNfpcLegacyLine(line, mode, stats)
+    local pixelLen = (mode == 256) and 2 or 1
+    local row = {}
+    local decode
+    if mode == 256 then
+        decode = function(s)
+            local v = tonumber(s, 16)
+            if v == nil then stats.bad = stats.bad + 1; return 0 end
+            return v
+        end
+    else
+        decode = function(s)
+            local v = NFP32_MAP[s:lower()]
+            if v == nil then stats.bad = stats.bad + 1; return 0 end
+            return v
+        end
+    end
+
+    local i = 1
+    while i <= #line do
+        local ch = line:sub(i, i)
+        if ch == "~" then
+            i = i + 1
+            local pixelStr = line:sub(i, i + pixelLen - 1)
+            i = i + pixelLen
+            local countHex = line:sub(i, i + 1)
+            i = i + 2
+            local count = tonumber(countHex, 16) or 1
+            local val = decode(pixelStr)
+            for _ = 1, count do
+                row[#row + 1] = val
+            end
+        else
+            local pixelStr = line:sub(i, i + pixelLen - 1)
+            row[#row + 1] = decode(pixelStr)
+            i = i + pixelLen
+        end
+    end
+    return row
+end
+
+local function fitRow(row, width)
+    for i = #row + 1, width do row[i] = 0 end
+    for i = width + 1, #row do row[i] = nil end
+    return row
+end
+
+local function blankRow(width)
+    local row = {}
+    for i = 1, width do row[i] = 0 end
+    return row
+end
+
+local function unpackC2Row(payload, mode, width, stats)
+    local bytes = base64Bytes(payload)
+    local row = {}
+    if mode == 256 then
+        for i = 1, math.min(width, #bytes) do
+            row[i] = bytes[i]
+        end
+    else
+        local x = 1
+        for i = 1, #bytes do
+            local b = bytes[i]
+            row[x] = math.floor(b / 16) % 16
+            x = x + 1
+            if x <= width then
+                row[x] = b % 16
+                x = x + 1
+            end
+            if x > width then break end
+        end
+    end
+    if #row < width then stats.bad = stats.bad + 1 end
+    return fitRow(row, width)
+end
+
+local function decodeC2Row(line, mode, width, prevRow, prevFrameRow, stats)
+    if line == "=" then
+        return prevRow or blankRow(width)
+    elseif line == "^" then
+        return prevFrameRow or blankRow(width)
+    elseif line:sub(1, 1) == "!" then
+        return unpackC2Row(line:sub(2), mode, width, stats)
+    end
+    return fitRow(decodeNfpcLegacyLine(line, mode, stats), width)
+end
+
+local function readC3Blob(lines, idx)
+    local line = lines[idx] or ""
+    if line:sub(1, 1) == "@" then
+        local count = tonumber(line:sub(2)) or 0
+        local parts = {}
+        for i = 1, count do
+            parts[i] = lines[idx + i] or ""
+        end
+        return table.concat(parts), idx + count + 1
+    end
+    return line, idx + 1
+end
+
+local function decodeC3Frame(payload, mode, w, h, prevFlat, stats)
+    local bytes = base64Bytes(payload)
+    local total = w * h
+    local flat = {}
+    local pos, i = 1, 1
+    while pos <= total and i <= #bytes do
+        local cmd = bytes[i] or 0
+        i = i + 1
+        local op = math.floor(cmd / 64)
+        local len = (cmd % 64) + 1
+        if op == 0 then
+            for _ = 1, len do
+                flat[pos] = prevFlat and prevFlat[pos] or 0
+                pos = pos + 1
+                if pos > total then break end
+            end
+        elseif op == 1 then
+            local src = pos - w
+            for _ = 1, len do
+                flat[pos] = flat[src] or 0
+                pos = pos + 1
+                src = src + 1
+                if pos > total then break end
+            end
+        elseif op == 2 then
+            local color = bytes[i] or 0
+            i = i + 1
+            for _ = 1, len do
+                flat[pos] = color
+                pos = pos + 1
+                if pos > total then break end
+            end
+        else
+            for _ = 1, len do
+                flat[pos] = bytes[i] or 0
+                i = i + 1
+                pos = pos + 1
+                if pos > total then break end
+            end
+        end
+    end
+    if pos <= total then stats.bad = stats.bad + 1 end
+    for p = 1, total do
+        if flat[p] == nil then flat[p] = 0 end
+        if mode ~= 256 then flat[p] = flat[p] % 32 end
+    end
+
+    local rows = {}
+    local p = 1
+    for y = 1, h do
+        local row = {}
+        for x = 1, w do
+            row[x] = flat[p] or 0
+            p = p + 1
+        end
+        rows[y] = row
+    end
+    return rows, flat
+end
+
 local function looksNfpc(line)
     return line and line:match("^!NFPC") ~= nil
 end
@@ -83,114 +269,83 @@ end
 
 local function parseNfpc(lines, stats)
     local header = lines[1] or ""
-    local _, _, wStr, hStr, modeStr = header:find("^!NFPC%s+(%d+)%s+(%d+)%s+(%d+)")
+    local _, _, wStr, hStr, modeStr, codec = header:find("^!NFPC%s+(%d+)%s+(%d+)%s+(%d+)%s*(%S*)")
     if not modeStr then error("Missing NFPC header") end
     local mode = tonumber(modeStr)
-    local pixelLen = (mode == 256) and 2 or 1
-
-    local decode
-    if mode == 256 then
-        decode = function(s)
-            local v = tonumber(s, 16)
-            if v == nil then stats.bad = stats.bad + 1; return 0 end
-            return v
-        end
-    else
-        decode = function(s)
-            local v = NFP32_MAP[s]
-            if v == nil then stats.bad = stats.bad + 1; return 0 end
-            return v
-        end
-    end
+    local w = tonumber(wStr) or 0
+    local h = tonumber(hStr) or 0
 
     local pixels = {}
-    for lineIdx = 2, #lines do
-        local line = lines[lineIdx]
-        if line ~= "" then
-            local row = {}
-            local i = 1
-            while i <= #line do
-                local ch = line:sub(i, i)
-                if ch == "~" then
-                    i = i + 1
-                    local pixelStr = line:sub(i, i + pixelLen - 1)
-                    i = i + pixelLen
-                    local countHex = line:sub(i, i + 1)
-                    i = i + 2
-                    local count = tonumber(countHex, 16) or 1
-                    local val = decode(pixelStr)
-                    for _ = 1, count do
-                        table.insert(row, val)
-                    end
-                else
-                    local pixelStr = line:sub(i, i + pixelLen - 1)
-                    table.insert(row, decode(pixelStr))
-                    i = i + pixelLen
-                end
+    if codec == "C3" then
+        local payload = readC3Blob(lines, 2)
+        pixels = decodeC3Frame(payload, mode, w, h, nil, stats)
+    elseif codec == "C2" then
+        local prevRow = nil
+        for y = 1, h do
+            local row = decodeC2Row(lines[y + 1] or "", mode, w, prevRow, nil, stats)
+            pixels[y] = row
+            prevRow = row
+        end
+    else
+        for lineIdx = 2, #lines do
+            local line = lines[lineIdx]
+            if line ~= "" then
+                pixels[#pixels + 1] = decodeNfpcLegacyLine(line, mode, stats)
             end
-            table.insert(pixels, row)
         end
     end
-    return pixels, tonumber(wStr) or 0, tonumber(hStr) or #pixels
+    return pixels, w, h ~= 0 and h or #pixels
 end
 
 local function parseNfpa(lines, stats)
     local header = lines[1] or ""
-    local _, _, wStr, hStr, modeStr, delayStr, loopStr, framesStr = header:find("^!NFPA%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)")
+    local _, _, wStr, hStr, modeStr, delayStr, loopStr, framesStr, codec = header:find("^!NFPA%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s*(%S*)")
     if not framesStr then error("Missing NFPA header") end
     local mode = tonumber(modeStr)
+    local w = tonumber(wStr) or 0
     local h = tonumber(hStr)
-    local pixelLen = (mode == 256) and 2 or 1
     local frameCount = tonumber(framesStr)
-
-    local decode
-    if mode == 256 then
-        decode = function(s)
-            local v = tonumber(s, 16)
-            if v == nil then stats.bad = stats.bad + 1; return 0 end
-            return v
-        end
-    else
-        decode = function(s)
-            local v = NFP32_MAP[s]
-            if v == nil then stats.bad = stats.bad + 1; return 0 end
-            return v
-        end
-    end
 
     local frames = {}
     local idx = 2
-    for f = 1, frameCount do
-        local frame = {}
-        for y = 1, h do
-            local line = lines[idx]
-            idx = idx + 1
-            local row = {}
-            if line and line ~= "" then
-                local i = 1
-                while i <= #line do
-                    local ch = line:sub(i, i)
-                    if ch == "~" then
-                        i = i + 1
-                        local pixelStr = line:sub(i, i + pixelLen - 1)
-                        i = i + pixelLen
-                        local countHex = line:sub(i, i + 1)
-                        i = i + 2
-                        local count = tonumber(countHex, 16) or 1
-                        local val = decode(pixelStr)
-                        for _ = 1, count do
-                            table.insert(row, val)
-                        end
-                    else
-                        local pixelStr = line:sub(i, i + pixelLen - 1)
-                        table.insert(row, decode(pixelStr))
-                        i = i + pixelLen
-                    end
-                end
-            end
-            table.insert(frame, row)
+    if codec == "C3" then
+        local prevFlat = nil
+        for f = 1, frameCount do
+            local payload
+            payload, idx = readC3Blob(lines, idx)
+            local rows, flat = decodeC3Frame(payload, mode, w, h, prevFlat, stats)
+            frames[f] = rows
+            prevFlat = flat
         end
-        table.insert(frames, frame)
+    elseif codec == "C2" then
+        local prevFrame = nil
+        for f = 1, frameCount do
+            local frame = {}
+            local prevRow = nil
+            for y = 1, h do
+                local row = decodeC2Row(lines[idx] or "", mode, w, prevRow, prevFrame and prevFrame[y], stats)
+                idx = idx + 1
+                frame[y] = row
+                prevRow = row
+            end
+            frames[f] = frame
+            prevFrame = frame
+        end
+    else
+        for f = 1, frameCount do
+            local frame = {}
+            for y = 1, h do
+                local line = lines[idx]
+                idx = idx + 1
+                if line and line ~= "" then
+                    frame[y] = decodeNfpcLegacyLine(line, mode, stats)
+                else
+                    frame[y] = {}
+                end
+                if w > 0 then fitRow(frame[y], w) end
+            end
+            frames[f] = frame
+        end
     end
     return frames, tonumber(wStr) or 0, tonumber(hStr) or 0, tonumber(delayStr) or 100, tonumber(loopStr) or 0
 end
@@ -301,7 +456,7 @@ local function appImageViewer(initialPath)
                 imgH = fh or #pixels
                 animDelay = (delay or 100) / 1000
                 isAnimation = true
-                formatName = "NFPA"
+                formatName = ((lines[1] or ""):find("C3") and "NFPA C3") or ((lines[1] or ""):find("C2") and "NFPA C2" or "NFPA")
                 startAnimation()
             else
                 status = "Invalid NFPA: " .. tostring(result)
@@ -314,7 +469,7 @@ local function appImageViewer(initialPath)
                 pixels = result
                 imgW = fw or 0
                 imgH = fh or #pixels
-                formatName = "NFPC"
+                formatName = ((lines[1] or ""):find("C3") and "NFPC C3") or ((lines[1] or ""):find("C2") and "NFPC C2" or "NFPC")
             else
                 status = "Invalid NFPC: " .. tostring(result)
                 if not quiet then API.showError("Image Viewer", status) end
@@ -388,6 +543,31 @@ local function appImageViewer(initialPath)
         end
     end
 
+    local function drawImageViewport(viewX, viewY, viewW, viewH)
+        local maxY = math.min(imgH - oy, math.floor(viewH / scale))
+        local maxX = math.min(imgW - ox, math.floor(viewW / scale))
+        for y = 1, maxY do
+            local row = pixels[y + oy]
+            if row then
+                local screenY = viewY + (y - 1) * scale
+                local x = 1
+                while x <= maxX do
+                    local color = row[x + ox]
+                    if color == nil then
+                        x = x + 1
+                    else
+                        local runEnd = x + 1
+                        while runEnd <= maxX and row[runEnd + ox] == color do
+                            runEnd = runEnd + 1
+                        end
+                        R.fillRect(viewX + (x - 1) * scale, screenY, (runEnd - x) * scale, scale, color)
+                        x = runEnd
+                    end
+                end
+            end
+        end
+    end
+
     win.onDraw = function(_, cx, cy, cw, ch)
         button(cx, cy, math.min(42, cw), "Open")
         if cw >= 78 then button(cx + 46, cy, 28, "+") end
@@ -414,19 +594,7 @@ local function appImageViewer(initialPath)
         end
 
         clampPan(cw, ch)
-        local maxY = math.min(imgH - oy, math.floor(viewH / scale))
-        local maxX = math.min(imgW - ox, math.floor(viewW / scale))
-        for y = 1, maxY do
-            local row = pixels[y + oy]
-            if row then
-                for x = 1, maxX do
-                    local color = row[x + ox]
-                    if color ~= nil then
-                        R.fillRect(viewX + (x - 1) * scale, viewY + (y - 1) * scale, scale, scale, color)
-                    end
-                end
-            end
-        end
+        drawImageViewport(viewX, viewY, viewW, viewH)
         drawText(cx + 4, cy + ch - 10, "Scale " .. scale .. "x  " .. status, K.DGRAY, K.GRAY, cw - 8)
     end
 
