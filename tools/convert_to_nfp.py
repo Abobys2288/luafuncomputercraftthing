@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """
-    CCOS NFP Converter v2
+    CCOS NFP Converter v3
     =====================
-    Converts any image to NFP or NFP256 format.
+    Converts any image to NFP, NFP256, or NFPC (compressed) format.
 
     Usage:
         python convert_to_nfp.py input.png --size 64 48 -o out.nfp
         python convert_to_nfp.py input.png --256 --size 64 48 -o out.nfp256
-        python convert_to_nfp.py input.png --ccos --dither -o out.nfp
+        python convert_to_nfp.py input.png --nfpc --size 64 48 -o out.nfpc
+        python convert_to_nfp.py input.png --dither -o out.nfp
 
     Formats:
         .nfp      32-color text (1 char/pixel, backward compatible)
         .nfp256   256-color hex (2 hex chars/pixel, uses full palette)
+        .nfpc     RLE-compressed NFP/NFP256 (smaller for icons & UI)
 
     The 256-color palette in render.lua:
         0-31:   W95 colors
@@ -121,7 +123,51 @@ def nearest_neighbor(img, palette):
     return out
 
 
-def convert_image(image_path, output_path, size=None, use256=False, dither=False):
+def encode_nfpc32_line(row):
+    """Compress a 32-color row into NFPC text.
+    row is a list of palette key characters."""
+    return _encode_rle(row, 1)
+
+
+def encode_nfpc256_line(row):
+    """Compress a 256-color row into NFPC text."""
+    hexes = [f"{v:02x}" for v in row]
+    return _encode_rle(hexes, 2)
+
+
+def _encode_rle(items, item_len):
+    """Generic RLE encoder for NFPC.
+    count is always encoded as exactly 2 lower-case hex digits (02-ff).
+    Runs longer than 255 are split into multiple chunks."""
+    if not items:
+        return ""
+    result = []
+    i = 0
+    n = len(items)
+    while i < n:
+        val = items[i]
+        j = i + 1
+        while j < n and items[j] == val:
+            j += 1
+        count = j - i
+        if count == 1:
+            result.append(val)
+        else:
+            while count > 0:
+                chunk = min(count, 255)
+                count_hex = f"{chunk:02x}"
+                rle = f"~{val}{count_hex}"
+                raw = val * chunk
+                if len(rle) < len(raw):
+                    result.append(rle)
+                else:
+                    result.append(raw)
+                count -= chunk
+        i = j
+    return "".join(result)
+
+
+def convert_image(image_path, output_path, size=None, use256=False, dither=False, use_nfpc=False):
     img = Image.open(image_path).convert('RGB')
     orig_w, orig_h = img.size
 
@@ -141,6 +187,8 @@ def convert_image(image_path, output_path, size=None, use256=False, dither=False
         print(f"Size: {orig_w}x{orig_h}")
 
     ext = Path(output_path).suffix.lower()
+    if use_nfpc or ext == '.nfpc':
+        use_nfpc = True
 
     if use256 or ext == '.nfp256':
         palette = PALETTE256
@@ -157,7 +205,17 @@ def convert_image(image_path, output_path, size=None, use256=False, dither=False
         pixels = nearest_neighbor(img, palette)
 
     # Write output
-    if use256 or ext == '.nfp256':
+    if use_nfpc or ext == '.nfpc':
+        mode = 256 if (use256 or palette is PALETTE256) else 32
+        lines = [f"!NFPC {target_w} {target_h} {mode}"]
+        for row in pixels:
+            if mode == 256:
+                lines.append(encode_nfpc256_line(row))
+            else:
+                lines.append(encode_nfpc32_line(row))
+        Path(output_path).write_text('\n'.join(lines), encoding='utf-8')
+        print(f"Saved: {output_path} ({target_w}x{target_h}, NFPC {mode}-color)")
+    elif use256 or ext == '.nfp256':
         # 2 hex chars per pixel
         lines = []
         for row in pixels:
@@ -180,6 +238,7 @@ def main():
     parser.add_argument('-o', '--output', default='out.nfp', help='Output file')
     parser.add_argument('-s', '--size', nargs=2, type=int, metavar=('W', 'H'), help='Target size')
     parser.add_argument('--256', dest='use256', action='store_true', help='Use 256-color hex format (.nfp256)')
+    parser.add_argument('--nfpc', action='store_true', help='Use compressed RLE format (.nfpc)')
     parser.add_argument('--dither', action='store_true', help='Apply Floyd-Steinberg dithering')
     args = parser.parse_args()
 
@@ -187,7 +246,7 @@ def main():
         print(f"ERROR: File not found: {args.input}")
         sys.exit(1)
 
-    convert_image(args.input, args.output, size=args.size, use256=args.use256, dither=args.dither)
+    convert_image(args.input, args.output, size=args.size, use256=args.use256, dither=args.dither, use_nfpc=args.nfpc)
 
 
 if __name__ == '__main__':

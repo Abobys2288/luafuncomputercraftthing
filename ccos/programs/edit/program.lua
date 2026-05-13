@@ -4,10 +4,29 @@ local R = _G.ccos_render
 local API = _G.ccos_api
 local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,BLUE=5,DBLUE=6,DESKTOP=30}
 
-local function popChar(text)
-    if API and API.utf8Pop then return API.utf8Pop(text) end
-    if R and R.utf8Pop then return R.utf8Pop(text) end
-    return tostring(text or ""):sub(1, -2)
+local function lineLen(line)
+    if R and R.utf8Len then return R.utf8Len(line) end
+    return #(line or "")
+end
+
+local function lineSub(line, startPos, endPos)
+    if R and R.utf8Sub then return R.utf8Sub(line, startPos, endPos) end
+    return tostring(line or ""):sub(startPos or 1, endPos or -1)
+end
+
+local function lineChar(line, pos)
+    if R and R.utf8CharAt then return R.utf8CharAt(line, pos) end
+    return tostring(line or ""):sub(pos, pos)
+end
+
+local function lineInsert(line, pos, ch)
+    if R and R.utf8Insert then return R.utf8Insert(line, pos, ch) end
+    return tostring(line or ""):sub(1, pos - 1) .. tostring(ch or "") .. tostring(line or ""):sub(pos)
+end
+
+local function lineRemove(line, pos)
+    if R and R.utf8Remove then return R.utf8Remove(line, pos) end
+    return tostring(line or ""):sub(1, pos - 1) .. tostring(line or ""):sub(pos + 1)
 end
 
 local function appEdit(fp)
@@ -37,7 +56,7 @@ local function appEdit(fp)
         local visibleChars = math.floor((cw - 6) / 6)
         for i=1, eh do
             local line = lines[sy + i] or ""
-            local display = line:sub(sx + 1, sx + visibleChars)
+            local display = lineSub(line, sx + 1, sx + visibleChars)
             R.drawText(cx + 2, cy + 16 + (i-1)*8, display, K.BLACK, K.GRAY)
         end
         if cl > sy and cl <= sy + eh then
@@ -45,7 +64,7 @@ local function appEdit(fp)
             local cx2 = cx + 2 + (cc - 1 - sx) * 6
             if cx2 >= cx + 2 and cx2 < cx + cw - 4 then
                 R.fillRect(cx2, cy2, 6, 8, K.DBLUE)
-                local c2 = (lines[cl] or ""):sub(cc, cc)
+                local c2 = lineChar(lines[cl], cc)
                 R.drawText(cx2, cy2, c2=="" and " " or c2, K.WHITE, K.DBLUE)
             end
         end
@@ -65,7 +84,7 @@ local function appEdit(fp)
     w.onKey = function(win, k, ch)
         if ch then
             local l = lines[cl] or ""
-            lines[cl] = l:sub(1, cc - 1) .. ch .. l:sub(cc)
+            lines[cl] = lineInsert(l, cc, ch)
             cc = cc + 1
             mod = true
             ensureHScroll()
@@ -73,10 +92,10 @@ local function appEdit(fp)
         elseif k == keys.backspace then
             if cc > 1 then
                 local l = lines[cl] or ""
-                lines[cl] = popChar(l:sub(1, cc - 1)) .. l:sub(cc)
+                lines[cl] = lineRemove(l, cc - 1)
                 cc = cc - 1
             elseif cl > 1 then
-                local pl = #(lines[cl - 1] or "")
+                local pl = lineLen(lines[cl - 1] or "")
                 lines[cl - 1] = (lines[cl - 1] or "") .. (lines[cl] or "")
                 table.remove(lines, cl)
                 cl = cl - 1
@@ -87,8 +106,8 @@ local function appEdit(fp)
             D.markContentDirty(win)
         elseif k == keys.enter then
             local l = lines[cl] or ""
-            lines[cl] = l:sub(1, cc - 1)
-            table.insert(lines, cl + 1, l:sub(cc))
+            lines[cl] = lineSub(l, 1, cc - 1)
+            table.insert(lines, cl + 1, lineSub(l, cc))
             cl = cl + 1
             cc = 1
             sx = 0
@@ -96,24 +115,24 @@ local function appEdit(fp)
             D.markContentDirty(win)
         elseif k == keys.up and cl > 1 then
             cl = cl - 1
-            cc = math.min(cc, #(lines[cl] or "") + 1)
+            cc = math.min(cc, lineLen(lines[cl] or "") + 1)
             if cl <= sy then sy = sy - 1 end
             ensureHScroll()
             D.markContentDirty(win)
         elseif k == keys.down and cl < #lines then
             cl = cl + 1
-            cc = math.min(cc, #(lines[cl] or "") + 1)
+            cc = math.min(cc, lineLen(lines[cl] or "") + 1)
             local eh = math.floor((win.ch - 16) / 8)
             if cl > sy + eh then sy = sy + 1 end
             ensureHScroll()
             D.markContentDirty(win)
         elseif k == keys.left then
             if cc > 1 then cc = cc - 1
-            elseif cl > 1 then cl = cl - 1; cc = #(lines[cl] or "") + 1 end
+            elseif cl > 1 then cl = cl - 1; cc = lineLen(lines[cl] or "") + 1 end
             ensureHScroll()
             D.markContentDirty(win)
         elseif k == keys.right then
-            if cc <= #(lines[cl] or "") then cc = cc + 1
+            if cc <= lineLen(lines[cl] or "") then cc = cc + 1
             elseif cl < #lines then cl = cl + 1; cc = 1; sx = 0 end
             ensureHScroll()
             D.markContentDirty(win)
@@ -122,9 +141,16 @@ local function appEdit(fp)
             sx = 0
             D.markContentDirty(win)
         elseif k == keys["end"] then
-            cc = #(lines[cl] or "") + 1
+            cc = lineLen(lines[cl] or "") + 1
             ensureHScroll()
             D.markContentDirty(win)
+        elseif k == keys.delete then
+            local l = lines[cl] or ""
+            if cc <= lineLen(l) then
+                lines[cl] = lineRemove(l, cc)
+                mod = true
+                D.markContentDirty(win)
+            end
         elseif k == keys.escape then
             if mod then API.writeFile(fp, table.concat(lines, "\n")) end
             D.destroyWindow(win)

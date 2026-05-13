@@ -92,7 +92,7 @@ local function appFM()
 
         local ext = (filePath:match("%.([^%.]+)$") or ""):lower()
         local targetIcon = "edit"
-        if ext == "nfp" or ext == "nfp256" then targetIcon = "img" end
+        if ext == "nfp" or ext == "nfp256" or ext == "nfpc" or ext == "nfpa" then targetIcon = "img" end
         for _, prog in ipairs(D.programs) do
             if prog.icon == targetIcon then prog.run(filePath); return end
         end

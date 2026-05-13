@@ -203,7 +203,7 @@ return {name = "My App", icon = "app", run = run}</textarea>
       </div>
       <div class="grid2">
         <label>Image<input id="imgFile" type="file" accept="image/*"></label>
-        <label>Format<select id="imgFormat"><option value="nfp256">nfp256</option><option value="nfp">nfp</option></select></label>
+        <label>Format<select id="imgFormat"><option value="nfp256">nfp256</option><option value="nfp">nfp</option><option value="nfpc">nfpc</option></select></label>
         <label>Width<input id="imgW" type="number" min="1" max="256" value="32"></label>
         <label>Height<input id="imgH" type="number" min="1" max="256" value="32"></label>
       </div>
@@ -364,6 +364,34 @@ function closest(rgb, format) {
   return best.toString(16).padStart(2, "0");
 }
 
+function encodeNfpcLine(line, pixelLen) {
+  if (!line) return "";
+  let result = "";
+  let i = 0;
+  while (i < line.length) {
+    const val = line.substr(i, pixelLen);
+    let j = i + pixelLen;
+    while (j < line.length && line.substr(j, pixelLen) === val) {
+      j += pixelLen;
+    }
+    let count = (j - i) / pixelLen;
+    if (count === 1) {
+      result += val;
+    } else {
+      while (count > 0) {
+        const chunk = Math.min(count, 255);
+        const countHex = chunk.toString(16).padStart(2, "0");
+        const rle = "~" + val + countHex;
+        const raw = val.repeat(chunk);
+        result += (rle.length < raw.length) ? rle : raw;
+        count -= chunk;
+      }
+    }
+    i = j;
+  }
+  return result;
+}
+
 async function convertImage() {
   const file = document.getElementById("imgFile").files[0];
   if (!file) { statusEl.textContent = "Choose an image first."; return; }
@@ -381,16 +409,25 @@ async function convertImage() {
   ctx.drawImage(img, 0, 0, width, height);
   const data = ctx.getImageData(0, 0, width, height).data;
   const lines = [];
+  const pixelFormat = format === "nfpc" ? "nfp256" : format;
+  const pixelLen = pixelFormat === "nfp256" ? 2 : 1;
   for (let y = 0; y < height; y++) {
     let line = "";
     for (let x = 0; x < width; x++) {
       const p = (y * width + x) * 4;
       const rgb = [data[p], data[p+1], data[p+2]];
-      line += closest(rgb, format);
+      line += closest(rgb, pixelFormat);
+    }
+    if (format === "nfpc") {
+      line = encodeNfpcLine(line, pixelLen);
     }
     lines.push(line);
   }
-  lastImageText = lines.join("\n");
+  if (format === "nfpc") {
+    lastImageText = "!NFPC " + width + " " + height + " 256\n" + lines.join("\n");
+  } else {
+    lastImageText = lines.join("\n");
+  }
   out.value = lastImageText;
   statusEl.textContent = `Converted ${width}x${height} ${format}.`;
 }

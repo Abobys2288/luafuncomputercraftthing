@@ -13,10 +13,11 @@ local function clipText(text, maxW)
     if R.clipText then return R.clipText(text, maxW) end
     text = tostring(text or "")
     local maxChars = math.max(0, math.floor((maxW or 0) / 6))
-    if #text <= maxChars then return text end
+    local len = R.utf8Len and R.utf8Len(text) or #text
+    if len <= maxChars then return text end
     if maxChars <= 0 then return "" end
     if maxChars <= 2 then return string.rep(".", maxChars) end
-    return text:sub(1, maxChars - 2) .. ".."
+    return (R.utf8Sub and R.utf8Sub(text, 1, maxChars - 2) or text:sub(1, maxChars - 2)) .. ".."
 end
 
 local function drawTextClip(x, y, text, fg, bg, maxW)
@@ -124,22 +125,63 @@ local function readNfpIcon(path)
     if not f then return nil end
     local ext = (path:match("%.([^%.]+)$") or ""):lower()
     local pixels, imgW = {}, 0
-    while true do
-        local line = f.readLine()
-        if not line then break end
-        if line ~= "" then
-            local row = {}
-            if ext == "nfp256" then
-                for i = 1, #line, 2 do
-                    row[#row + 1] = tonumber(line:sub(i, i + 1), 16) or 0
+
+    if ext == "nfpc" then
+        local header = f.readLine()
+        if not header or not header:match("^!NFPC") then f.close(); return nil end
+        local _, _, wStr, hStr, modeStr = header:find("^!NFPC%s+(%d+)%s+(%d+)%s+(%d+)")
+        local mode = tonumber(modeStr) or 32
+        local pixelLen = (mode == 256) and 2 or 1
+        local decode
+        if mode == 256 then
+            decode = function(s) return tonumber(s, 16) or 0 end
+        else
+            decode = function(s) return NFP32_MAP[s:lower()] or 0 end
+        end
+        while true do
+            local line = f.readLine()
+            if not line then break end
+            if line ~= "" then
+                local row = {}
+                local i = 1
+                while i <= #line do
+                    if line:sub(i,i) == "~" then
+                        i = i + 1
+                        local ps = line:sub(i, i+pixelLen-1)
+                        i = i + pixelLen
+                        local chex = line:sub(i, i+1)
+                        i = i + 2
+                        local cnt = tonumber(chex, 16) or 1
+                        local v = decode(ps)
+                        for _=1,cnt do row[#row+1] = v end
+                    else
+                        local ps = line:sub(i, i+pixelLen-1)
+                        row[#row+1] = decode(ps)
+                        i = i + pixelLen
+                    end
                 end
-            else
-                for i = 1, #line do
-                    row[#row + 1] = NFP32_MAP[line:sub(i, i):lower()] or 0
-                end
+                pixels[#pixels + 1] = row
+                imgW = math.max(imgW, #row)
             end
-            pixels[#pixels + 1] = row
-            imgW = math.max(imgW, #row)
+        end
+    else
+        while true do
+            local line = f.readLine()
+            if not line then break end
+            if line ~= "" then
+                local row = {}
+                if ext == "nfp256" then
+                    for i = 1, #line, 2 do
+                        row[#row + 1] = tonumber(line:sub(i, i + 1), 16) or 0
+                    end
+                else
+                    for i = 1, #line do
+                        row[#row + 1] = NFP32_MAP[line:sub(i, i):lower()] or 0
+                    end
+                end
+                pixels[#pixels + 1] = row
+                imgW = math.max(imgW, #row)
+            end
         end
     end
     f.close()
@@ -153,13 +195,16 @@ function D.iconPathsFor(prog)
     if prog and prog.iconPath then paths[#paths + 1] = prog.iconPath end
     if type(icon) == "string" and icon:find("/") then paths[#paths + 1] = icon end
     if prog and prog._dirName then
+        paths[#paths + 1] = "/ccos/programs/" .. prog._dirName .. "/icon.nfpc"
         paths[#paths + 1] = "/ccos/programs/" .. prog._dirName .. "/icon.nfp256"
         paths[#paths + 1] = "/ccos/programs/" .. prog._dirName .. "/icon.nfp"
     end
     if type(icon) == "string" and not icon:find("/") then
+        paths[#paths + 1] = "/ccos/icons/" .. icon .. ".nfpc"
         paths[#paths + 1] = "/ccos/icons/" .. icon .. ".nfp256"
         paths[#paths + 1] = "/ccos/icons/" .. icon .. ".nfp"
     end
+    paths[#paths + 1] = "/ccos/icons/app.nfpc"
     paths[#paths + 1] = "/ccos/icons/app.nfp256"
     return paths
 end
@@ -193,7 +238,8 @@ function D.drawProgramIcon(prog, x, y, w, h)
         end
         return true
     end
-    R.drawText(x + math.floor((w - 6) / 2), y + math.floor((h - 7) / 2), (prog.name or "?"):sub(1, 1):upper(), K.DBLUE, nil)
+    local nameFirst = R.utf8Sub and R.utf8Sub(prog.name or "?", 1, 1) or (prog.name or "?"):sub(1, 1)
+    R.drawText(x + math.floor((w - 6) / 2), y + math.floor((h - 7) / 2), nameFirst:upper(), K.DBLUE, nil)
     return false
 end
 
@@ -210,7 +256,8 @@ D.rebuildIconCache = function()
         if iy > by then break end -- fully below screen, stop
         if iy + ih >= 0 then
             local lab = prog.name
-            if #lab > 8 then lab = lab:sub(1, 7) .. ".." end
+            local labLen = R.utf8Len and R.utf8Len(lab) or #lab
+            if labLen > 8 then lab = (R.utf8Sub and R.utf8Sub(lab, 1, 7) or lab:sub(1, 7)) .. ".." end
             table.insert(D.iconCache, {
                 prog = prog,
                 ix = ix, iy = iy,
@@ -310,10 +357,10 @@ function D.showError(title, message)
         local maxChars = math.max(1, math.floor((cx + cw - textX - 4) / 6))
         local text = tostring(message) or "Unknown error"
         local lines = {}
-        while #text > 0 and #lines < math.max(1, math.floor((ch - 28) / 8)) do
-            local piece = text:sub(1, maxChars)
+        while (R.utf8Len and R.utf8Len(text) or #text) > 0 and #lines < math.max(1, math.floor((ch - 28) / 8)) do
+            local piece = R.utf8Sub and R.utf8Sub(text, 1, maxChars) or text:sub(1, maxChars)
             table.insert(lines, piece)
-            text = text:sub(maxChars + 1)
+            text = R.utf8Sub and R.utf8Sub(text, maxChars + 1) or text:sub(maxChars + 1)
         end
         if #lines == 0 then lines = {"Unknown error"} end
         for i, line in ipairs(lines) do
@@ -561,7 +608,9 @@ function D._drawFull()
     local layoutX = math.max(60, R.w - 76)
     local bx=60; for _,w in ipairs(D.windows) do local bw=math.min(100,layoutX-bx-4); if bw<25 then break end
         local active=D.activeWin and D.activeWin.id==w.id; R.drawButton(bx,by+3,bw,14,active)
-        local t=#w.title>12 and w.title:sub(1,10)..".." or w.title; if w.minimized then t="("..t..")" end
+        local titleLen = R.utf8Len and R.utf8Len(w.title) or #w.title
+        local t = titleLen > 12 and ((R.utf8Sub and R.utf8Sub(w.title, 1, 10) or w.title:sub(1,10)) .. "..") or w.title
+        if w.minimized then t="("..t..")" end
         drawTextClip(bx+4,by+6,t,active and K.WHITE or K.BLACK,active and K.GRAY or K.GRAY,bw-8)
         bx=bx+bw+2
     end

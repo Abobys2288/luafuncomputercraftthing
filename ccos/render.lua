@@ -378,6 +378,24 @@ function R.utf8Pop(text)
     return table.concat(chars)
 end
 
+function R.utf8CharAt(text, pos)
+    local chars = R.utf8Chars(text)
+    return chars[pos] or ""
+end
+
+function R.utf8Insert(text, pos, ch)
+    local chars = R.utf8Chars(text)
+    table.insert(chars, pos, ch)
+    return table.concat(chars)
+end
+
+function R.utf8Remove(text, pos)
+    local chars = R.utf8Chars(text)
+    if pos < 1 or pos > #chars then return text end
+    table.remove(chars, pos)
+    return table.concat(chars)
+end
+
 function R.fontKey(ch)
     if not ch or ch == "" then return "?" end
     if #ch == 1 then return ch:upper() end

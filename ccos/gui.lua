@@ -50,7 +50,9 @@ function gui.writeAt(x, y, text, fg, bg)
     local d = gui.display or term
     d.setCursorPos(x, y)
     if fg then gui.setColors(fg, bg or gui.C.BLACK) end
-    if #text > gui.w - x + 1 then text = text:sub(1, gui.w - x + 1) end
+    local maxChars = gui.w - x + 1
+    local textLen = R.utf8Len and R.utf8Len(text) or #text
+    if textLen > maxChars then text = (R.utf8Sub and R.utf8Sub(text, 1, maxChars) or text:sub(1, maxChars)) end
     d.write(text)
     gui.resetColors()
 end
@@ -195,10 +197,11 @@ function gui.drawList(child, absX, absY)
         if item then
             local prefix = (idx == selected) and "> " or "  "
             local text = prefix .. item
-            if #text > w then text = text:sub(1, w) end
+            local textLen = R.utf8Len and R.utf8Len(text) or #text
+            if textLen > w then text = (R.utf8Sub and R.utf8Sub(text, 1, w) or text:sub(1, w)) end
             if idx == selected then
                 gui.setColors(gui.C.BLACK, gui.C.LIGHT_GRAY)
-                d.write(text .. string.rep(" ", w - #text))
+                d.write(text .. string.rep(" ", w - (R.utf8Len and R.utf8Len(text) or #text)))
             else
                 gui.setColors(gui.C.WHITE, gui.C.BLACK)
                 d.write(text)
@@ -308,13 +311,14 @@ function gui.handleKey(win, key, char)
 
     if tf then
         if key == keys.backspace then
-            tf.text = tf.text:sub(1, -2)
+            tf.text = R.utf8Pop and R.utf8Pop(tf.text) or tf.text:sub(1, -2)
             return true
         elseif key == keys.enter then
             if tf.onSubmit then tf.onSubmit(tf.text) end
             return true
         elseif char then
-            if #tf.text < tf.w then
+            local tfLen = R.utf8Len and R.utf8Len(tf.text) or #tf.text
+            if tfLen < tf.w then
                 tf.text = tf.text .. char
             end
             return true

@@ -43,6 +43,16 @@ local function popChar(text)
     return tostring(text or ""):sub(1, -2)
 end
 
+local function lineLen(line)
+    if R and R.utf8Len then return R.utf8Len(line) end
+    return #(line or "")
+end
+
+local function lineSub(line, startPos, endPos)
+    if R and R.utf8Sub then return R.utf8Sub(line, startPos, endPos) end
+    return tostring(line or ""):sub(startPos or 1, endPos or -1)
+end
+
 local function safeName(name)
     name = tostring(name or ""):lower():gsub("%s+", "-"):gsub("[^%w%-%_]", "")
     if name == "" then name = "site" .. os.getComputerID() end
@@ -243,7 +253,7 @@ local function appSites()
             local row = math.floor((my - 40) / 8) + 1
             if mode == "edit" and row >= 1 and row <= #lines then
                 cl = math.max(1, math.min(#lines, sy + row))
-                cc = math.min(#(lines[cl] or "") + 1, math.max(1, math.floor((mx - 4) / 6) + 1))
+                cc = math.min(lineLen(lines[cl]) + 1, math.max(1, math.floor((mx - 4) / 6) + 1))
                 API.redrawContent(w)
             end
         end
@@ -253,32 +263,32 @@ local function appSites()
         local rows = math.max(1, math.floor((w.ch - 21 - 44) / 8))
         if mode == "edit" and ch then
             local line = lines[cl] or ""
-            lines[cl] = line:sub(1, cc - 1) .. ch .. line:sub(cc)
+            lines[cl] = lineSub(line, 1, cc - 1) .. ch .. lineSub(line, cc)
             cc = cc + 1
             API.redrawContent(w)
         elseif k == keys.f5 then registerSite()
         elseif k == keys.escape then API.close(w)
         elseif k == keys.up then
-            if mode == "edit" and cl > 1 then cl = cl - 1; cc = math.min(cc, #(lines[cl] or "") + 1); if cl <= sy then sy = math.max(0, sy - 1) end
+            if mode == "edit" and cl > 1 then cl = cl - 1; cc = math.min(cc, lineLen(lines[cl]) + 1); if cl <= sy then sy = math.max(0, sy - 1) end
             else sy = math.max(0, sy - 1) end
             API.redrawContent(w)
         elseif k == keys.down then
             local count = #(mode == "edit" and lines or viewLines)
-            if mode == "edit" and cl < #lines then cl = cl + 1; cc = math.min(cc, #(lines[cl] or "") + 1); if cl > sy + rows then sy = sy + 1 end
+            if mode == "edit" and cl < #lines then cl = cl + 1; cc = math.min(cc, lineLen(lines[cl]) + 1); if cl > sy + rows then sy = sy + 1 end
             else sy = math.min(math.max(0, count - rows), sy + 1) end
             API.redrawContent(w)
         elseif mode == "edit" and k == keys.left then
             cc = math.max(1, cc - 1); API.redrawContent(w)
         elseif mode == "edit" and k == keys.right then
-            cc = math.min(#(lines[cl] or "") + 1, cc + 1); API.redrawContent(w)
+            cc = math.min(lineLen(lines[cl]) + 1, cc + 1); API.redrawContent(w)
         elseif mode == "edit" and k == keys.backspace then
             local line = lines[cl] or ""
             if cc > 1 then
-                local before = line:sub(1, cc - 1)
-                lines[cl] = popChar(before) .. line:sub(cc)
+                local before = lineSub(line, 1, cc - 1)
+                lines[cl] = popChar(before) .. lineSub(line, cc)
                 cc = math.max(1, cc - 1)
             elseif cl > 1 then
-                local prevLen = #(lines[cl - 1] or "")
+                local prevLen = lineLen(lines[cl - 1])
                 lines[cl - 1] = (lines[cl - 1] or "") .. line
                 table.remove(lines, cl)
                 cl = cl - 1
@@ -287,8 +297,8 @@ local function appSites()
             API.redrawContent(w)
         elseif mode == "edit" and k == keys.enter then
             local line = lines[cl] or ""
-            lines[cl] = line:sub(1, cc - 1)
-            table.insert(lines, cl + 1, line:sub(cc))
+            lines[cl] = lineSub(line, 1, cc - 1)
+            table.insert(lines, cl + 1, lineSub(line, cc))
             cl = cl + 1
             cc = 1
             if cl > sy + rows then sy = sy + 1 end

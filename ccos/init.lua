@@ -30,29 +30,68 @@ local function loadLogoPixels(path)
     local pixels = {}
     local w = 0
     local ext = path:match("%.([^%.]+)$") or ""
-    while true do
-        local line = f.readLine()
-        if not line then break end
-        local row = {}
-        if ext == "nfp256" then
-            for i = 1, #line, 2 do
-                local hex = line:sub(i, i+1)
-                local val = tonumber(hex, 16) or 0
-                table.insert(row, val)
-            end
+    local nfp32 = {
+        ['0']=1,['1']=2,['2']=3,['3']=4,['4']=5,['5']=6,['6']=7,['7']=8,
+        ['8']=9,['9']=10,['a']=11,['b']=12,['c']=13,['d']=14,['e']=15,['f']=16,
+        ['g']=17,['h']=18,['i']=19,['j']=20,['k']=21,['l']=22,['m']=23,['n']=24,
+        ['o']=25,['p']=26,['q']=27,['r']=28,['s']=29,['t']=30,['u']=31,['v']=32,
+    }
+
+    if ext == "nfpc" then
+        local header = f.readLine()
+        if not header or not header:match("^!NFPC") then f.close(); return nil end
+        local _, _, wStr, hStr, modeStr = header:find("^!NFPC%s+(%d+)%s+(%d+)%s+(%d+)")
+        local mode = tonumber(modeStr) or 32
+        local pixelLen = (mode == 256) and 2 or 1
+        local decode
+        if mode == 256 then
+            decode = function(s) return tonumber(s, 16) or 0 end
         else
-            local nfp32 = {
-                ['0']=1,['1']=2,['2']=3,['3']=4,['4']=5,['5']=6,['6']=7,['7']=8,
-                ['8']=9,['9']=10,['a']=11,['b']=12,['c']=13,['d']=14,['e']=15,['f']=16,
-                ['g']=17,['h']=18,['i']=19,['j']=20,['k']=21,['l']=22,['m']=23,['n']=24,
-                ['o']=25,['p']=26,['q']=27,['r']=28,['s']=29,['t']=30,['u']=31,['v']=32,
-            }
-            for i = 1, #line do
-                table.insert(row, nfp32[line:sub(i,i)] or 0)
-            end
+            decode = function(s) return nfp32[s] or 0 end
         end
-        table.insert(pixels, row)
-        w = math.max(w, #row)
+        while true do
+            local line = f.readLine()
+            if not line then break end
+            local row = {}
+            local i = 1
+            while i <= #line do
+                if line:sub(i,i) == "~" then
+                    i = i + 1
+                    local ps = line:sub(i, i+pixelLen-1)
+                    i = i + pixelLen
+                    local chex = line:sub(i, i+1)
+                    i = i + 2
+                    local cnt = tonumber(chex, 16) or 1
+                    local v = decode(ps)
+                    for _=1,cnt do table.insert(row, v) end
+                else
+                    local ps = line:sub(i, i+pixelLen-1)
+                    table.insert(row, decode(ps))
+                    i = i + pixelLen
+                end
+            end
+            table.insert(pixels, row)
+            w = math.max(w, #row)
+        end
+    else
+        while true do
+            local line = f.readLine()
+            if not line then break end
+            local row = {}
+            if ext == "nfp256" then
+                for i = 1, #line, 2 do
+                    local hex = line:sub(i, i+1)
+                    local val = tonumber(hex, 16) or 0
+                    table.insert(row, val)
+                end
+            else
+                for i = 1, #line do
+                    table.insert(row, nfp32[line:sub(i,i)] or 0)
+                end
+            end
+            table.insert(pixels, row)
+            w = math.max(w, #row)
+        end
     end
     f.close()
     return pixels, w, #pixels
@@ -66,7 +105,7 @@ local pbw, pbx, pby, cx, cy, ly
 
 local function drawLogo(R, cx, cy, maxSize)
     -- Try to load custom boot logo
-    local logoPaths = {"/ccos/bootlogo.nfp256", "/ccos/bootlogo.nfp", "/disk/bootlogo.nfp256", "/disk/bootlogo.nfp"}
+    local logoPaths = {"/ccos/bootlogo.nfpc", "/ccos/bootlogo.nfp256", "/ccos/bootlogo.nfp", "/disk/bootlogo.nfpc", "/disk/bootlogo.nfp256", "/disk/bootlogo.nfp"}
     local pixels, imgW, imgH
     for _, path in ipairs(logoPaths) do
         pixels, imgW, imgH = loadLogoPixels(path)

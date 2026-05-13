@@ -9,7 +9,7 @@ return {
     {name="netbrowse", title="Network Browser", desc="Browse network", icon="net"},
     {name="chat", title="Chat", desc="Network chat", icon="chat"},
     {name="pkgman", title="Packages", desc="Install built-in or URL packages", icon="pkg"},
-    {name="imgview", title="Image Viewer", desc="View .nfp and .nfp256 images", icon="img"},
+    {name="imgview", title="Image Viewer", desc="View .nfp, .nfp256, .nfpc and .nfpa images", icon="img"},
     {name="music", title="Music", desc="Speaker note player", icon="music"},
     {name="fastfetch", title="Fastfetch", desc="System overview", icon="fastfetch"},
     {name="sites", title="Sites Browser", desc="Browse CCOS pages", icon="sites"},

@@ -66,10 +66,11 @@ function api.clipText(text, maxW)
     if renderer and renderer.clipText then return renderer.clipText(text, maxW) end
     text = tostring(text or "")
     local maxChars = math.max(0, math.floor((maxW or 0) / 6))
-    if #text <= maxChars then return text end
+    local len = api.utf8Len(text)
+    if len <= maxChars then return text end
     if maxChars <= 0 then return "" end
     if maxChars <= 2 then return string.rep(".", maxChars) end
-    return text:sub(1, maxChars - 2) .. ".."
+    return api.utf8Sub(text, 1, maxChars - 2) .. ".."
 end
 
 function api.utf8Chars(text)
@@ -77,20 +78,55 @@ function api.utf8Chars(text)
     if renderer and renderer.utf8Chars then return renderer.utf8Chars(text) end
     text = tostring(text or "")
     local chars = {}
-    for i = 1, #text do chars[#chars + 1] = text:sub(i, i) end
+    local i = 1
+    while i <= #text do
+        local b = text:byte(i) or 0
+        local len = 1
+        if b >= 240 then len = 4
+        elseif b >= 224 then len = 3
+        elseif b >= 192 then len = 2 end
+        table.insert(chars, text:sub(i, i + len - 1))
+        i = i + len
+    end
     return chars
 end
 
 function api.utf8Len(text)
     local renderer = api.getRenderer()
     if renderer and renderer.utf8Len then return renderer.utf8Len(text) end
-    return #tostring(text or "")
+    return #api.utf8Chars(text)
 end
 
 function api.utf8Pop(text)
     local renderer = api.getRenderer()
     if renderer and renderer.utf8Pop then return renderer.utf8Pop(text) end
-    return tostring(text or ""):sub(1, -2)
+    local chars = api.utf8Chars(text)
+    table.remove(chars)
+    return table.concat(chars)
+end
+
+function api.utf8CharAt(text, pos)
+    local renderer = api.getRenderer()
+    if renderer and renderer.utf8CharAt then return renderer.utf8CharAt(text, pos) end
+    local chars = api.utf8Chars(text)
+    return chars[pos] or ""
+end
+
+function api.utf8Insert(text, pos, ch)
+    local renderer = api.getRenderer()
+    if renderer and renderer.utf8Insert then return renderer.utf8Insert(text, pos, ch) end
+    local chars = api.utf8Chars(text)
+    table.insert(chars, pos, tostring(ch or ""))
+    return table.concat(chars)
+end
+
+function api.utf8Remove(text, pos)
+    local renderer = api.getRenderer()
+    if renderer and renderer.utf8Remove then return renderer.utf8Remove(text, pos) end
+    local chars = api.utf8Chars(text)
+    if pos < 1 or pos > #chars then return text end
+    table.remove(chars, pos)
+    return table.concat(chars)
 end
 
 function api.drawText(x, y, text, fg, bg, maxW)

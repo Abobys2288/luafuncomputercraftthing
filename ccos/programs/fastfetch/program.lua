@@ -153,10 +153,11 @@ end
 local function clipText(text, pxWidth)
     local maxChars = math.max(0, math.floor(pxWidth / 6))
     text = tostring(text or "")
-    if #text > maxChars then
+    local len = R.utf8Len and R.utf8Len(text) or #text
+    if len > maxChars then
         if maxChars <= 0 then return "" end
         if maxChars <= 2 then return string.rep(".", maxChars) end
-        return text:sub(1, maxChars - 2) .. ".."
+        return (R.utf8Sub and R.utf8Sub(text, 1, maxChars - 2) or text:sub(1, maxChars - 2)) .. ".."
     end
     return text
 end
