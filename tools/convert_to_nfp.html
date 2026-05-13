@@ -1617,6 +1617,7 @@ let sourceFileName = "";
 let outputText = "";
 let outputFileName = "converted.nfp";
 let sourceObjectUrl = "";
+let sourceVideoElement = null;
 let lastChangedSize = "width";
 let previewTimer = 0;
 
@@ -2059,6 +2060,22 @@ function describeLoadedSource(file, durationSeconds) {
   return sourceKind.toUpperCase() + " " + size + duration + " | " + formatBytes(file.size);
 }
 
+function cleanupSourceObjectUrl() {
+  if (sourceObjectUrl && sourceObjectUrl.startsWith("blob:")) {
+    URL.revokeObjectURL(sourceObjectUrl);
+  }
+  sourceObjectUrl = "";
+}
+
+function cleanupSourceVideoElement() {
+  if (!sourceVideoElement) return;
+  sourceVideoElement.pause();
+  sourceVideoElement.removeAttribute("src");
+  sourceVideoElement.load();
+  sourceVideoElement.remove();
+  sourceVideoElement = null;
+}
+
 function sanitizeBaseName(name) {
   const base = (name || "converted").replace(/\.[^.]+$/, "");
   return (base || "converted").replace(/[^a-z0-9_-]+/gi, "_").replace(/^_+|_+$/g, "") || "converted";
@@ -2202,7 +2219,8 @@ function renderSwatches() {
 }
 
 async function loadImageFromFile(file) {
-  if (sourceObjectUrl) URL.revokeObjectURL(sourceObjectUrl);
+  cleanupSourceVideoElement();
+  cleanupSourceObjectUrl();
   sourceObjectUrl = URL.createObjectURL(file);
   const img = new Image();
   img.decoding = "async";
@@ -2215,24 +2233,149 @@ async function loadImageFromFile(file) {
 }
 
 async function loadVideoFromFile(file) {
-  if (sourceObjectUrl) URL.revokeObjectURL(sourceObjectUrl);
-  sourceObjectUrl = URL.createObjectURL(file);
+  cleanupSourceVideoElement();
+  cleanupSourceObjectUrl();
+  const blobUrl = URL.createObjectURL(file);
+  sourceObjectUrl = blobUrl;
+  try {
+    return await loadVideoFromUrl(blobUrl, file);
+  } catch (firstError) {
+    cleanupSourceVideoElement();
+    cleanupSourceObjectUrl();
+    if (file.size <= 128 * 1024 * 1024) {
+      setStatus("Retrying video load...");
+      try {
+        const dataUrl = await readFileAsDataUrl(file);
+        return await loadVideoFromUrl(dataUrl, file);
+      } catch (_) {
+        cleanupSourceVideoElement();
+      }
+    }
+    throw firstError;
+  }
+}
+
+function loadVideoFromUrl(url, file) {
   const video = document.createElement("video");
   video.muted = true;
   video.playsInline = true;
   video.preload = "auto";
-  const loaded = new Promise((resolve, reject) => {
-    video.onloadeddata = () => resolve(video);
-    video.onerror = () => reject(new Error("Cannot load video"));
+  video.controls = false;
+  video.style.position = "fixed";
+  video.style.left = "-10000px";
+  video.style.top = "0";
+  video.style.width = "1px";
+  video.style.height = "1px";
+  video.style.opacity = "0";
+  video.style.pointerEvents = "none";
+  document.body.appendChild(video);
+
+  return waitForVideoReady(video, file, url).then(() => {
+    sourceVideoElement = video;
+    return video;
+  }).catch(error => {
+    video.remove();
+    throw error;
   });
-  video.src = sourceObjectUrl;
-  video.load();
-  return loaded;
+}
+
+function waitForVideoReady(video, file, url) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let nudged = false;
+    let timeout = 0;
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      video.removeEventListener("loadedmetadata", onReady);
+      video.removeEventListener("loadeddata", onReady);
+      video.removeEventListener("canplay", onReady);
+      video.removeEventListener("canplaythrough", onReady);
+      video.removeEventListener("seeked", onReady);
+      video.removeEventListener("timeupdate", onReady);
+      video.removeEventListener("error", onError);
+    };
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(video);
+    };
+    const fail = message => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error(message));
+    };
+    const nudgeFrameDecode = () => {
+      if (nudged || !video.videoWidth || !video.videoHeight) return;
+      nudged = true;
+      const duration = Number.isFinite(video.duration) ? video.duration : 0;
+      const target = duration > 0 ? Math.min(0.05, Math.max(0, duration - 0.001)) : 0;
+      try {
+        video.currentTime = target;
+      } catch (_) {}
+    };
+    function onReady() {
+      if (video.videoWidth > 0 && video.videoHeight > 0 && video.readyState >= 2) {
+        done();
+        return;
+      }
+      if (video.readyState >= 1) nudgeFrameDecode();
+    }
+    function onError() {
+      fail(describeVideoLoadError(video, file, url));
+    }
+
+    video.addEventListener("loadedmetadata", onReady);
+    video.addEventListener("loadeddata", onReady);
+    video.addEventListener("canplay", onReady);
+    video.addEventListener("canplaythrough", onReady);
+    video.addEventListener("seeked", onReady);
+    video.addEventListener("timeupdate", onReady);
+    video.addEventListener("error", onError);
+    timeout = setTimeout(() => {
+      if (video.videoWidth > 0 && video.videoHeight > 0 && video.readyState >= 1) {
+        done();
+      } else {
+        fail("Video load timed out. Try H.264 MP4 or VP9/WebM.");
+      }
+    }, 15000);
+
+    video.src = url;
+    video.load();
+  });
+}
+
+function describeVideoLoadError(video, file, url) {
+  const code = video.error ? video.error.code : 0;
+  const reasons = {
+    1: "Video load was aborted",
+    2: "Chrome could not read the video file",
+    3: "Chrome could not decode this video codec",
+    4: "Chrome does not support this video type or codec"
+  };
+  const reason = reasons[code] || "Chrome could not load this video";
+  const type = file.type || "unknown MIME";
+  const support = type !== "unknown MIME" ? video.canPlayType(type) : "";
+  const supportNote = support ? "support: " + support : "support: unknown";
+  const sourceNote = url.startsWith("data:") ? "data URL" : "blob URL";
+  return reason + ". Use H.264 MP4 or VP8/VP9 WebM. (" + type + ", " + supportNote + ", " + sourceNote + ")";
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Cannot read video file"));
+    reader.readAsDataURL(file);
+  });
 }
 
 function detectSourceKind(file) {
   const name = file.name.toLowerCase();
   if (file.type.startsWith("video/")) return "video";
+  if (/\.(mp4|m4v|webm|mov|ogv|ogg)$/i.test(name)) return "video";
   if (file.type === "image/gif" || name.endsWith(".gif")) return "gif";
   return "image";
 }
@@ -2266,21 +2409,45 @@ function seekVideo(video, time) {
     return Promise.resolve();
   }
   return new Promise((resolve, reject) => {
+    let settled = false;
+    let timeout = 0;
     const cleanup = () => {
+      clearTimeout(timeout);
       video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("loadeddata", onReady);
+      video.removeEventListener("canplay", onReady);
       video.removeEventListener("error", onError);
     };
-    const onSeeked = () => {
+    const done = () => {
+      if (settled) return;
+      settled = true;
       cleanup();
       resolve();
     };
-    const onError = () => {
+    const fail = error => {
+      if (settled) return;
+      settled = true;
       cleanup();
-      reject(new Error("Cannot seek video"));
+      reject(error);
+    };
+    const onSeeked = () => done();
+    const onReady = () => {
+      if (video.readyState >= 2 && Math.abs(video.currentTime - target) < 0.08) done();
+    };
+    const onError = () => {
+      fail(new Error("Cannot seek video"));
     };
     video.addEventListener("seeked", onSeeked, { once: true });
+    video.addEventListener("loadeddata", onReady, { once: true });
+    video.addEventListener("canplay", onReady, { once: true });
     video.addEventListener("error", onError, { once: true });
-    video.currentTime = target;
+    timeout = setTimeout(() => fail(new Error("Cannot seek video: timed out")), 10000);
+    try {
+      video.currentTime = target;
+      onReady();
+    } catch (error) {
+      fail(error);
+    }
   });
 }
 
@@ -2417,8 +2584,10 @@ async function loadSelectedFile(file) {
   } catch (error) {
     sourceImage = null;
     sourceMedia = null;
+    cleanupSourceVideoElement();
+    cleanupSourceObjectUrl();
     updateDimensionLimits();
-    setFileSummary(file.name, "Could not load source | " + formatBytes(file.size));
+    setFileSummary(file.name, (error.message || "Could not load source") + " | " + formatBytes(file.size));
     setStatus(error.message, "bad");
   }
 }
