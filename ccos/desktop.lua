@@ -7,7 +7,50 @@
 local R = _G.ccos_render
 local D = {}; _G._desktop = D
 
-local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,BLUE=5,DBLUE=6,RED=11,DESKTOP=30}
+local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,BLUE=5,DBLUE=19,RED=11,DESKTOP=30}
+
+local function clipText(text, maxW)
+    if R.clipText then return R.clipText(text, maxW) end
+    text = tostring(text or "")
+    local maxChars = math.max(0, math.floor((maxW or 0) / 6))
+    if #text <= maxChars then return text end
+    if maxChars <= 0 then return "" end
+    if maxChars <= 2 then return string.rep(".", maxChars) end
+    return text:sub(1, maxChars - 2) .. ".."
+end
+
+local function drawTextClip(x, y, text, fg, bg, maxW)
+    R.drawText(x, y, clipText(text, maxW), fg, bg)
+end
+
+local function drawButtonText(x, y, w, h, label, pressed)
+    if w <= 0 or h <= 0 then return end
+    if R.drawButtonText then
+        R.drawButtonText(x, y, w, h, label, pressed, K.BLACK, K.GRAY)
+        return
+    end
+    R.drawButton(x, y, w, h, pressed)
+    drawTextClip(x + 4, y + 3, label, K.BLACK, K.GRAY, w - 8)
+end
+
+local function drawWindowChrome(w, x, y, ww, hh, active)
+    R.fillRect(x, y, ww, 18, active and K.DBLUE or K.GRAY)
+    local rightPad = 4
+    if ww >= 24 then
+        drawButtonText(x + ww - 18, y + 1, 16, 14, "X", false)
+        rightPad = 22
+    end
+    if ww >= 62 then
+        drawButtonText(x + ww - 36, y + 1, 16, 14, "[]", false)
+        drawButtonText(x + ww - 54, y + 1, 16, 14, "_", false)
+        rightPad = 58
+    end
+    drawTextClip(x + 4, y + 4, w.title, active and K.WHITE or K.LGRAY, active and K.DBLUE or K.GRAY, ww - rightPad - 6)
+    R.drawW95Raised(x, y, ww, hh)
+    if not w.maximized and ww >= 10 and hh >= 10 then
+        R.fillRect(x + ww - 6, y + hh - 6, 6, 6, K.DGRAY)
+    end
+end
 
 D.windows = {}
 D.activeWin = nil
@@ -133,28 +176,28 @@ function D.showError(title, message)
     local w = D.createWindow(title or "Error", wx, wy, ww, wh)
     w.modal = true
     w.onDraw = function(_, cx, cy, cw, ch)
-        R.fillRect(cx+2, cy+2, cw-4, ch-4, K.GRAY)
+        R.fillRect(cx+2, cy+2, math.max(0, cw-4), math.max(0, ch-4), K.GRAY)
         -- Error icon (red X)
-        R.drawText(cx+6, cy+6, "X", K.RED, K.GRAY)
+        if cw >= 18 then R.drawText(cx+6, cy+6, "X", K.RED, K.GRAY) end
         -- Message (word wrap manually by line length)
-        local maxChars = math.floor((cw - 20) / 6)
+        local textX = cw >= 58 and cx + 20 or cx + 4
+        local maxChars = math.max(1, math.floor((cx + cw - textX - 4) / 6))
         local text = tostring(message) or "Unknown error"
         local lines = {}
-        while #text > 0 do
+        while #text > 0 and #lines < math.max(1, math.floor((ch - 28) / 8)) do
             local piece = text:sub(1, maxChars)
             table.insert(lines, piece)
             text = text:sub(maxChars + 1)
         end
         if #lines == 0 then lines = {"Unknown error"} end
         for i, line in ipairs(lines) do
-            R.drawText(cx+20, cy+6 + (i-1)*8, line, K.BLACK, K.GRAY)
+            drawTextClip(textX, cy+6 + (i-1)*8, line, K.BLACK, K.GRAY, cx + cw - textX - 4)
         end
         -- OK button
-        local bw = 40
+        local bw = math.min(40, math.max(24, cw - 8))
         local bx = cx + math.floor((cw - bw) / 2)
         local by2 = cy + ch - 18
-        R.drawButton(bx, by2, bw, 14, false)
-        R.drawText(bx + 14, by2 + 3, "OK", K.BLACK, K.GRAY)
+        drawButtonText(bx, by2, bw, 14, "OK", false)
     end
     w.onClick = function(_, mx, my)
         local contentW = w.cw - 6
@@ -210,11 +253,26 @@ function D.safeRun(fn, ...)
 end
 
 function D.fitWin(ww, wh)
-    ww = math.min(ww, R.w - 4)
-    wh = math.min(wh, R.h - D.taskbarH - 4)
+    local maxW = math.max(30, R.w - 4)
+    local maxH = math.max(28, R.h - D.taskbarH - 4)
+    ww = math.max(math.min(80, maxW), math.min(ww or 200, maxW))
+    wh = math.max(math.min(50, maxH), math.min(wh or 120, maxH))
     local x = math.max(1, math.floor((R.w - ww) / 2))
     local y = math.max(1, math.floor((R.h - D.taskbarH - wh) / 2))
     return x, y, ww, wh
+end
+
+function D.clampWindow(w)
+    if not w then return end
+    local by = math.max(20, R.h - D.taskbarH)
+    local maxW = math.max(30, R.w)
+    local maxH = math.max(24, by)
+    local minW = math.min(80, maxW)
+    local minH = math.min(40, maxH)
+    w.cw = math.max(minW, math.min(w.cw or minW, maxW))
+    w.ch = math.max(minH, math.min(w.ch or minH, maxH))
+    w.cx = math.max(1, math.min(w.cx or 1, math.max(1, R.w - w.cw + 1)))
+    w.cy = math.max(1, math.min(w.cy or 1, math.max(1, by - w.ch + 1)))
 end
 
 function D.loadPrograms()
@@ -271,6 +329,7 @@ end
 function D.createWindow(title, cx, cy, cw, ch)
     local id = D.nextWinId; D.nextWinId = id + 1
     local w = {id=id,title=title or "Win",cx=cx or 30,cy=cy or 20,cw=cw or 200,ch=ch or 120,visible=true,minimized=false,onDraw=nil,onKey=nil,onClick=nil,onDoubleClick=nil}
+    D.clampWindow(w)
     table.insert(D.windows,w); D.activeWin=w; D.markDirty(); return w
 end
 
@@ -292,10 +351,10 @@ function D.inputDialog(title,prompt,default,callback)
     default=default or ""; local input=default
     local wx,wy,ww,wh=D.fitWin(240,80); local w=D.createWindow(title,wx,wy,ww,wh)
     w.onDraw=function(win,cx,cy,cw,ch)
-        R.drawText(cx+4,cy+4,prompt,K.BLACK,K.GRAY)
-        R.drawW95Sunken(cx+4,cy+18,cw-8,16)
-        R.drawText(cx+6,cy+20,input.."_",K.BLACK,K.GRAY)
-        R.drawText(cx+4,cy+42,"Enter=OK  Esc=Cancel",K.BLACK,K.GRAY)
+        drawTextClip(cx+4,cy+4,prompt,K.BLACK,K.GRAY,cw-8)
+        R.drawW95Sunken(cx+4,cy+18,math.max(8,cw-8),16)
+        drawTextClip(cx+6,cy+20,input.."_",K.BLACK,K.GRAY,cw-12)
+        drawTextClip(cx+4,cy+42,"Enter=OK  Esc=Cancel",K.BLACK,K.GRAY,cw-8)
     end
     w.onKey=function(win,k,ch)
         if ch then input=input..ch; D.markContentDirty(win)
@@ -354,31 +413,23 @@ function D._drawFull()
 
     -- Windows
     for _,w in ipairs(D.windows) do if w.visible and not w.minimized then
+        D.clampWindow(w)
         local x,y,ww,hh=w.cx,w.cy,w.cw,w.ch; if y+hh>by then hh=math.max(20,by-y) end
         local act=D.activeWin and D.activeWin.id==w.id
         -- Background + content
         R.fillRect(x,y,ww,hh,K.GRAY)
-        R.fillRect(x+2,y+17,ww-4,hh-19,K.GRAY)
+        R.fillRect(x+2,y+17,math.max(0,ww-4),math.max(0,hh-19),K.GRAY)
         if w.onDraw then pcall(w.onDraw,w,x+3,y+18,ww-6,hh-21) end
-        -- Title bar & frame on top to clip overflow
-        R.fillRect(x,y,ww,18,act and K.DBLUE or K.GRAY)
-        R.drawText(x+4,y+4,w.title,act and K.WHITE or K.LGRAY,act and K.DBLUE or K.GRAY)
-        R.drawButton(x+ww-54,y+1,16,14,false); R.drawText(x+ww-49,y+4,"_",K.BLACK,K.GRAY)
-        R.drawButton(x+ww-36,y+1,16,14,false); R.drawText(x+ww-31,y+4,"[]",K.BLACK,K.GRAY)
-        R.drawButton(x+ww-18,y+1,16,14,false); R.drawText(x+ww-13,y+4,"X",K.BLACK,K.GRAY)
-        R.drawW95Raised(x,y,ww,hh)
-        if not w.maximized then
-            R.fillRect(x+ww-6, y+hh-6, 6, 6, K.DGRAY)
-        end
+        drawWindowChrome(w, x, y, ww, hh, act)
     end end
 
     -- Taskbar
     R.fillRect(0,by,R.w,D.taskbarH,K.GRAY); R.drawLine(0,by,R.w-1,by,K.WHITE)
-    R.drawButton(2,by+2,54,16,D.startMenuOpen); R.drawText(6,by+6,"Start",K.BLACK,K.GRAY)
+    drawButtonText(2,by+2,54,16,"Start",D.startMenuOpen)
     local bx=60; for _,w in ipairs(D.windows) do local bw=math.min(100,R.w-bx-55); if bw<25 then break end
         local active=D.activeWin and D.activeWin.id==w.id; R.drawButton(bx,by+3,bw,14,active)
         local t=#w.title>12 and w.title:sub(1,10)..".." or w.title; if w.minimized then t="("..t..")" end
-        R.drawText(bx+4,by+6,t,active and K.WHITE or K.BLACK,active and K.GRAY or K.GRAY)
+        drawTextClip(bx+4,by+6,t,active and K.WHITE or K.BLACK,active and K.GRAY or K.GRAY,bw-8)
         bx=bx+bw+2
     end
     R.drawW95Sunken(R.w-48,by+3,44,14); R.drawText(R.w-44,by+6,D.clock,K.BLACK,K.GRAY)
@@ -418,7 +469,7 @@ function D._drawFull()
             local hit = D.mouse.x >= sx + 24 and D.mouse.x < sx + mw - 8 and D.mouse.y >= iy and D.mouse.y < iy + itemH
             local active = (hasHit and hit) or (not hasHit and idx == D.startMenuSel)
             if active then R.fillRect(sx + 24, iy, mw - 32, itemH, K.DBLUE) end
-            R.drawText(sx + 28, iy + 2, label, active and K.WHITE or K.BLACK, active and K.DBLUE or K.GRAY)
+            drawTextClip(sx + 28, iy + 2, label, active and K.WHITE or K.BLACK, active and K.DBLUE or K.GRAY, mw - 38)
         end
     end
 
@@ -435,7 +486,7 @@ function D._drawFull()
             else
                 local hit = D.mouse.x >= m.x + 2 and D.mouse.x < m.x + m.w - 2 and D.mouse.y >= iy and D.mouse.y < iy + m.itemH
                 if hit then R.fillRect(m.x + 2, iy, m.w - 4, m.itemH, K.DBLUE) end
-                R.drawText(m.x + 6, iy + 2, it[1], hit and K.WHITE or K.BLACK, hit and K.DBLUE or K.GRAY)
+                drawTextClip(m.x + 6, iy + 2, it[1], hit and K.WHITE or K.BLACK, hit and K.DBLUE or K.GRAY, m.w - 12)
             end
         end
     end
@@ -451,20 +502,13 @@ function D.drawAll()
     else
         if D._contentWin then local w=D._contentWin
             if w.visible then
-                R.fillRect(w.cx+2,w.cy+17,w.cw-4,w.ch-19,K.GRAY)
+                D.clampWindow(w)
+                R.fillRect(w.cx+2,w.cy+17,math.max(0,w.cw-4),math.max(0,w.ch-19),K.GRAY)
                 if w.onDraw then pcall(w.onDraw,w,w.cx+3,w.cy+18,w.cw-6,w.ch-21) end
                 -- Redraw frame to clip any content overflow
                 local x,y,ww,hh=w.cx,w.cy,w.cw,w.ch; local by=R.h-D.taskbarH; if y+hh>by then hh=math.max(20,by-y) end
                 local act=D.activeWin and D.activeWin.id==w.id
-                R.fillRect(x,y,ww,18,act and K.DBLUE or K.GRAY)
-                R.drawText(x+4,y+4,w.title,act and K.WHITE or K.LGRAY,act and K.DBLUE or K.GRAY)
-                R.drawButton(x+ww-54,y+1,16,14,false); R.drawText(x+ww-49,y+4,"_",K.BLACK,K.GRAY)
-                R.drawButton(x+ww-36,y+1,16,14,false); R.drawText(x+ww-31,y+4,"[]",K.BLACK,K.GRAY)
-                R.drawButton(x+ww-18,y+1,16,14,false); R.drawText(x+ww-13,y+4,"X",K.BLACK,K.GRAY)
-                R.drawW95Raised(x,y,ww,hh)
-                if not w.maximized then
-                    R.fillRect(x+ww-6, y+hh-6, 6, 6, K.DGRAY)
-                end
+                drawWindowChrome(w, x, y, ww, hh, act)
             end
             D._contentWin=nil
         end
@@ -551,13 +595,14 @@ function D.click(mx,my,btn)
     -- Windows
     local w=D.winAt(mx,my); if w then D.bringToFront(w)
         if my>=w.cy and my<w.cy+16 then
-            if mx>=w.cx+w.cw-18 then D.destroyWindow(w); return nil end
-            if mx>=w.cx+w.cw-36 and mx<w.cx+w.cw-20 then
+            if w.cw >= 24 and mx>=w.cx+w.cw-18 then D.destroyWindow(w); return nil end
+            if w.cw >= 62 and mx>=w.cx+w.cw-36 and mx<w.cx+w.cw-20 then
                 if w.maximized then if w.prevState then w.cx=w.prevState.x; w.cy=w.prevState.y; w.cw=w.prevState.w; w.ch=w.prevState.h; w.prevState=nil end; w.maximized=false
                 else w.prevState={x=w.cx,y=w.cy,w=w.cw,h=w.ch}; w.cx=1; w.cy=1; w.cw=R.w; w.ch=by-1; w.maximized=true end
+                D.clampWindow(w)
                 D.markDirty(); return nil
             end
-            if mx>=w.cx+w.cw-54 and mx<w.cx+w.cw-38 then w.minimized=true; D.markDirty(); return nil end
+            if w.cw >= 62 and mx>=w.cx+w.cw-54 and mx<w.cx+w.cw-38 then w.minimized=true; D.markDirty(); return nil end
             if not w.maximized then D.dragWin=w; D.dragOX=mx-w.cx; D.dragOY=my-w.cy end; return nil
         end
         if not w.maximized and mx>=w.cx+w.cw-8 and my>=w.cy+w.ch-8 then
@@ -609,12 +654,13 @@ function D.drag(mx,my)
         w=D.resizeWin; if not w then return end
         local nw = mx - w.cx + D.resizeOX
         local nh = my - w.cy + D.resizeOY
-        w.cw = math.max(80, math.min(R.w - w.cx + 1, nw))
-        w.ch = math.max(40, math.min(R.h - D.taskbarH - w.cy + 1, nh))
+        w.cw = math.max(math.min(80, R.w), math.min(R.w - w.cx + 1, nw))
+        w.ch = math.max(math.min(40, R.h - D.taskbarH), math.min(R.h - D.taskbarH - w.cy + 1, nh))
+        D.clampWindow(w)
         D.markDirty()
         return
     end
-    w.cx=mx-D.dragOX; w.cy=my-D.dragOY; if w.cy<1 then w.cy=1 end; local by=R.h-D.taskbarH; if w.cy+w.ch>by+1 then w.cy=by-w.ch+2 end
+    w.cx=mx-D.dragOX; w.cy=my-D.dragOY; D.clampWindow(w)
     D.markDirty()
 end
 

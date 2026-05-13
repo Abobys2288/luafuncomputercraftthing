@@ -1,190 +1,289 @@
 -- CCOS Program: File Manager
 local D = _G._desktop
-local R = _G.ccos_render
 local API = _G.ccos_api
-local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,BLUE=5,DBLUE=6,DESKTOP=30}
+local R = API and API.getRenderer and API.getRenderer() or _G.ccos_render
+local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,BLUE=5,DBLUE=19,RED=11,DESKTOP=30}
+
+local function clip(text, w)
+    if API and API.clipText then return API.clipText(text, w) end
+    if R.clipText then return R.clipText(text, w) end
+    return tostring(text or "")
+end
+
+local function drawText(x, y, text, fg, bg, w)
+    if API and API.drawText then API.drawText(x, y, text, fg, bg, w)
+    else R.drawText(x, y, w and clip(text, w) or text, fg, bg) end
+end
+
+local function button(x, y, w, text)
+    if w <= 0 then return end
+    if R.drawButtonText then R.drawButtonText(x, y, w, 14, text, false, K.BLACK, K.GRAY)
+    else R.drawButton(x, y, w, 14, false); drawText(x + 4, y + 3, text, K.BLACK, K.GRAY, w - 8) end
+end
+
+local function join(base, name)
+    if not base or base == "/" then return "/" .. name end
+    return base .. "/" .. name
+end
+
+local function parent(path)
+    if not path or path == "/" then return "/" end
+    return API.getDir(path)
+end
 
 local function appFM()
     local path = "/"
+    local history = {}
     local sel = 1
     local scroll = 0
     local items = {}
+    local status = "Ready"
+
+    local function selected()
+        return items[sel]
+    end
+
+    local function fullPath(it)
+        if not it or it.name == ".." then return parent(path) end
+        return join(path, it.name)
+    end
 
     local function refresh()
-        local l = fs.list(path)
-        if not l then l = {} end
-        table.sort(l)
+        local ok, list = pcall(fs.list, path)
+        if not ok or not list then
+            status = "Cannot open " .. path
+            path = "/"
+            list = fs.list(path) or {}
+        end
+        table.sort(list, function(a, b)
+            local ap, bp = join(path, a), join(path, b)
+            local ad, bd = fs.isDir(ap), fs.isDir(bp)
+            if ad ~= bd then return ad end
+            return a:lower() < b:lower()
+        end)
+
         items = {}
-        if path ~= "/" then table.insert(items,"..") end
-        for _,it in ipairs(l) do
-            local fp = path=="/" and ("/"..it) or (path.."/"..it)
-            table.insert(items, fs.isDir(fp) and ("/"..it) or it)
+        if path ~= "/" then table.insert(items, {name="..", kind="Folder", size="", up=true}) end
+        for _, name in ipairs(list) do
+            local fp = join(path, name)
+            local isDir = fs.isDir(fp)
+            local size = ""
+            if not isDir then
+                local okSize, got = pcall(fs.getSize, fp)
+                size = okSize and tostring(got) or "?"
+            end
+            table.insert(items, {name=name, kind=isDir and "Folder" or "File", size=size, dir=isDir})
         end
-        if #items==0 then items={"(empty)"} end
+        if #items == 0 then items = {{name="(empty)", kind="", size="", empty=true}} end
         sel = math.max(1, math.min(sel, #items))
-    end
-
-    refresh()
-    local wx, wy, ww, wh = D.fitWin(260, 160)
-    local w = D.createWindow("File Manager", wx, wy, ww, wh)
-
-    w.onDraw = function(win, cx, cy, cw, ch)
-        R.drawButton(cx, cy, 40, 14, false)
-        R.drawText(cx+4, cy+3, "New", K.BLACK, K.GRAY)
-        R.drawButton(cx+42, cy, 52, 14, false)
-        R.drawText(cx+46, cy+3, "New Dir", K.BLACK, K.GRAY)
-        R.drawButton(cx+96, cy, 40, 14, false)
-        R.drawText(cx+100, cy+3, "Delete", K.BLACK, K.GRAY)
-        local lh = math.floor((ch-24)/8)
-        local hasHover = false
-        for i=1, lh do
-            local idx = scroll + i
-            local it = items[idx]
-            if not it then break end
-            local iy = cy + 16 + (i-1)*8
-            if D.mouse.x>=cx+2 and D.mouse.x<cx+cw-2 and D.mouse.y>=iy-1 and D.mouse.y<iy+8 then
-                hasHover = true; break
-            end
-        end
-        for i=1, lh do
-            local idx = scroll + i
-            local it = items[idx]
-            if not it then break end
-            local iy = cy + 16 + (i-1)*8
-            local hover = D.mouse.x>=cx+2 and D.mouse.x<cx+cw-2 and D.mouse.y>=iy-1 and D.mouse.y<iy+8
-            local active = (hasHover and hover) or (not hasHover and idx==sel)
-            if active then
-                R.fillRect(cx+2, iy-1, cw-4, 9, K.DBLUE)
-                R.drawText(cx+4, iy, it, K.WHITE, K.DBLUE)
-            else
-                R.drawText(cx+4, iy, it, K.BLACK, K.GRAY)
-            end
-        end
-        R.drawText(cx+2, cy+ch-10, " "..path, K.BLACK, K.GRAY)
-    end
-
-    w.onClick = function(win, mx, my)
-        if my >= 0 and my < 14 then
-            if mx >= 0 and mx < 40 then
-                D.inputDialog("New File", "Enter filename:", "newfile.txt", function(name)
-                    if name then
-                        local fp = path=="/" and ("/"..name) or (path.."/"..name)
-                        API.writeFile(fp, "")
-                        refresh()
-                        D.markDirty()
-                    end
-                end)
-            elseif mx >= 42 and mx < 94 then
-                D.inputDialog("New Folder", "Enter folder name:", "newdir", function(name)
-                    if name then
-                        local fp = path=="/" and ("/"..name) or (path.."/"..name)
-                        fs.makeDir(fp)
-                        refresh()
-                        D.markDirty()
-                    end
-                end)
-            elseif mx >= 96 and mx < 136 then
-                local it = items[sel]
-                if it and it ~= ".." then
-                    local fp = path=="/" and ("/"..it) or (path.."/"..it)
-                    if fs.exists(fp) then fs.delete(fp) end
-                    refresh()
-                    D.markDirty()
-                end
-                return
-            end
-        end
-        local lh = math.floor((win.ch-24)/8)
-        for i=1, lh do
-            local idx = scroll + i
-            local iy = 16 + (i-1)*8
-            if my >= iy-1 and my < iy+8 then
-                sel = idx
-                D.markContentDirty(win)
-                return
-            end
-        end
+        scroll = math.max(0, math.min(scroll, math.max(0, #items - 1)))
+        status = #items .. " item(s)"
     end
 
     local function openFile(filePath)
-        local ext = filePath:match("%.([^%.]+)$") or ""
+        if fs.isDir(filePath) then
+            table.insert(history, path)
+            path = filePath
+            sel, scroll = 1, 0
+            refresh()
+            D.markDirty()
+            return
+        end
+
+        local ext = (filePath:match("%.([^%.]+)$") or ""):lower()
         local targetIcon = "edit"
         if ext == "nfp" or ext == "nfp256" then targetIcon = "img" end
         for _, prog in ipairs(D.programs) do
-            if prog.icon == targetIcon then
-                prog.run(filePath)
-                return
-            end
+            if prog.icon == targetIcon then prog.run(filePath); return end
         end
-        for _, prog in ipairs(D.programs) do
-            if prog.icon == "edit" then
-                prog.run(filePath)
-                return
-            end
-        end
+        status = "No opener for " .. ext
+        D.markContentDirty(D.activeWin)
     end
 
-    w.onDoubleClick = function(win, mx, my)
-        local lh = math.floor((win.ch-24)/8)
-        for i=1, lh do
-            local idx = scroll + i
-            local iy = 16 + (i-1)*8
-            if my >= iy-1 and my < iy+8 then
-                local it = items[idx]
-                if it then
-                    if it == ".." then
-                        path = API.getDir(path)
-                        sel = 1; scroll = 0
-                        refresh(); D.markDirty()
-                    elseif it:sub(1,1)=="/" then
-                        local np = path=="/" and it or (path..it)
-                        if fs.isDir(np) then
-                            path = np
-                            sel = 1; scroll = 0
-                            refresh(); D.markDirty()
-                        end
-                    else
-                        openFile(path=="/" and ("/"..it) or (path.."/"..it))
-                    end
-                end
-                return
+    refresh()
+    local wx, wy, ww, wh = API.fitWindow(320, 190)
+    local w = API.window("File Manager", wx, wy, ww, wh)
+    if not w then return end
+
+    local toolbar = {
+        {id="back", label="Back", w=38},
+        {id="up", label="Up", w=28},
+        {id="new", label="New", w=34},
+        {id="dir", label="Folder", w=48},
+        {id="rename", label="Rename", w=52},
+        {id="delete", label="Delete", w=46},
+        {id="refresh", label="Refresh", w=52},
+    }
+
+    local function toolbarHit(mx, my)
+        if my < 0 or my >= 14 then return nil end
+        local x = 0
+        for _, b in ipairs(toolbar) do
+            if x + b.w <= w.cw - 6 then
+                if mx >= x and mx < x + b.w then return b.id end
+                x = x + b.w + 2
             end
         end
+        return nil
     end
 
-    w.onKey = function(win, k, ch)
-        if k==keys.up and sel>1 then
-            sel = sel - 1
-            if sel <= scroll then scroll = scroll - 1 end
-            D.markContentDirty(win)
-        elseif k==keys.down and sel<#items then
-            sel = sel + 1
-            local lh = math.floor((win.ch-24)/8)
-            if sel > scroll + lh then scroll = scroll + 1 end
-            D.markContentDirty(win)
-        elseif k==keys.enter then
-            local it = items[sel]
-            if it then
-                if it==".." then
-                    path = API.getDir(path)
-                elseif it:sub(1,1)=="/" then
-                    local np = path=="/" and it or (path..it)
-                    if fs.isDir(np) then path = np end
-                else
-                    openFile(path=="/" and ("/"..it) or (path.."/"..it))
-                end
-                sel = 1; scroll = 0
+    local function goUp()
+        if path ~= "/" then table.insert(history, path); path = parent(path); sel, scroll = 1, 0; refresh(); D.markDirty() end
+    end
+
+    local function goBack()
+        local prev = table.remove(history)
+        if prev and fs.isDir(prev) then path = prev; sel, scroll = 1, 0; refresh(); D.markDirty() end
+    end
+
+    local function createFile()
+        D.inputDialog("New File", "Filename:", "newfile.txt", function(name)
+            if name and name ~= "" then
+                local fp = join(path, name)
+                if fs.exists(fp) then status = "Already exists" else API.writeFile(fp, "") end
                 refresh(); D.markDirty()
             end
-        elseif k==keys.backspace then
-            path = API.getDir(path)
-            sel = 1; scroll = 0
-            refresh(); D.markDirty()
-        elseif k==keys.f5 then
-            refresh(); D.markDirty()
-        elseif k==keys.escape then
-            D.destroyWindow(win)
+        end)
+    end
+
+    local function createFolder()
+        D.inputDialog("New Folder", "Folder name:", "newdir", function(name)
+            if name and name ~= "" then
+                local fp = join(path, name)
+                if fs.exists(fp) then status = "Already exists" else fs.makeDir(fp) end
+                refresh(); D.markDirty()
+            end
+        end)
+    end
+
+    local function renameSelected()
+        local it = selected()
+        if not it or it.empty or it.up then return end
+        D.inputDialog("Rename", "New name:", it.name, function(name)
+            if name and name ~= "" and name ~= it.name then
+                local src, dst = fullPath(it), join(path, name)
+                if fs.exists(dst) then status = "Target exists" else fs.move(src, dst); status = "Renamed" end
+                refresh(); D.markDirty()
+            end
+        end)
+    end
+
+    local function deleteSelected()
+        local it = selected()
+        if not it or it.empty or it.up then return end
+        local fp = fullPath(it)
+        if fs.exists(fp) then fs.delete(fp); status = "Deleted: " .. it.name end
+        sel = math.max(1, sel - 1)
+        refresh(); D.markDirty()
+    end
+
+    local function activate()
+        local it = selected()
+        if not it or it.empty then return end
+        if it.up then goUp() else openFile(fullPath(it)) end
+    end
+
+    w.onDraw = function(_, cx, cy, cw, ch)
+        local tx = cx
+        for _, b in ipairs(toolbar) do
+            if tx - cx + b.w <= cw then
+                button(tx, cy, b.w, b.label)
+                tx = tx + b.w + 2
+            end
         end
+
+        R.drawW95Sunken(cx, cy + 18, math.max(8, cw), 14)
+        drawText(cx + 4, cy + 21, path, K.BLACK, K.GRAY, cw - 8)
+
+        local listY = cy + 38
+        local footerY = cy + ch - 10
+        local rowH = 8
+        local rows = math.max(1, math.floor((footerY - listY - 10) / rowH))
+        local nameW = math.max(60, cw - 104)
+        local typeX = cx + 6 + nameW
+        local sizeX = cx + cw - 44
+
+        R.fillRect(cx, listY - 9, cw, 9, K.LGRAY)
+        drawText(cx + 6, listY - 8, "Name", K.BLACK, K.LGRAY, nameW - 2)
+        if cw >= 150 then drawText(typeX, listY - 8, "Type", K.BLACK, K.LGRAY, 40) end
+        if cw >= 210 then drawText(sizeX, listY - 8, "Size", K.BLACK, K.LGRAY, 40) end
+
+        local hasHover = false
+        for i = 1, rows do
+            local iy = listY + (i - 1) * rowH
+            if D.mouse.x >= cx + 2 and D.mouse.x < cx + cw - 2 and D.mouse.y >= iy and D.mouse.y < iy + rowH then
+                hasHover = true
+                break
+            end
+        end
+
+        for i = 1, rows do
+            local idx = scroll + i
+            local it = items[idx]
+            if not it then break end
+            local iy = listY + (i - 1) * rowH
+            local hover = D.mouse.x >= cx + 2 and D.mouse.x < cx + cw - 2 and D.mouse.y >= iy and D.mouse.y < iy + rowH
+            local active = (hasHover and hover) or (not hasHover and idx == sel)
+            if active then R.fillRect(cx + 2, iy, cw - 4, rowH, K.DBLUE) end
+            local fg, bg = active and K.WHITE or K.BLACK, active and K.DBLUE or K.GRAY
+            local prefix = it.up and "^ " or (it.dir and "[] " or "   ")
+            drawText(cx + 6, iy, prefix .. it.name, fg, bg, nameW - 6)
+            if cw >= 150 then drawText(typeX, iy, it.kind, fg, bg, 40) end
+            if cw >= 210 then drawText(sizeX, iy, it.size, fg, bg, 40) end
+        end
+
+        local maxScroll = math.max(0, #items - rows)
+        if maxScroll > 0 and cw >= 12 then
+            local barH = math.max(8, math.floor((rows / #items) * (rows * rowH)))
+            local barY = listY + math.floor(((rows * rowH) - barH) * scroll / maxScroll)
+            R.fillRect(cx + cw - 5, barY, 3, barH, K.DGRAY)
+        end
+
+        drawText(cx + 4, footerY, status .. "  Enter=open  F2=rename  Del=delete", K.DGRAY, K.GRAY, cw - 8)
+    end
+
+    w.onClick = function(_, mx, my)
+        local hit = toolbarHit(mx, my)
+        if hit == "back" then goBack(); return
+        elseif hit == "up" then goUp(); return
+        elseif hit == "new" then createFile(); return
+        elseif hit == "dir" then createFolder(); return
+        elseif hit == "rename" then renameSelected(); return
+        elseif hit == "delete" then deleteSelected(); return
+        elseif hit == "refresh" then refresh(); D.markDirty(); return end
+
+        local listY = 38
+        local rows = math.max(1, math.floor((w.ch - 21 - listY - 20) / 8))
+        for i = 1, rows do
+            local iy = listY + (i - 1) * 8
+            if my >= iy and my < iy + 8 then
+                sel = math.min(#items, scroll + i)
+                D.markContentDirty(w)
+                return
+            end
+        end
+    end
+
+    w.onDoubleClick = function()
+        activate()
+    end
+
+    w.onKey = function(_, k)
+        local rows = math.max(1, math.floor((w.ch - 21 - 58) / 8))
+        if k == keys.up and sel > 1 then
+            sel = sel - 1; if sel <= scroll then scroll = math.max(0, scroll - 1) end; D.markContentDirty(w)
+        elseif k == keys.down and sel < #items then
+            sel = sel + 1; if sel > scroll + rows then scroll = scroll + 1 end; D.markContentDirty(w)
+        elseif k == keys.pageUp then
+            sel = math.max(1, sel - rows); scroll = math.max(0, scroll - rows); D.markContentDirty(w)
+        elseif k == keys.pageDown then
+            sel = math.min(#items, sel + rows); scroll = math.min(math.max(0, #items - rows), scroll + rows); D.markContentDirty(w)
+        elseif k == keys.enter then activate()
+        elseif k == keys.backspace then goUp()
+        elseif k == keys.f2 then renameSelected()
+        elseif k == keys.delete then deleteSelected()
+        elseif k == keys.f5 then refresh(); D.markDirty()
+        elseif k == keys.escape then API.close(w) end
     end
 end
 

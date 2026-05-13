@@ -16,14 +16,14 @@ local PALETTE = {}
 
 -- 0-31: Original W95 palette
 local W95 = {
-    {0,0,0}, {255,255,255}, {192,192,192}, {223,223,223},
-    {128,128,128}, {0,0,192}, {0,0,128}, {0,192,192},
-    {128,224,255}, {0,192,0}, {0,128,0}, {255,0,0},
-    {128,0,0}, {255,255,0}, {255,192,0}, {128,64,0},
-    {128,0,128}, {255,128,255}, {64,64,64}, {0,84,168},
-    {128,158,200}, {0,0,255}, {240,240,240}, {32,32,32},
-    {160,160,160}, {200,200,200}, {248,248,248}, {0,0,64},
-    {48,48,48}, {0,128,0}, {0,128,128}, {192,192,192},
+    {8,10,14}, {248,249,252}, {202,206,214}, {232,235,240},
+    {108,116,128}, {42,82,146}, {28,56,110}, {0,154,162},
+    {135,211,232}, {36,160,90}, {24,112,66}, {218,64,64},
+    {132,35,35}, {236,215,76}, {222,160,58}, {128,82,42},
+    {118,72,156}, {230,138,210}, {70,76,86}, {35,92,154},
+    {126,153,194}, {66,112,220}, {241,243,246}, {28,31,36},
+    {158,165,176}, {216,220,226}, {252,253,255}, {20,36,74},
+    {52,58,68}, {30,122,72}, {25,120,126}, {198,203,212},
 }
 for i, c in ipairs(W95) do
     PALETTE[i-1] = c
@@ -243,9 +243,10 @@ end
 
 function R.drawButton(x, y, w, h, pressed)
     if R.mode == 0 then return end
-    local G = R.PAL.GRAY
+    if w <= 0 or h <= 0 then return end
+    local G = R.PAL.BUTTON_FACE or R.PAL.GRAY
     local DG = R.PAL.DARK_GRAY
-    local LG = R.PAL.LIGHT_GRAY
+    local LG = R.PAL.BUTTON_HI or R.PAL.LIGHT_GRAY
     R.fillRect(x+2, y+2, w-4, h-4, G)
     if pressed then
         R.drawLine(x, y, x+w-1, y, DG)
@@ -341,6 +342,34 @@ function R.drawText(x, y, text, fg, bg)
             end
         end
         cx = cx + 6
+    end
+end
+
+function R.textWidth(text)
+    return #(tostring(text or "")) * 6
+end
+
+function R.clipText(text, maxW)
+    text = tostring(text or "")
+    local maxChars = math.max(0, math.floor((maxW or 0) / 6))
+    if #text <= maxChars then return text end
+    if maxChars <= 0 then return "" end
+    if maxChars <= 2 then return string.rep(".", maxChars) end
+    return text:sub(1, maxChars - 2) .. ".."
+end
+
+function R.drawTextClipped(x, y, text, fg, bg, maxW)
+    R.drawText(x, y, R.clipText(text, maxW), fg, bg)
+end
+
+function R.drawButtonText(x, y, w, h, text, pressed, fg, bg)
+    if w <= 0 or h <= 0 then return end
+    R.drawButton(x, y, w, h, pressed)
+    local label = R.clipText(text, math.max(0, w - 8))
+    if label ~= "" then
+        local tx = x + math.max(3, math.floor((w - R.textWidth(label)) / 2))
+        local ty = y + math.max(2, math.floor((h - 7) / 2))
+        R.drawText(tx, ty, label, fg or R.PAL.BLACK, bg or (R.PAL.BUTTON_FACE or R.PAL.GRAY))
     end
 end
 

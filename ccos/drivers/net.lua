@@ -83,8 +83,11 @@ function net.discover(timeout)
         local event, p1, p2, p3 = os.pullEvent()
         if event == "rednet_message" then
             local id, msg = p1, p2
-            if type(msg) == "table" and msg.proto == net.protocol and msg.type == "discover_ok" then
-                found[id] = msg.host or ("PC_" .. id)
+            if type(msg) == "table" and msg.proto == net.protocol then
+                local data = msg.data or msg
+                if type(data) == "table" and data.type == "discover_ok" then
+                    found[id] = data.host or ("PC_" .. id)
+                end
             end
         elseif event == "timer" and p1 == timer then
             break
@@ -104,6 +107,51 @@ end
 function net.lookup(serviceName)
     if not net.online then return nil end
     return rednet.lookup(net.protocol, serviceName)
+end
+
+function net.requestPackageList(serverId)
+    if not net.online then return nil end
+    net.send(serverId, {type = "pkg_list"})
+    local id, msg = net.receive(3)
+    if id and msg and msg.type == "pkg_list_resp" then return msg.packages or {} end
+    return nil
+end
+
+function net.requestPackage(serverId, name)
+    if not net.online then return nil end
+    net.send(serverId, {type = "pkg_get", name = name})
+    local id, msg = net.receive(5)
+    if id and msg and msg.type == "pkg_get_resp" then return msg end
+    return nil
+end
+
+function net.siteRegister(serverId, name, title)
+    if not net.online then return false end
+    return net.send(serverId, {type = "site_register", name = name, title = title or name, host = net.hostName})
+end
+
+function net.siteList(serverId)
+    if not net.online then return {} end
+    net.send(serverId, {type = "site_list"})
+    local id, msg = net.receive(3)
+    if id and msg and msg.type == "site_list_resp" then return msg.sites or {} end
+    return {}
+end
+
+function net.siteResolve(serverId, name)
+    if not net.online then return nil end
+    net.send(serverId, {type = "site_resolve", name = name})
+    local id, msg = net.receive(3)
+    if id and msg and msg.type == "site_resolve_ok" then return msg.id, msg.site end
+    return nil
+end
+
+function net.siteGet(hostId, name, path)
+    if not net.online then return nil end
+    net.send(hostId, {type = "site_get", name = name, path = path or "index.txt"})
+    local id, msg = net.receive(5)
+    if id and msg and msg.type == "site_content" then return msg.content, msg.title end
+    return nil
 end
 
 -- Background listener for chat + kick (non-blocking)

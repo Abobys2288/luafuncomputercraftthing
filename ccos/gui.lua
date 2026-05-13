@@ -265,33 +265,33 @@ function gui.handleClick(win, cx, cy)
 
     -- Check children
     for _, child in ipairs(win.children) do
-        if not child.visible then goto continue end
-        local absX = win.x + child.x - 1
-        local absY = win.y + child.y - 1
+        if child.visible then
+            local absX = win.x + child.x - 1
+            local absY = win.y + child.y - 1
 
-        if cx >= absX and cx < absX + (child.w or #child.text or 10) and
-           cy >= absY and cy < absY + (child.h or 1) then
+            if cx >= absX and cx < absX + (child.w or #child.text or 10) and
+               cy >= absY and cy < absY + (child.h or 1) then
 
-            if child.type == "button" and child.onClick then
-                child.onClick()
-                return true
-            elseif child.type == "list" then
-                local idx = (child.scroll or 0) + (cy - absY + 1)
-                if child.items[idx] then
-                    child.selected = idx
-                    if child.onSelect then child.onSelect(idx, child.items[idx]) end
+                if child.type == "button" and child.onClick then
+                    child.onClick()
+                    return true
+                elseif child.type == "list" then
+                    local idx = (child.scroll or 0) + (cy - absY + 1)
+                    if child.items[idx] then
+                        child.selected = idx
+                        if child.onSelect then child.onSelect(idx, child.items[idx]) end
+                    end
+                    return true
+                elseif child.type == "textfield" then
+                    -- Focus this textfield, unfocus others
+                    for _, c in ipairs(win.children) do
+                        if c.type == "textfield" then c.focused = false end
+                    end
+                    child.focused = true
+                    return true
                 end
-                return true
-            elseif child.type == "textfield" then
-                -- Focus this textfield, unfocus others
-                for _, c in ipairs(win.children) do
-                    if c.type == "textfield" then c.focused = false end
-                end
-                child.focused = true
-                return true
             end
         end
-        ::continue::
     end
     return false
 end

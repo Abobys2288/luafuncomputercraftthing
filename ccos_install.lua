@@ -17,6 +17,7 @@ local FILES = {
     "render.lua",
     "desktop.lua",
     "api.lua",
+    "packages.lua",
     "kernel.lua",
     "gui.lua",
     "bootlogo.nfp256",
@@ -32,6 +33,8 @@ local FILES = {
     "programs/pkgman/program.lua",
     "programs/imgview/program.lua",
     "programs/music/program.lua",
+    "programs/fastfetch/program.lua",
+    "programs/sites/program.lua",
     -- Drivers
     "drivers/net.lua",
 }
