@@ -66,8 +66,10 @@ D.resizeWin = nil
 D.resizeOX = 0
 D.resizeOY = 0
 D.mouse = {x=0,y=0}
+D.lastClick = nil
 D.dirty = true
 D._contentWin = nil
+D._dirtyWindows = {}
 D._clockDirty = false
 D.programs = {}
 
@@ -161,7 +163,11 @@ D.dragAppOY = 0
 D.iconScrollY = 0
 
 D.markDirty = function() D.dirty = true end
-D.markContentDirty = function(win) D._contentWin = win end
+D.markContentDirty = function(win)
+    if not win then D.dirty = true; return end
+    D._contentWin = win
+    D._dirtyWindows[win.id] = win
+end
 D.markClockDirty = function() D._clockDirty = true end
 D.startMenuScroll = 0
 D.startMenuSel = 1
@@ -494,23 +500,44 @@ function D._drawFull()
     R.endDraw()
 end
 
+function D._drawWindow(w)
+    if not w or not w.visible or w.minimized then return end
+    D.clampWindow(w)
+    local by = R.h - D.taskbarH
+    local x, y, ww, hh = w.cx, w.cy, w.cw, w.ch
+    if y + hh > by then hh = math.max(20, by - y) end
+    local act = D.activeWin and D.activeWin.id == w.id
+    R.fillRect(x, y, ww, hh, K.GRAY)
+    R.fillRect(x + 2, y + 17, math.max(0, ww - 4), math.max(0, hh - 19), K.GRAY)
+    if w.onDraw then pcall(w.onDraw, w, x + 3, y + 18, ww - 6, hh - 21) end
+    drawWindowChrome(w, x, y, ww, hh, act)
+end
+
+function D._dirtyWindowStartIndex()
+    local startIdx = nil
+    for i, w in ipairs(D.windows) do
+        if w.visible and not w.minimized and D._dirtyWindows[w.id] then
+            startIdx = i
+            break
+        end
+    end
+    return startIdx
+end
+
 function D.drawAll()
     if not D.dirty and not D._contentWin and not D._clockDirty then return end
-    R.beginDraw(); local topWin=D.windows[#D.windows]
-    if D.dirty or (D._contentWin and D._contentWin~=topWin) then
-        D._drawFull(); D.dirty=false; D._contentWin=nil; D._clockDirty=false
+    R.beginDraw()
+    if D.dirty then
+        D._drawFull(); D.dirty=false; D._contentWin=nil; D._dirtyWindows={}; D._clockDirty=false
     else
-        if D._contentWin then local w=D._contentWin
-            if w.visible then
-                D.clampWindow(w)
-                R.fillRect(w.cx+2,w.cy+17,math.max(0,w.cw-4),math.max(0,w.ch-19),K.GRAY)
-                if w.onDraw then pcall(w.onDraw,w,w.cx+3,w.cy+18,w.cw-6,w.ch-21) end
-                -- Redraw frame to clip any content overflow
-                local x,y,ww,hh=w.cx,w.cy,w.cw,w.ch; local by=R.h-D.taskbarH; if y+hh>by then hh=math.max(20,by-y) end
-                local act=D.activeWin and D.activeWin.id==w.id
-                drawWindowChrome(w, x, y, ww, hh, act)
+        local startIdx = D._dirtyWindowStartIndex()
+        if startIdx then
+            for i = startIdx, #D.windows do
+                D._drawWindow(D.windows[i])
             end
-            D._contentWin=nil
+            D._contentWin=nil; D._dirtyWindows={}
+        elseif D._contentWin then
+            D._contentWin=nil; D._dirtyWindows={}
         end
         if D._clockDirty then local by=R.h-D.taskbarH; R.fillRect(R.w-48,by+3,44,14,K.GRAY); R.drawW95Sunken(R.w-48,by+3,44,14); R.drawText(R.w-44,by+6,D.clock,K.BLACK,K.GRAY); D._clockDirty=false end
     end
@@ -522,11 +549,15 @@ end
 -- ============================================================
 function D.click(mx,my,btn)
     local by=R.h-D.taskbarH
-    -- Right-click on empty desktop
+    -- Right-click delegates to windows first, then desktop.
     if btn==2 then
         if my>=by then return nil end
         local w=D.winAt(mx,my)
-        if w then return nil end
+        if w then
+            D.bringToFront(w)
+            if w.onRightClick then pcall(w.onRightClick,w,mx-w.cx-3,my-w.cy-18) end
+            return nil
+        end
         if R.w ~= D.lastIconCacheW or R.h ~= D.lastIconCacheH then D.rebuildIconCache() end
         for _, ic in ipairs(D.iconCache) do
             if mx>=ic.ix-2 and mx<ic.ix+ic.iw+2 and my>=ic.iy-2 and my<ic.iy+ic.ih+2 then return nil end
@@ -614,7 +645,18 @@ function D.click(mx,my,btn)
             D.dragAppOX = mx
             D.dragAppOY = my
         end
-        if w.onClick then pcall(w.onClick,w,mx-w.cx-3,my-w.cy-18) end; return nil
+        local rx, ry = mx-w.cx-3, my-w.cy-18
+        local now = os.clock()
+        local last = D.lastClick
+        local isDouble = last and last.win == w.id and last.btn == btn and now - last.time < 0.45 and math.abs(last.x - mx) <= 3 and math.abs(last.y - my) <= 3
+        if w.onClick then pcall(w.onClick,w,rx,ry) end
+        if isDouble and w.onDoubleClick then
+            D.lastClick = nil
+            pcall(w.onDoubleClick,w,rx,ry)
+        else
+            D.lastClick = {win=w.id, btn=btn, x=mx, y=my, time=now}
+        end
+        return nil
     end
     -- Desktop icons (cached layout)
     if R.w ~= D.lastIconCacheW or R.h ~= D.lastIconCacheH then

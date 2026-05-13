@@ -1,7 +1,24 @@
 -- CCOS Program: Calculator
 local D = _G._desktop
-local R = _G.ccos_render
-local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,BLUE=5,DBLUE=6,DESKTOP=30}
+local API = _G.ccos_api
+local R = API and API.getRenderer and API.getRenderer() or _G.ccos_render
+local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,BLUE=5,DBLUE=19,DESKTOP=30}
+
+local function clip(text, w)
+    if API and API.clipText then return API.clipText(text, w) end
+    if R.clipText then return R.clipText(text, w) end
+    return tostring(text or "")
+end
+
+local function drawText(x, y, text, fg, bg, w)
+    if API and API.drawText then API.drawText(x, y, text, fg, bg, w)
+    else R.drawText(x, y, w and clip(text, w) or text, fg, bg) end
+end
+
+local function button(x, y, w, h, text)
+    if R.drawButtonText then R.drawButtonText(x, y, w, h, text, false, K.BLACK, K.GRAY)
+    else R.drawButton(x, y, w, h, false); drawText(x + 3, y + 3, text, K.BLACK, K.GRAY, w - 6) end
+end
 
 local function appCalc()
     local display = ""
@@ -18,34 +35,43 @@ local function appCalc()
         {"1", "2", "3", "+"},
         {"0", ".", "=", ""}
     }
-    local btnW, btnH = 26, 14
     local pad = 2
 
+    local function metrics(cw, ch)
+        local btnW = math.max(16, math.floor((cw - 10 - 3 * pad) / 4))
+        local btnH = math.max(10, math.min(14, math.floor((ch - 54 - 4 * pad) / 5)))
+        local gridW = 4 * btnW + 3 * pad
+        local gridH = 5 * btnH + 4 * pad
+        local startX = math.max(2, math.floor((cw - gridW) / 2))
+        local startY = math.max(48, ch - gridH - 4)
+        return btnW, btnH, startX, startY
+    end
+
     w.onDraw = function(win, cx, cy, cw, ch)
-        R.drawW95Sunken(cx+4, cy+4, cw-8, 18)
+        R.drawW95Sunken(cx+4, cy+4, math.max(8, cw-8), 18)
         local text = display
         if result ~= "" then text = result end
-        -- truncate to fit
-        local maxChars = math.floor((cw - 12) / 6)
-        if #text > maxChars then text = text:sub(-maxChars) end
-        R.drawText(cx+6, cy+7, text, K.BLACK, K.GRAY)
+        drawText(cx+6, cy+7, text, K.BLACK, K.GRAY, cw - 12)
+
+        if ch < 86 or cw < 78 then
+            drawText(cx+4, cy+26, "Resize calculator", K.DGRAY, K.GRAY, cw - 8)
+            return
+        end
 
         local hy = cy + 26
         for i = math.max(1, #history - 1), #history do
-            R.drawText(cx+4, hy, history[i] or "", K.DBLUE, K.GRAY)
+            drawText(cx+4, hy, history[i] or "", K.DBLUE, K.GRAY, cw - 8)
             hy = hy + 8
         end
 
-        local startX = cx + math.floor((cw - 4*btnW - 3*pad) / 2)
-        local startY = cy + ch - 5*btnH - 4*pad - 4
+        local btnW, btnH, startX, startY = metrics(cw, ch)
         for row = 1, 5 do
             for col = 1, 4 do
                 local label = buttons[row][col]
                 if label and label ~= "" then
-                    local bx = startX + (col-1)*(btnW+pad)
-                    local by = startY + (row-1)*(btnH+pad)
-                    R.drawButton(bx, by, btnW, btnH, false)
-                    R.drawText(bx+math.floor((btnW-6)/2), by+4, label, K.BLACK, K.GRAY)
+                    local bx = cx + startX + (col-1)*(btnW+pad)
+                    local by = cy + startY + (row-1)*(btnH+pad)
+                    button(bx, by, btnW, btnH, label)
                 end
             end
         end
@@ -53,8 +79,8 @@ local function appCalc()
 
     w.onClick = function(win, mx, my)
         -- mx,my are relative to content area
-        local startX = math.floor((win.cw - 4*btnW - 3*pad) / 2)
-        local startY = win.ch - 5*btnH - 4*pad - 23
+        if win.ch - 21 < 86 or win.cw - 6 < 78 then return end
+        local btnW, btnH, startX, startY = metrics(win.cw - 6, win.ch - 21)
 
         for row = 1, 5 do
             for col = 1, 4 do

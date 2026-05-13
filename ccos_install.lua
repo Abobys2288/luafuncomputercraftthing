@@ -1,5 +1,5 @@
 --[[
-    CCOS Installer v5 — CLEAN AUTOMATIC
+    CCOS Installer v6 — CLEAN AUTOMATIC
     ======================================
     Auto-discovers all files, creates dirs automatically, nice UI.
 ]]
@@ -41,6 +41,10 @@ local FILES = {
 
 local SERVER_FILE = "ccos_server.lua"
 local SERVER_URL = "https://raw.githubusercontent.com/" .. REPO .. "/" .. BRANCH .. "/" .. SERVER_FILE
+local SERVER_TARGETS = {
+    "/ccos/server.lua",
+    "/" .. SERVER_FILE,
+}
 
 -- ============================================================
 -- UI HELPERS
@@ -177,7 +181,7 @@ local function main()
         return
     end
 
-    local total = #FILES + 1
+    local total = #FILES + #SERVER_TARGETS
     local success, failed = 0, 0
     local logLines = {}
     local listY = by + 7
@@ -234,15 +238,16 @@ local function main()
         sleep(0.05)
     end
 
-    -- Download server script separately (goes to root)
-    do
-        local url = SERVER_URL
-        local path = "/" .. SERVER_FILE
-        term.setCursorPos(bx + 3, by + bh - 5)
+    -- Download server script into CCOS and root compatibility path.
+    for j, path in ipairs(SERVER_TARGETS) do
+        local step = #FILES + j
+        progress(pbX, pbY, pbW, step, total)
+        term.setCursorPos(bx + 3, by + bh - 7 + j)
         set(colors.black, colors.lightGray)
-        term.write("Server: " .. SERVER_FILE)
-        local ok2, err2 = downloadFile(url, path)
-        term.setCursorPos(bx + bw - 8, by + bh - 5)
+        local label = j == 1 and "Server core" or "Server alias"
+        term.write((label .. ": " .. path):sub(1, bw - 12))
+        local ok2, err2 = downloadFile(SERVER_URL, path)
+        term.setCursorPos(bx + bw - 8, by + bh - 7 + j)
         if ok2 then
             set(colors.black, colors.lime)
             term.write("[OK]")
@@ -251,10 +256,9 @@ local function main()
             set(colors.black, colors.red)
             term.write("[ERR]")
             failed = failed + 1
-            table.insert(logLines, SERVER_FILE .. ": " .. tostring(err2))
+            table.insert(logLines, path .. ": " .. tostring(err2))
         end
         reset()
-        progress(pbX, pbY, pbW, total, total)
     end
 
     local statusY = by + bh - 4

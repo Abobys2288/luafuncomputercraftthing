@@ -57,7 +57,8 @@ local function loadLocalManifest()
         {name="imgview", title="Image Viewer", desc="View images"},
         {name="music", title="Music", desc="Speaker player"},
         {name="fastfetch", title="Fastfetch", desc="System overview"},
-        {name="sites", title="Sites", desc="Host and browse pages"},
+        {name="sites", title="Sites Browser", desc="Browse pages"},
+        {name="sitebuilder", title="Site Builder", desc="Create and host pages"},
     }
 end
 

@@ -183,6 +183,53 @@ local function appFM()
         if it.up then goUp() else openFile(fullPath(it)) end
     end
 
+    local function selectAt(my)
+        local listY = 38
+        local rows = math.max(1, math.floor((w.ch - 21 - listY - 20) / 8))
+        for i = 1, rows do
+            local iy = listY + (i - 1) * 8
+            if my >= iy and my < iy + 8 then
+                sel = math.min(#items, scroll + i)
+                return true
+            end
+        end
+        return false
+    end
+
+    local function showContext(mx, my)
+        selectAt(my)
+        local it = selected()
+        local canFile = it and not it.empty and not it.up
+        local menu = {
+            {"Open", function() activate() end},
+            {nil, nil},
+            {"New File", function() createFile() end},
+            {"New Folder", function() createFolder() end},
+            {nil, nil},
+            {"Rename", function() if canFile then renameSelected() end end},
+            {"Delete", function() if canFile then deleteSelected() end end},
+            {nil, nil},
+            {"Refresh", function() refresh(); D.markDirty() end},
+        }
+        local itemH = 14
+        local mw = 104
+        local mh = #menu * itemH + 4
+        local ax = w.cx + 3 + mx
+        local ay = w.cy + 18 + my
+        local by = R.h - D.taskbarH
+        if ax + mw > R.w then ax = R.w - mw end
+        if ay + mh > by then ay = by - mh end
+        D.contextMenu = {
+            x = math.max(1, ax),
+            y = math.max(1, ay),
+            w = mw,
+            h = mh,
+            items = menu,
+            itemH = itemH,
+        }
+        D.markDirty()
+    end
+
     w.onDraw = function(_, cx, cy, cw, ch)
         local tx = cx
         for _, b in ipairs(toolbar) do
@@ -252,20 +299,18 @@ local function appFM()
         elseif hit == "delete" then deleteSelected(); return
         elseif hit == "refresh" then refresh(); D.markDirty(); return end
 
-        local listY = 38
-        local rows = math.max(1, math.floor((w.ch - 21 - listY - 20) / 8))
-        for i = 1, rows do
-            local iy = listY + (i - 1) * 8
-            if my >= iy and my < iy + 8 then
-                sel = math.min(#items, scroll + i)
-                D.markContentDirty(w)
-                return
-            end
+        if selectAt(my) then
+            D.markContentDirty(w)
+            return
         end
     end
 
     w.onDoubleClick = function()
         activate()
+    end
+
+    w.onRightClick = function(_, mx, my)
+        showContext(mx, my)
     end
 
     w.onKey = function(_, k)

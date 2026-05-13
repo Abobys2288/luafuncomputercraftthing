@@ -12,5 +12,6 @@ return {
     {name="imgview", title="Image Viewer", desc="View .nfp and .nfp256 images"},
     {name="music", title="Music", desc="Speaker note player"},
     {name="fastfetch", title="Fastfetch", desc="System overview"},
-    {name="sites", title="Sites", desc="Host and browse CCOS pages"},
+    {name="sites", title="Sites Browser", desc="Browse CCOS pages"},
+    {name="sitebuilder", title="Site Builder", desc="Create and host CCOS pages"},
 }

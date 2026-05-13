@@ -144,6 +144,152 @@ function api.joinPath(base, name)
     return base .. "/" .. name
 end
 
+function api.chooseFile(options, callback)
+    if type(options) == "function" then callback = options; options = {} end
+    options = options or {}
+    local desktop = getDesktop()
+    local R2 = api.getRenderer()
+    if not desktop or not R2 then
+        if callback then callback(nil) end
+        return nil
+    end
+
+    local path = options.path or "/"
+    local title = options.title or "Choose File"
+    local extensions = options.extensions or options.ext
+    local allowDirs = options.allowDirs == true
+    local sel, scroll = 1, 0
+    local items = {}
+    local status = "Select file"
+
+    local function allowed(name, isDir)
+        if isDir then return true end
+        if not extensions then return true end
+        local ext = (name:match("%.([^%.]+)$") or ""):lower()
+        for _, want in ipairs(extensions) do
+            want = tostring(want):lower():gsub("^%.", "")
+            if ext == want then return true end
+        end
+        return false
+    end
+
+    local function refresh()
+        local ok, list = pcall(fs.list, path)
+        if not ok or not list then path = "/"; list = fs.list("/") or {}; status = "Reset to /" end
+        table.sort(list, function(a, b)
+            local ap, bp = api.joinPath(path, a), api.joinPath(path, b)
+            local ad, bd = fs.isDir(ap), fs.isDir(bp)
+            if ad ~= bd then return ad end
+            return a:lower() < b:lower()
+        end)
+        items = {}
+        if path ~= "/" then table.insert(items, {name="..", up=true, dir=true}) end
+        for _, name in ipairs(list) do
+            local fp = api.joinPath(path, name)
+            local isDir = fs.isDir(fp)
+            if allowed(name, isDir) then table.insert(items, {name=name, dir=isDir}) end
+        end
+        if #items == 0 then items = {{name="(empty)", empty=true}} end
+        sel = math.max(1, math.min(sel, #items))
+        scroll = math.max(0, math.min(scroll, math.max(0, #items - 1)))
+    end
+
+    local wx, wy, ww, wh = api.fitWindow(options.w or 260, options.h or 170)
+    local win = api.window(title, wx, wy, ww, wh)
+    if not win then if callback then callback(nil) end; return nil end
+
+    local function done(value)
+        api.close(win)
+        if callback then callback(value) end
+    end
+
+    local function selectedPath()
+        local it = items[sel]
+        if not it or it.empty then return nil, it end
+        if it.up then return api.getDir(path), it end
+        return api.joinPath(path, it.name), it
+    end
+
+    local function activate()
+        local fp, it = selectedPath()
+        if not fp or not it then return end
+        if it.up or fs.isDir(fp) then
+            if allowDirs and not it.up and options.pickDirs then done(fp); return end
+            path = fp
+            sel, scroll = 1, 0
+            refresh()
+            api.redrawContent(win)
+        else
+            done(fp)
+        end
+    end
+
+    refresh()
+
+    win.onDraw = function(_, cx, cy, cw, ch)
+        if R2.drawButtonText then R2.drawButtonText(cx, cy, 38, 14, "Open", false)
+        else R2.drawButton(cx, cy, 38, 14, false); api.drawText(cx+4, cy+3, "Open", 0, 2, 30) end
+        if cw >= 84 then
+            if R2.drawButtonText then R2.drawButtonText(cx + 42, cy, 38, 14, "Cancel", false)
+            else R2.drawButton(cx+42, cy, 38, 14, false); api.drawText(cx+46, cy+3, "Cancel", 0, 2, 30) end
+        end
+        if cw >= 128 then api.drawText(cx + 86, cy + 3, status, 4, 2, cw - 90) end
+
+        R2.drawW95Sunken(cx, cy + 18, math.max(8, cw), 14)
+        api.drawText(cx + 4, cy + 21, path, 0, 2, cw - 8)
+
+        local listY = cy + 38
+        local rows = math.max(1, math.floor((ch - 52) / 8))
+        for i = 1, rows do
+            local idx = scroll + i
+            local it = items[idx]
+            if not it then break end
+            local iy = listY + (i - 1) * 8
+            local active = idx == sel
+            if active then R2.fillRect(cx + 2, iy, cw - 4, 8, 19) end
+            local prefix = it.up and "^ " or (it.dir and "[] " or "   ")
+            api.drawText(cx + 6, iy, prefix .. it.name, active and 1 or 0, active and 19 or 2, cw - 12)
+        end
+
+        api.drawText(cx + 4, cy + ch - 10, "Enter=open  Backspace=up  Esc=cancel", 4, 2, cw - 8)
+    end
+
+    win.onClick = function(_, mx, my)
+        if my >= 0 and my < 14 then
+            if mx < 38 then activate()
+            elseif mx >= 42 and mx < 80 then done(nil) end
+            return
+        end
+        local rows = math.max(1, math.floor((win.ch - 21 - 52) / 8))
+        for i = 1, rows do
+            local iy = 38 + (i - 1) * 8
+            if my >= iy and my < iy + 8 then
+                sel = math.min(#items, scroll + i)
+                api.redrawContent(win)
+                return
+            end
+        end
+    end
+
+    win.onDoubleClick = function()
+        activate()
+    end
+
+    win.onKey = function(_, k)
+        local rows = math.max(1, math.floor((win.ch - 21 - 52) / 8))
+        if k == keys.enter then activate()
+        elseif k == keys.escape then done(nil)
+        elseif k == keys.backspace then path = api.getDir(path); sel, scroll = 1, 0; refresh(); api.redrawContent(win)
+        elseif k == keys.up and sel > 1 then sel = sel - 1; if sel <= scroll then scroll = math.max(0, scroll - 1) end; api.redrawContent(win)
+        elseif k == keys.down and sel < #items then sel = sel + 1; if sel > scroll + rows then scroll = scroll + 1 end; api.redrawContent(win)
+        elseif k == keys.pageUp then sel = math.max(1, sel - rows); scroll = math.max(0, scroll - rows); api.redrawContent(win)
+        elseif k == keys.pageDown then sel = math.min(#items, sel + rows); scroll = math.min(math.max(0, #items - rows), scroll + rows); api.redrawContent(win)
+        end
+    end
+
+    return win
+end
+
 function api.showError(title, message)
     local desktop = getDesktop()
     if desktop and desktop.showError then

@@ -165,12 +165,21 @@ local function appImageViewer(initialPath)
     end
 
     local function openDialog()
-        D.inputDialog("Open Image", "Path:", fp or "/tools/smile.nfp", function(path)
-            if path and path ~= "" then
-                if loadImage(path, false) then win.title = "Image: " .. API.getFileName(path) end
-                API.redrawContent(win)
-            end
-        end)
+        if API.chooseFile then
+            API.chooseFile({title="Open Image", path="/", extensions={"nfp","nfp256"}}, function(path)
+                if path and path ~= "" then
+                    if loadImage(path, false) then win.title = "Image: " .. API.getFileName(path) end
+                    API.redrawContent(win)
+                end
+            end)
+        else
+            D.inputDialog("Open Image", "Path:", fp or "/tools/smile.nfp", function(path)
+                if path and path ~= "" then
+                    if loadImage(path, false) then win.title = "Image: " .. API.getFileName(path) end
+                    API.redrawContent(win)
+                end
+            end)
+        end
     end
 
     win.onDraw = function(_, cx, cy, cw, ch)
