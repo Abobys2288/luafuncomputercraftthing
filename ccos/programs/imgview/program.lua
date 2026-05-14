@@ -13,7 +13,9 @@ for i = 1, #NFP32_KEYS do
 end
 
 local LARGE_FILE_BYTES = 5 * 1024 * 1024
+local HUGE_COMPRESSED_BYTES = 32 * 1024 * 1024
 local MAX_DECODE_PIXELS = 1200000
+local MAX_ANIM_DECODE_PIXELS = 5200000
 local SAFE_PREVIEW_ROWS = 96
 
 local function clip(text, w)
@@ -239,8 +241,7 @@ local function readC3Blob(lines, idx)
     return line, idx + 1
 end
 
-local function decodeC3Frame(payload, mode, w, h, prevFlat, stats)
-    local bytes = base64Bytes(payload)
+local function decodeC3FrameBytes(bytes, mode, w, h, prevFlat, stats)
     local total = w * h
     local flat = {}
     local pos, i = 1, 1
@@ -299,6 +300,135 @@ local function decodeC3Frame(payload, mode, w, h, prevFlat, stats)
     return rows, flat
 end
 
+local function decodeC3Frame(payload, mode, w, h, prevFlat, stats)
+    return decodeC3FrameBytes(base64Bytes(payload), mode, w, h, prevFlat, stats)
+end
+
+local function decodeC4Frame(payload, mode, w, h, prevFlat, stats)
+    local bytes = base64Bytes(payload)
+    local total = w * h
+    local flat = {}
+    local pos, i = 1, 1
+    while pos <= total and i <= #bytes do
+        local cmd = bytes[i] or 0
+        i = i + 1
+        local op = math.floor(cmd / 64)
+        local len = (cmd % 64) + 1
+        if cmd == 0xFF then
+            local ext = bytes[i] or 0
+            i = i + 1
+            op = math.floor(ext / 64)
+            len = (ext % 64) * 256 + (bytes[i] or 0) + 1
+            i = i + 1
+        end
+        if op == 0 then
+            for _ = 1, len do
+                flat[pos] = prevFlat and prevFlat[pos] or 0
+                pos = pos + 1
+                if pos > total then break end
+            end
+        elseif op == 1 then
+            local src = pos - w
+            for _ = 1, len do
+                flat[pos] = flat[src] or 0
+                pos = pos + 1
+                src = src + 1
+                if pos > total then break end
+            end
+        elseif op == 2 then
+            local color = bytes[i] or 0
+            i = i + 1
+            for _ = 1, len do
+                flat[pos] = color
+                pos = pos + 1
+                if pos > total then break end
+            end
+        else
+            for _ = 1, len do
+                flat[pos] = bytes[i] or 0
+                i = i + 1
+                pos = pos + 1
+                if pos > total then break end
+            end
+        end
+    end
+    if pos <= total then stats.bad = stats.bad + 1 end
+    for p = 1, total do
+        if flat[p] == nil then flat[p] = 0 end
+        if mode ~= 256 then flat[p] = flat[p] % 32 end
+    end
+
+    local rows = {}
+    local p = 1
+    for y = 1, h do
+        local row = {}
+        for x = 1, w do
+            row[x] = flat[p] or 0
+            p = p + 1
+        end
+        rows[y] = row
+    end
+    return rows, flat
+end
+
+local function lzssDecompress(bytes)
+    local out, i = {}, 1
+    while i <= #bytes do
+        local flags = bytes[i] or 0
+        i = i + 1
+        local mask = 1
+        for _ = 1, 8 do
+            if i > #bytes then break end
+            if math.floor(flags / mask) % 2 == 1 then
+                local b1, b2 = bytes[i] or 0, bytes[i + 1] or 0
+                i = i + 2
+                local len = math.floor(b1 / 16) + 3
+                local dist = ((b1 % 16) * 256 + b2) + 1
+                local src = #out - dist + 1
+                for _ = 1, len do
+                    out[#out + 1] = out[src] or 0
+                    src = src + 1
+                end
+            else
+                out[#out + 1] = bytes[i] or 0
+                i = i + 1
+            end
+            mask = mask * 2
+        end
+    end
+    return out
+end
+
+local function readVarUint(bytes, idx)
+    local value, mul = 0, 1
+    while idx <= #bytes do
+        local b = bytes[idx] or 0
+        idx = idx + 1
+        value = value + (b % 128) * mul
+        if b < 128 then break end
+        mul = mul * 128
+    end
+    return value, idx
+end
+
+local function decodeC5Frames(payload, mode, w, h, frameCount, stats)
+    local stream = lzssDecompress(base64Bytes(payload))
+    local frames, idx, prevFlat = {}, 1, nil
+    for f = 1, frameCount do
+        local len
+        len, idx = readVarUint(stream, idx)
+        local frameBytes = {}
+        for i = 1, len do
+            frameBytes[i] = stream[idx] or 0
+            idx = idx + 1
+        end
+        local rows, flat = decodeC3FrameBytes(frameBytes, mode, w, h, prevFlat, stats)
+        frames[f] = rows
+        prevFlat = flat
+    end
+    return frames
+end
+
 local function looksNfpc(line)
     return line and line:match("^!NFPC") ~= nil
 end
@@ -316,7 +446,14 @@ local function parseNfpc(lines, stats)
     local h = tonumber(hStr) or 0
 
     local pixels = {}
-    if codec == "C3" then
+    if codec == "C5" then
+        local payload = readC3Blob(lines, 2)
+        local frames = decodeC5Frames(payload, mode, w, h, 1, stats)
+        pixels = frames[1] or {}
+    elseif codec == "C4" then
+        local payload = readC3Blob(lines, 2)
+        pixels = decodeC4Frame(payload, mode, w, h, nil, stats)
+    elseif codec == "C3" then
         local payload = readC3Blob(lines, 2)
         pixels = decodeC3Frame(payload, mode, w, h, nil, stats)
     elseif codec == "C2" then
@@ -348,7 +485,20 @@ local function parseNfpa(lines, stats)
 
     local frames = {}
     local idx = 2
-    if codec == "C3" then
+    if codec == "C5" then
+        local payload
+        payload, idx = readC3Blob(lines, idx)
+        frames = decodeC5Frames(payload, mode, w, h, frameCount, stats)
+    elseif codec == "C4" then
+        local prevFlat = nil
+        for f = 1, frameCount do
+            local payload
+            payload, idx = readC3Blob(lines, idx)
+            local rows, flat = decodeC4Frame(payload, mode, w, h, prevFlat, stats)
+            frames[f] = rows
+            prevFlat = flat
+        end
+    elseif codec == "C3" then
         local prevFlat = nil
         for f = 1, frameCount do
             local payload
@@ -532,16 +682,18 @@ local function appImageViewer(initialPath)
         fileSize = safeSize(fp)
         local first = readFirstLine(fp) or ""
         local header = parseHeader(first)
-        if fileSize >= LARGE_FILE_BYTES then
-            if header then return setInfoOnly(fp, header, "File is over 5 MB") end
-            if ext == "nfp" or ext == "nfp256" then
-                if loadLargeRawPreview(fp, ext) then return true end
-            end
-        end
         if header then
             local total = (header.w or 0) * (header.h or 0) * math.max(1, header.frames or 1)
-            if total > MAX_DECODE_PIXELS then
+            local maxPixels = header.kind == "NFPA" and MAX_ANIM_DECODE_PIXELS or MAX_DECODE_PIXELS
+            if total > maxPixels then
                 return setInfoOnly(fp, header, "Decoded pixels exceed safe limit")
+            end
+            if fileSize >= HUGE_COMPRESSED_BYTES then
+                return setInfoOnly(fp, header, "Compressed file is over 32 MB")
+            end
+        elseif fileSize >= LARGE_FILE_BYTES then
+            if ext == "nfp" or ext == "nfp256" then
+                if loadLargeRawPreview(fp, ext) then return true end
             end
         end
 
@@ -576,7 +728,7 @@ local function appImageViewer(initialPath)
                 imgH = fh or #pixels
                 animDelay = (delay or 100) / 1000
                 isAnimation = true
-                formatName = ((lines[1] or ""):find("C3") and "NFPA C3") or ((lines[1] or ""):find("C2") and "NFPA C2" or "NFPA")
+                formatName = ((lines[1] or ""):find("C5") and "NFPA C5") or ((lines[1] or ""):find("C4") and "NFPA C4") or ((lines[1] or ""):find("C3") and "NFPA C3") or ((lines[1] or ""):find("C2") and "NFPA C2" or "NFPA")
                 startAnimation()
             else
                 status = "Invalid NFPA: " .. tostring(result)
@@ -589,7 +741,7 @@ local function appImageViewer(initialPath)
                 pixels = result
                 imgW = fw or 0
                 imgH = fh or #pixels
-                formatName = ((lines[1] or ""):find("C3") and "NFPC C3") or ((lines[1] or ""):find("C2") and "NFPC C2" or "NFPC")
+                formatName = ((lines[1] or ""):find("C5") and "NFPC C5") or ((lines[1] or ""):find("C4") and "NFPC C4") or ((lines[1] or ""):find("C3") and "NFPC C3") or ((lines[1] or ""):find("C2") and "NFPC C2" or "NFPC")
             else
                 status = "Invalid NFPC: " .. tostring(result)
                 if not quiet then API.showError("Image Viewer", status) end

@@ -7,22 +7,35 @@
 <style>
   :root {
     color-scheme: dark;
-    --bg: #121312;
-    --bar: #191a18;
-    --panel: #20211f;
-    --panel-2: #272822;
-    --field: #111210;
-    --line: #45483e;
-    --text: #eeeeec;
-    --muted: #abae9f;
-    --soft: #777b6f;
-    --accent: #2fa89f;
-    --accent-2: #d99731;
-    --danger: #d7514a;
-    --good: #81b86c;
-    --focus: rgba(47, 168, 159, .35);
+    --bg: #0d0b11;
+    --surface: #1a1822;
+    --surface-high: #23212c;
+    --surface-highest: #2c2a38;
+    --field: #14131a;
+    --outline: #3f3d4a;
+    --outline-variant: #2e2c38;
+    --text: #e6e1f0;
+    --muted: #9e99ac;
+    --soft: #6e697c;
+    --primary: #b8a8e8;
+    --primary-container: #3a3058;
+    --on-primary: #e8e0ff;
+    --secondary: #9ecfb0;
+    --secondary-container: #1f3d2e;
+    --warning: #e0c898;
+    --warning-container: #3d2e1a;
+    --danger: #e8a0a0;
+    --danger-container: #3d1c1c;
+    --good: #7ec496;
+    --good-container: #1a3d2a;
+    --focus: rgba(184, 168, 232, .28);
     --mono: "Cascadia Mono", "Consolas", monospace;
     --ui: Inter, "Segoe UI", system-ui, sans-serif;
+    --radius-sm: 10px;
+    --radius-md: 14px;
+    --radius-lg: 18px;
+    --radius-xl: 24px;
+    --radius-pill: 999px;
   }
 
   * { box-sizing: border-box; }
@@ -33,7 +46,8 @@
     margin: 0;
     background: var(--bg);
     color: var(--text);
-    font: 14px/1.35 var(--ui);
+    font: 14px/1.4 var(--ui);
+    -webkit-font-smoothing: antialiased;
   }
 
   button, input, textarea {
@@ -46,35 +60,50 @@
     align-items: center;
     justify-content: center;
     gap: 8px;
-    min-height: 36px;
-    padding: 7px 11px;
-    border: 1px solid #55584f;
-    border-radius: 7px;
-    background: #2b2d28;
+    min-height: 40px;
+    padding: 8px 16px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-pill);
+    background: var(--surface-high);
+    color: var(--text);
+    font-size: 13.5px;
+    font-weight: 500;
+    letter-spacing: .01em;
     cursor: pointer;
-    transition: border-color .12s ease, background .12s ease, transform .12s ease;
+    transition: all .18s cubic-bezier(.4,0,.2,1);
   }
 
   button:hover {
-    border-color: var(--accent);
-    background: #30342f;
+    background: var(--surface-highest);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0,0,0,.25);
   }
 
-  button:active { transform: translateY(1px); }
+  button:active { transform: translateY(0); }
 
   button:disabled {
     cursor: not-allowed;
-    opacity: .45;
+    opacity: .4;
   }
 
   button.primary {
-    border-color: #42bdb3;
-    background: #176961;
+    background: var(--primary-container);
+    color: var(--on-primary);
+  }
+
+  button.primary:hover {
+    background: #453870;
+    box-shadow: 0 4px 16px rgba(184,168,232,.18);
   }
 
   button.warning {
-    border-color: #d9a34a;
-    background: #704f18;
+    background: var(--warning-container);
+    color: var(--warning);
+  }
+
+  button.warning:hover {
+    background: #4d3a20;
+    box-shadow: 0 4px 16px rgba(224,200,152,.12);
   }
 
   svg {
@@ -93,9 +122,9 @@
     align-items: center;
     gap: 12px;
     min-height: 56px;
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--line);
-    background: var(--bar);
+    padding: 10px 18px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--outline-variant);
   }
 
   h1 {
@@ -103,7 +132,8 @@
     font-size: 18px;
     line-height: 1.1;
     font-weight: 700;
-    letter-spacing: 0;
+    letter-spacing: -.01em;
+    color: var(--text);
   }
 
   .status {
@@ -123,36 +153,41 @@
     display: grid;
     grid-template-columns: minmax(290px, 380px) minmax(420px, 1fr) minmax(320px, 480px);
     min-height: calc(100vh - 56px);
+    gap: 10px;
+    padding: 10px;
+    background: var(--bg);
   }
 
   section {
     min-width: 0;
-    border-right: 1px solid var(--line);
-    background: var(--panel);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    overflow: hidden;
+    border: 1px solid var(--outline-variant);
   }
-
-  section:last-child { border-right: 0; }
 
   .section-head {
     display: flex;
     align-items: center;
-    min-height: 44px;
+    min-height: 48px;
     gap: 10px;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--line);
-    background: var(--panel-2);
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--outline-variant);
+    background: var(--surface-high);
   }
 
   .section-head strong {
-    font-size: 13px;
+    font-size: 12px;
     text-transform: uppercase;
-    letter-spacing: .04em;
+    letter-spacing: .06em;
+    color: var(--muted);
+    font-weight: 600;
   }
 
   .body {
     display: grid;
-    gap: 12px;
-    padding: 12px;
+    gap: 14px;
+    padding: 14px;
   }
 
   .form-grid {
@@ -165,7 +200,7 @@
 
   .field {
     display: grid;
-    gap: 5px;
+    gap: 6px;
     min-width: 0;
     color: var(--muted);
     font-size: 12px;
@@ -175,6 +210,7 @@
     min-width: 0;
     color: var(--muted);
     font-size: 12px;
+    font-weight: 500;
   }
 
   .field-top {
@@ -194,18 +230,19 @@
   input[type="number"],
   input[type="text"] {
     width: 100%;
-    min-height: 36px;
-    padding: 7px 9px;
-    border: 1px solid var(--line);
-    border-radius: 7px;
+    min-height: 40px;
+    padding: 8px 12px;
+    border: 1px solid var(--outline);
+    border-radius: var(--radius-sm);
     background: var(--field);
     outline: none;
+    transition: border-color .15s ease, box-shadow .15s ease;
   }
 
   input[type="number"]:focus,
   input[type="text"]:focus,
   textarea:focus {
-    border-color: var(--accent);
+    border-color: var(--primary);
     box-shadow: 0 0 0 3px var(--focus);
   }
 
@@ -214,41 +251,40 @@
   .file-picker {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
-    gap: 8px;
+    gap: 10px;
     align-items: stretch;
-    min-height: 44px;
-    padding: 6px;
-    border: 1px dashed #5b5f55;
-    border-radius: 8px;
-    background: #12140f;
+    min-height: 48px;
+    padding: 8px;
+    border: 1.5px dashed var(--outline);
+    border-radius: var(--radius-md);
+    background: var(--field);
+    transition: border-color .2s ease, background .2s ease, box-shadow .2s ease;
   }
 
   .file-picker:hover {
-    border-color: var(--accent);
-    background: #151914;
+    border-color: var(--primary);
+    background: #191825;
   }
 
   .file-picker:focus-within,
   .file-picker.drag {
-    border-color: var(--accent);
-    background: #151914;
+    border-color: var(--primary);
+    border-style: solid;
+    background: #191825;
     box-shadow: 0 0 0 3px var(--focus);
   }
 
-  .file-picker.drag {
-    border-style: solid;
-  }
-
   .file-picker button {
-    min-width: 112px;
+    min-width: 100px;
     align-self: stretch;
+    border-radius: var(--radius-sm);
   }
 
   .file-name {
     display: grid;
     align-content: center;
     min-width: 0;
-    padding: 0 8px;
+    padding: 0 6px;
     color: var(--text);
     font-size: 13px;
     overflow: hidden;
@@ -279,6 +315,10 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .segment.codec {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
   .segment input,
   .switch input {
     position: absolute;
@@ -292,21 +332,23 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 36px;
+    min-height: 38px;
     padding: 7px 8px;
-    border: 1px solid var(--line);
-    border-radius: 7px;
+    border: 1px solid var(--outline);
+    border-radius: var(--radius-sm);
     background: var(--field);
     color: var(--muted);
     text-align: center;
     white-space: nowrap;
     user-select: none;
+    transition: all .15s ease;
   }
 
   .segment input:checked + span {
-    border-color: var(--accent);
-    background: #163c39;
-    color: var(--text);
+    border-color: var(--primary);
+    background: var(--primary-container);
+    color: var(--on-primary);
+    font-weight: 500;
   }
 
   .segment input:focus-visible + span,
@@ -316,7 +358,7 @@
 
   .switches {
     display: grid;
-    gap: 8px;
+    gap: 10px;
   }
 
   .switch {
@@ -324,26 +366,52 @@
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    min-height: 36px;
-    padding: 6px 8px;
-    border: 1px solid var(--line);
-    border-radius: 7px;
+    min-height: 40px;
+    padding: 8px 10px;
+    border: 1px solid var(--outline);
+    border-radius: var(--radius-sm);
     background: var(--field);
     color: var(--muted);
     font-size: 13px;
+    transition: opacity .15s ease;
   }
 
-  .switch.disabled {
-    opacity: .45;
+  .switch.disabled { opacity: .4; }
+
+  .field.disabled,
+  .compression-options.disabled { opacity: .4; }
+
+  .compression-options {
+    display: grid;
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid var(--outline);
+    border-radius: var(--radius-sm);
+    background: var(--field);
+  }
+
+  .compression-options .segment {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .segment.disabled {
+    opacity: .4;
+    pointer-events: none;
+  }
+
+  input[type="range"] {
+    width: 100%;
+    accent-color: var(--primary);
   }
 
   .switch span:last-child {
     position: relative;
-    width: 38px;
-    height: 22px;
-    border-radius: 999px;
-    background: #4b4e45;
+    width: 40px;
+    height: 24px;
+    border-radius: var(--radius-pill);
+    background: #4a4855;
     flex: 0 0 auto;
+    transition: background .2s ease;
   }
 
   .switch span:last-child::after {
@@ -351,20 +419,20 @@
     position: absolute;
     top: 3px;
     left: 3px;
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
-    background: #d7d8d1;
-    transition: transform .14s ease, background .14s ease;
+    background: #d0cdd8;
+    transition: transform .2s cubic-bezier(.4,0,.2,1), background .2s ease;
   }
 
   .switch input:checked + span + span {
-    background: #1f7d74;
+    background: var(--primary-container);
   }
 
   .switch input:checked + span + span::after {
     transform: translateX(16px);
-    background: white;
+    background: var(--on-primary);
   }
 
   .actions {
@@ -380,15 +448,21 @@
   .meta-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
+    gap: 10px;
   }
 
   .metric {
     min-width: 0;
-    padding: 8px;
-    border: 1px solid var(--line);
-    border-radius: 7px;
+    padding: 10px;
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-sm);
     background: var(--field);
+    transition: border-color .15s ease, transform .1s ease;
+  }
+
+  .metric:hover {
+    border-color: var(--outline);
+    transform: translateY(-1px);
   }
 
   .metric b {
@@ -403,26 +477,28 @@
 
   .metric span {
     display: block;
-    margin-top: 3px;
+    margin-top: 4px;
     color: var(--muted);
     font-size: 11px;
     text-transform: uppercase;
-    letter-spacing: .04em;
+    letter-spacing: .05em;
+    font-weight: 500;
   }
 
   .preview-wrap {
     display: grid;
     grid-template-rows: auto 1fr;
     min-height: 0;
-    background: #151613;
+    background: var(--surface);
   }
 
   .preview-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 1px;
+    gap: 6px;
     min-height: 0;
-    background: var(--line);
+    padding: 6px;
+    background: var(--surface);
   }
 
   .preview-pane {
@@ -430,7 +506,10 @@
     grid-template-rows: auto 1fr;
     min-width: 0;
     min-height: 0;
-    background: var(--panel);
+    background: var(--surface-high);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    border: 1px solid var(--outline-variant);
   }
 
   .preview-title {
@@ -438,56 +517,73 @@
     align-items: center;
     gap: 8px;
     min-height: 38px;
-    padding: 8px 10px;
-    border-bottom: 1px solid var(--line);
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--outline-variant);
+    background: var(--surface-highest);
     color: var(--muted);
-    font-size: 12px;
+    font-size: 11px;
     text-transform: uppercase;
-    letter-spacing: .04em;
+    letter-spacing: .06em;
+    font-weight: 600;
   }
 
   .canvas-stage {
     display: grid;
     place-items: center;
-    min-height: 260px;
-    padding: 14px;
+    align-content: center;
+    min-height: 220px;
+    padding: 10px;
     overflow: auto;
+    position: relative;
     background:
-      linear-gradient(45deg, #171813 25%, transparent 25%),
-      linear-gradient(-45deg, #171813 25%, transparent 25%),
-      linear-gradient(45deg, transparent 75%, #171813 75%),
-      linear-gradient(-45deg, transparent 75%, #171813 75%),
-      #10110f;
+      linear-gradient(45deg, #1a1825 25%, transparent 25%),
+      linear-gradient(-45deg, #1a1825 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #1a1825 75%),
+      linear-gradient(-45deg, transparent 75%, #1a1825 75%),
+      #13111a;
     background-position: 0 0, 0 8px, 8px -8px, -8px 0;
     background-size: 16px 16px;
   }
 
   canvas {
-    max-width: 100%;
+    width: 100%;
     height: auto;
-    border: 1px solid #5b5e54;
+    display: block;
+    border: 1px solid var(--outline);
+    border-radius: var(--radius-sm);
     background: black;
     image-rendering: pixelated;
+    box-shadow: 0 4px 16px rgba(0,0,0,.4);
+    transition: opacity .35s ease, transform .35s ease;
+    opacity: 0;
+    transform: scale(.98);
+  }
+
+  canvas.visible {
+    opacity: 1;
+    transform: scale(1);
   }
 
   .empty-canvas {
     color: var(--soft);
     text-align: center;
     font-size: 13px;
+    padding: 40px 20px;
+    opacity: .8;
   }
 
   .palette-strip {
     display: grid;
-    gap: 2px;
-    padding: 10px 12px;
-    border-top: 1px solid var(--line);
-    background: var(--panel);
+    gap: 4px;
+    padding: 10px 14px;
+    border-top: 1px solid var(--outline-variant);
+    background: var(--surface);
   }
 
   .swatches {
     display: grid;
     grid-template-columns: repeat(32, minmax(5px, 1fr));
-    gap: 2px;
+    gap: 3px;
   }
 
   .swatches.mode-256 {
@@ -497,28 +593,29 @@
   .swatch {
     aspect-ratio: 1;
     min-height: 8px;
-    border: 1px solid rgba(255, 255, 255, .08);
+    border-radius: 3px;
+    border: 1px solid rgba(255,255,255,.06);
   }
 
   .output-panel {
     display: grid;
     grid-template-rows: auto 1fr;
     min-height: 0;
-    background: var(--panel);
+    background: var(--surface);
   }
 
   textarea {
     width: 100%;
     height: 100%;
     min-height: 280px;
-    padding: 12px;
+    padding: 14px;
     border: 0;
     border-radius: 0;
-    background: #10110f;
-    color: #e8e9df;
+    background: var(--field);
+    color: #ddd8e8;
     outline: none;
     resize: none;
-    font: 12px/1.35 var(--mono);
+    font: 12px/1.4 var(--mono);
     white-space: pre;
     tab-size: 2;
   }
@@ -531,6 +628,115 @@
     white-space: nowrap;
   }
 
+  .canvas-badge {
+    position: absolute;
+    bottom: 12px;
+    right: 12px;
+    padding: 4px 10px;
+    border-radius: var(--radius-pill);
+    background: rgba(0,0,0,.6);
+    backdrop-filter: blur(4px);
+    color: var(--muted);
+    font-size: 11px;
+    font-family: var(--mono);
+    pointer-events: none;
+    z-index: 2;
+    opacity: 0;
+    transition: opacity .2s ease;
+  }
+
+  .canvas-stage.has-canvas .canvas-badge {
+    opacity: 1;
+  }
+
+  .progress-wrap {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-sm);
+    background: var(--field);
+  }
+
+  .progress-wrap.active {
+    display: flex;
+  }
+
+  .progress-track {
+    flex: 1 1 auto;
+    height: 6px;
+    border-radius: var(--radius-pill);
+    background: #2e2c38;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: var(--radius-pill);
+    background: var(--primary);
+    transition: width .18s ease;
+  }
+
+  .progress-text {
+    color: var(--muted);
+    font-size: 11px;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+
+  .drag-overlay {
+    position: fixed;
+    inset: 0;
+    display: none;
+    place-items: center;
+    background: rgba(0,0,0,.55);
+    backdrop-filter: blur(3px);
+    z-index: 100;
+  }
+
+  .drag-overlay.active {
+    display: grid;
+  }
+
+  .drag-overlay-box {
+    padding: 32px 48px;
+    border: 2px dashed var(--primary);
+    border-radius: var(--radius-xl);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 18px;
+    text-align: center;
+    box-shadow: 0 8px 32px rgba(0,0,0,.4);
+  }
+
+  .toast {
+    position: fixed;
+    bottom: 18px;
+    right: 18px;
+    padding: 12px 16px;
+    border-radius: var(--radius-md);
+    background: var(--surface-high);
+    border: 1px solid var(--outline-variant);
+    color: var(--text);
+    font-size: 13px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.45);
+    transform: translateY(20px);
+    opacity: 0;
+    transition: transform .25s ease, opacity .25s ease;
+    z-index: 101;
+    pointer-events: none;
+  }
+
+  .toast.show {
+    transform: translateY(0);
+    opacity: 1;
+  }
+
+  .toast.good { border-color: var(--good); color: var(--good); }
+  .toast.bad { border-color: var(--danger); color: var(--danger); }
+
   @media (max-width: 1120px) {
     main {
       grid-template-columns: 360px minmax(360px, 1fr);
@@ -538,7 +744,7 @@
 
     .output-panel {
       grid-column: 1 / -1;
-      border-top: 1px solid var(--line);
+      border-top: 1px solid var(--outline-variant);
     }
   }
 
@@ -547,6 +753,7 @@
       align-items: flex-start;
       flex-direction: column;
       gap: 6px;
+      padding: 10px 14px;
     }
 
     .status { margin-left: 0; width: 100%; }
@@ -554,11 +761,13 @@
     main {
       display: block;
       min-height: auto;
+      padding: 8px;
+      gap: 8px;
     }
 
     section {
       border-right: 0;
-      border-bottom: 1px solid var(--line);
+      margin-bottom: 8px;
     }
 
     .preview-grid,
@@ -571,7 +780,7 @@
     }
 
     .canvas-stage {
-      min-height: 210px;
+      min-height: 180px;
     }
 
     textarea {
@@ -581,6 +790,10 @@
 </style>
 </head>
 <body>
+<div id="dragOverlay" class="drag-overlay">
+  <div class="drag-overlay-box">Drop image or video here</div>
+</div>
+<div id="toast" class="toast"></div>
 <header>
   <h1>CCOS NFP Converter</h1>
   <div id="status" class="status" aria-live="polite">Ready</div>
@@ -653,6 +866,30 @@
           <span>Best compression</span>
           <span aria-hidden="true"></span>
         </label>
+        <div id="compressionOptions" class="compression-options">
+          <div class="field-top">
+            <span class="field-label">Compression type</span>
+            <span id="qualityValue" class="field-hint">Lossless</span>
+          </div>
+          <div class="segment" id="compressionModeGroup">
+            <label><input id="compressionLossless" type="radio" name="compressionMode" value="lossless" checked><span>Lossless</span></label>
+            <label><input id="compressionLossy" type="radio" name="compressionMode" value="lossy"><span>Lossy</span></label>
+          </div>
+          <label id="qualityField" class="field disabled">
+            <span class="field-top"><span>Lossy quality</span><span>smaller at low Q</span></span>
+            <input id="qualityInput" type="range" min="35" max="100" step="1" value="88" disabled>
+          </label>
+          <div class="field-top" style="margin-top:10px">
+            <span class="field-label">Codec</span>
+          </div>
+          <div class="segment codec" id="codecGroup">
+            <label><input id="codecAuto" type="radio" name="codec" value="auto" checked><span>Auto</span></label>
+            <label><input id="codecC2" type="radio" name="codec" value="c2"><span>C2</span></label>
+            <label><input id="codecC3" type="radio" name="codec" value="c3"><span>C3</span></label>
+            <label><input id="codecC4" type="radio" name="codec" value="c4"><span>C4</span></label>
+            <label><input id="codecC5" type="radio" name="codec" value="c5"><span>C5</span></label>
+          </div>
+        </div>
         <label class="switch">
           <input id="ratioInput" type="checkbox" checked>
           <span>Lock image ratio</span>
@@ -660,22 +897,31 @@
         </label>
       </div>
 
+      <div id="progressWrap" class="progress-wrap">
+        <div class="progress-track"><div id="progressFill" class="progress-fill"></div></div>
+        <span id="progressText" class="progress-text"></span>
+      </div>
+
       <div class="actions">
-        <button id="fitButton" title="Fit inside 128 by 96">
+        <button id="fitButton" title="Fit inside 128 by 96 (F)">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5"/><path d="M20 9V4h-5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/></svg>
           Fit
         </button>
-        <button id="convertButton" class="primary">
+        <button id="convertButton" class="primary" title="Convert (Ctrl+Enter)">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v4"/><path d="M12 17v4"/><path d="m4.9 4.9 2.8 2.8"/><path d="m16.3 16.3 2.8 2.8"/><path d="M3 12h4"/><path d="M17 12h4"/><path d="m4.9 19.1 2.8-2.8"/><path d="m16.3 7.7 2.8-2.8"/></svg>
           Convert
         </button>
-        <button id="copyButton" disabled>
+        <button id="copyButton" disabled title="Copy output (Ctrl+C)">
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           Copy
         </button>
-        <button id="downloadButton" class="warning" disabled>
+        <button id="downloadButton" class="warning" disabled title="Download (Ctrl+S)">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
           Download
+        </button>
+        <button id="resetButton" title="Clear source (Esc)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          Clear
         </button>
       </div>
 
@@ -683,7 +929,7 @@
         <div class="metric"><b id="metricSize">-</b><span>Image</span></div>
         <div class="metric"><b id="metricMode">32</b><span>Palette</span></div>
         <div class="metric"><b id="metricBytes">0 B</b><span>Output</span></div>
-        <div class="metric"><b id="metricRatio">-</b><span>RLE</span></div>
+        <div class="metric"><b id="metricRatio">-</b><span>Compression</span></div>
       </div>
     </div>
   </section>
@@ -696,16 +942,18 @@
     <div class="preview-grid">
       <div class="preview-pane">
         <div class="preview-title">Source</div>
-        <div class="canvas-stage">
+        <div id="sourceStage" class="canvas-stage">
           <canvas id="sourceCanvas" hidden></canvas>
           <div id="sourceEmpty" class="empty-canvas">No image</div>
+          <span id="sourceBadge" class="canvas-badge">-</span>
         </div>
       </div>
       <div class="preview-pane">
         <div class="preview-title">NFP</div>
-        <div class="canvas-stage">
+        <div id="resultStage" class="canvas-stage">
           <canvas id="resultCanvas" hidden></canvas>
           <div id="resultEmpty" class="empty-canvas">No output</div>
+          <span id="resultBadge" class="canvas-badge">-</span>
         </div>
       </div>
     </div>
@@ -1589,15 +1837,32 @@ const els = {
   dither: document.getElementById("ditherInput"),
   compact: document.getElementById("compactInput"),
   compactSwitch: document.getElementById("compactSwitch"),
+  compressionOptions: document.getElementById("compressionOptions"),
+  compressionLossless: document.getElementById("compressionLossless"),
+  compressionLossy: document.getElementById("compressionLossy"),
+  codecGroup: document.getElementById("codecGroup"),
+  codecAuto: document.getElementById("codecAuto"),
+  codecC2: document.getElementById("codecC2"),
+  codecC3: document.getElementById("codecC3"),
+  codecC4: document.getElementById("codecC4"),
+  codecC5: document.getElementById("codecC5"),
+  quality: document.getElementById("qualityInput"),
+  qualityValue: document.getElementById("qualityValue"),
+  qualityField: document.getElementById("qualityField"),
   ratio: document.getElementById("ratioInput"),
   fit: document.getElementById("fitButton"),
   convert: document.getElementById("convertButton"),
   copy: document.getElementById("copyButton"),
   download: document.getElementById("downloadButton"),
+  reset: document.getElementById("resetButton"),
   sourceCanvas: document.getElementById("sourceCanvas"),
   resultCanvas: document.getElementById("resultCanvas"),
   sourceEmpty: document.getElementById("sourceEmpty"),
   resultEmpty: document.getElementById("resultEmpty"),
+  sourceStage: document.getElementById("sourceStage"),
+  resultStage: document.getElementById("resultStage"),
+  sourceBadge: document.getElementById("sourceBadge"),
+  resultBadge: document.getElementById("resultBadge"),
   output: document.getElementById("outputText"),
   outputName: document.getElementById("outputName"),
   previewNote: document.getElementById("previewNote"),
@@ -1606,7 +1871,12 @@ const els = {
   metricSize: document.getElementById("metricSize"),
   metricMode: document.getElementById("metricMode"),
   metricBytes: document.getElementById("metricBytes"),
-  metricRatio: document.getElementById("metricRatio")
+  metricRatio: document.getElementById("metricRatio"),
+  progressWrap: document.getElementById("progressWrap"),
+  progressFill: document.getElementById("progressFill"),
+  progressText: document.getElementById("progressText"),
+  dragOverlay: document.getElementById("dragOverlay"),
+  toast: document.getElementById("toast")
 };
 
 let sourceImage = null;
@@ -1625,6 +1895,84 @@ function setStatus(text, tone) {
   els.status.textContent = text;
   els.status.classList.toggle("good", tone === "good");
   els.status.classList.toggle("bad", tone === "bad");
+}
+
+let toastTimer = 0;
+function showToast(text, tone) {
+  els.toast.textContent = text;
+  els.toast.className = "toast" + (tone ? " " + tone : "");
+  requestAnimationFrame(() => els.toast.classList.add("show"));
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => els.toast.classList.remove("show"), 2500);
+}
+
+function setProgress(visible, percent, text) {
+  els.progressWrap.classList.toggle("active", visible);
+  if (visible) {
+    els.progressFill.style.width = Math.max(0, Math.min(100, percent || 0)) + "%";
+    els.progressText.textContent = text || "";
+  }
+}
+
+function setCanvasVisible(canvas, visible) {
+  canvas.classList.toggle("visible", visible);
+}
+
+function updateCanvasBadge(badge, width, height) {
+  badge.textContent = width + " × " + height;
+}
+
+const STORAGE_KEY = "ccos_nfp_converter_v1";
+function saveSettings() {
+  try {
+    const format = document.querySelector("input[name='format']:checked");
+    const compressionMode = document.querySelector("input[name='compressionMode']:checked");
+    const codec = document.querySelector("input[name='codec']:checked");
+    const data = {
+      width: els.width.value,
+      height: els.height.value,
+      format: format ? format.value : "nfp32",
+      dither: els.dither.checked,
+      compact: els.compact.checked,
+      compressionMode: compressionMode ? compressionMode.value : "lossless",
+      codec: codec ? codec.value : "auto",
+      quality: els.quality.value,
+      ratio: els.ratio.checked,
+      fps: els.fps.value,
+      loop: els.loop.value,
+      duration: els.duration.value
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch (_) {}
+}
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (data.width) els.width.value = data.width;
+    if (data.height) els.height.value = data.height;
+    if (data.fps) els.fps.value = data.fps;
+    if (data.loop) els.loop.value = data.loop;
+    if (data.duration != null) els.duration.value = data.duration;
+    if (data.dither != null) els.dither.checked = !!data.dither;
+    if (data.compact != null) els.compact.checked = !!data.compact;
+    if (data.ratio != null) els.ratio.checked = !!data.ratio;
+    if (data.quality) els.quality.value = data.quality;
+    if (data.format) {
+      const input = document.querySelector("input[name='format'][value='" + data.format + "']");
+      if (input) input.checked = true;
+    }
+    if (data.compressionMode) {
+      const input = document.querySelector("input[name='compressionMode'][value='" + data.compressionMode + "']");
+      if (input) input.checked = true;
+    }
+    if (data.codec) {
+      const input = document.querySelector("input[name='codec'][value='" + data.codec + "']");
+      if (input) input.checked = true;
+    }
+  } catch (_) {}
 }
 
 function selectedFormat() {
@@ -1728,6 +2076,99 @@ function rowsEqual(a, offsetA, b, offsetB, width) {
     if (a[offsetA + x] !== b[offsetB + x]) return false;
   }
   return true;
+}
+
+function selectedCompressionMode() {
+  const picked = document.querySelector("input[name='compressionMode']:checked");
+  return picked ? picked.value : "lossless";
+}
+
+function selectedCodec() {
+  const picked = document.querySelector("input[name='codec']:checked");
+  return picked ? picked.value : "auto";
+}
+
+function detectCodec(text) {
+  if (!text) return "";
+  const first = text.split("\n")[0] || "";
+  if (first.endsWith(" C5")) return "C5";
+  if (first.endsWith(" C4")) return "C4";
+  if (first.endsWith(" C3")) return "C3";
+  if (first.endsWith(" C2")) return "C2";
+  return "Legacy";
+}
+
+function compressionQuality() {
+  const value = Number(els.quality.value);
+  if (!Number.isFinite(value)) return 82;
+  return Math.max(35, Math.min(100, Math.round(value)));
+}
+
+function lossyActive(format) {
+  return !!(format.compressed && els.compact.checked && selectedCompressionMode() === "lossy");
+}
+
+function paletteDistanceSq(a, b, mode) {
+  if (a === b) return 0;
+  const palette = paletteFor(mode);
+  const ca = palette[a] || palette[0];
+  const cb = palette[b] || palette[0];
+  const dr = ca[0] - cb[0];
+  const dg = ca[1] - cb[1];
+  const db = ca[2] - cb[2];
+  return dr * dr + dg * dg + db * db;
+}
+
+function lossyThresholdForQuality(quality, mode) {
+  if (quality >= 100) return 0;
+  const softness = (100 - quality) / 100;
+  const channelDelta = (mode === 256 ? 350 : 250) * softness;
+  return channelDelta * channelDelta * 3;
+}
+
+function closeEnoughIndex(a, b, threshold, mode) {
+  return a === b || paletteDistanceSq(a, b, mode) <= threshold;
+}
+
+function applyLossyCompression(indices, width, height, mode, previousFrame, quality) {
+  const threshold = lossyThresholdForQuality(quality, mode);
+  if (threshold <= 0) return { indices, changed: 0 };
+
+  const out = new Uint16Array(indices);
+  const verticalThreshold = threshold * 0.7;
+  const horizontalThreshold = threshold * 0.4;
+  const total = width * height;
+  let changed = 0;
+
+  for (let i = 0; i < total; i++) {
+    const value = indices[i];
+    if (previousFrame && closeEnoughIndex(value, previousFrame[i], threshold, mode)) {
+      if (out[i] !== previousFrame[i]) { out[i] = previousFrame[i]; changed++; }
+      continue;
+    }
+    if (i >= width && closeEnoughIndex(value, out[i - width], verticalThreshold, mode)) {
+      if (out[i] !== out[i - width]) { out[i] = out[i - width]; changed++; }
+      continue;
+    }
+    if (i % width !== 0 && closeEnoughIndex(value, out[i - 1], horizontalThreshold, mode)) {
+      if (out[i] !== out[i - 1]) { out[i] = out[i - 1]; changed++; }
+    }
+  }
+
+  return { indices: out, changed };
+}
+
+function previewFromIndices(indices, width, height, mode) {
+  const palette = paletteFor(mode);
+  const preview = new ImageData(width, height);
+  for (let i = 0, p = 0; i < indices.length; i++, p += 4) {
+    const color = palette[indices[i]] || palette[0];
+    preview.data[p] = color[0];
+    preview.data[p + 1] = color[1];
+    preview.data[p + 2] = color[2];
+    preview.data[p + 3] = 255;
+  }
+  return preview;
 }
 
 function quantizeNearest(imageData, width, height, mode) {
@@ -1868,48 +2309,233 @@ function countRunLinear(indices, offset, total, limit) {
 
 function encodeC3Bytes(indices, width, height, previousFrame) {
   const total = width * height;
+  const cost = new Uint32Array(total + 1);
+  const choiceOp = new Uint8Array(total);
+  const choiceLen = new Uint8Array(total);
+  const INF = 0x3fffffff;
+  const standardLens = [1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 28, 32, 40, 48, 56, 64];
+
+  function candidateLens(maxLen, allowOne) {
+    if (!allowOne && maxLen < 2) return [];
+    const out = [];
+    for (const len of standardLens) {
+      if (len > maxLen) break;
+      if (allowOne || len > 1) out.push(len);
+    }
+    if (maxLen > 0 && out[out.length - 1] !== maxLen) out.push(maxLen);
+    return out;
+  }
+
+  cost.fill(INF);
+  cost[total] = 0;
+
+  for (let pos = total - 1; pos >= 0; pos--) {
+    let bestCost = INF;
+    let bestOp = 3;
+    let bestLen = 1;
+
+    const maxRaw = Math.min(64, total - pos);
+    for (const len of candidateLens(maxRaw, true)) {
+      const next = pos + len;
+      const value = 1 + len + cost[next];
+      if (value < bestCost) {
+        bestCost = value;
+        bestOp = 3;
+        bestLen = len;
+      }
+    }
+
+    const copyLen = previousFrame ? countSameLinear(indices, pos, previousFrame, pos, maxRaw) : 0;
+    for (const len of candidateLens(copyLen, true)) {
+      const value = 1 + cost[pos + len];
+      if (value < bestCost) {
+        bestCost = value;
+        bestOp = 0;
+        bestLen = len;
+      }
+    }
+
+    let upLen = 0;
+    if (pos >= width) {
+      upLen = countSameLinear(indices, pos, indices, pos - width, Math.min(64, total - pos));
+    }
+    for (const len of candidateLens(upLen, true)) {
+      const value = 1 + cost[pos + len];
+      if (value < bestCost) {
+        bestCost = value;
+        bestOp = 1;
+        bestLen = len;
+      }
+    }
+
+    const runLen = countRunLinear(indices, pos, total, 64);
+    for (const len of candidateLens(runLen, false)) {
+      const value = 2 + cost[pos + len];
+      if (value < bestCost) {
+        bestCost = value;
+        bestOp = 2;
+        bestLen = len;
+      }
+    }
+
+    cost[pos] = bestCost;
+    choiceOp[pos] = bestOp;
+    choiceLen[pos] = bestLen;
+  }
+
   const bytes = [];
   let pos = 0;
 
-  function copyLengthAt(offset) {
-    return previousFrame ? countSameLinear(indices, offset, previousFrame, offset, Math.min(64, total - offset)) : 0;
+  while (pos < total) {
+    const op = choiceOp[pos];
+    const len = choiceLen[pos] || 1;
+    bytes.push(op * 64 + len - 1);
+    if (op === 2) {
+      bytes.push(indices[pos] & 255);
+    } else if (op === 3) {
+      for (let i = pos; i < pos + len; i++) bytes.push(indices[i] & 255);
+    }
+    pos += len;
   }
 
-  function upLengthAt(offset) {
-    if (offset < width) return 0;
-    const rowRemaining = width - (offset % width);
-    return countSameLinear(indices, offset, indices, offset - width, Math.min(64, rowRemaining, total - offset));
+  return new Uint8Array(bytes);
+}
+
+function encodeC4Bytes(indices, width, height, previousFrame) {
+  const total = width * height;
+  const cost = new Uint32Array(total + 1);
+  const choiceOp = new Uint8Array(total);
+  const choiceLen = new Uint16Array(total);
+  const INF = 0x3fffffff;
+  const normalLens = [1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 28, 32, 40, 48, 56];
+  const extendedLens = [64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384, 448, 512, 640, 768, 896, 1024, 1280, 1536, 2048, 2560, 3072, 4096, 5120, 6144, 8192, 10240, 12288, 16384];
+
+  function candidateLens(maxLen, allowOne, isExtended) {
+    if (!allowOne && maxLen < 2) return [];
+    const out = [];
+    const lens = isExtended ? extendedLens : normalLens;
+    for (const len of lens) {
+      if (len > maxLen) break;
+      if (allowOne || len > 1) out.push(len);
+    }
+    if (maxLen > 0 && out[out.length - 1] !== maxLen) out.push(maxLen);
+    return out;
   }
 
-  function runLengthAt(offset) {
-    return countRunLinear(indices, offset, total, 64);
+  cost.fill(INF);
+  cost[total] = 0;
+
+  for (let pos = total - 1; pos >= 0; pos--) {
+    let bestCost = INF;
+    let bestOp = 3;
+    let bestLen = 1;
+
+    const maxRaw = Math.min(16384, total - pos);
+    for (const len of candidateLens(Math.min(maxRaw, 63), true, false)) {
+      const next = pos + len;
+      const value = 1 + len + cost[next];
+      if (value < bestCost) {
+        bestCost = value;
+        bestOp = 3;
+        bestLen = len;
+      }
+    }
+    for (const len of candidateLens(maxRaw, true, true)) {
+      if (len < 64) continue;
+      const next = pos + len;
+      const value = 3 + len + cost[next];
+      if (value < bestCost) {
+        bestCost = value;
+        bestOp = 3;
+        bestLen = len;
+      }
+    }
+
+    const copyLen = previousFrame ? countSameLinear(indices, pos, previousFrame, pos, maxRaw) : 0;
+    for (const len of candidateLens(Math.min(copyLen, 63), true, false)) {
+      const value = 1 + cost[pos + len];
+      if (value < bestCost) {
+        bestCost = value;
+        bestOp = 0;
+        bestLen = len;
+      }
+    }
+    for (const len of candidateLens(copyLen, true, true)) {
+      if (len < 64) continue;
+      const value = 3 + cost[pos + len];
+      if (value < bestCost) {
+        bestCost = value;
+        bestOp = 0;
+        bestLen = len;
+      }
+    }
+
+    let upLen = 0;
+    if (pos >= width) {
+      upLen = countSameLinear(indices, pos, indices, pos - width, Math.min(16384, total - pos));
+    }
+    for (const len of candidateLens(Math.min(upLen, 63), true, false)) {
+      const value = 1 + cost[pos + len];
+      if (value < bestCost) {
+        bestCost = value;
+        bestOp = 1;
+        bestLen = len;
+      }
+    }
+    for (const len of candidateLens(upLen, true, true)) {
+      if (len < 64) continue;
+      const value = 3 + cost[pos + len];
+      if (value < bestCost) {
+        bestCost = value;
+        bestOp = 1;
+        bestLen = len;
+      }
+    }
+
+    const runLen = countRunLinear(indices, pos, total, 16384);
+    for (const len of candidateLens(Math.min(runLen, 63), false, false)) {
+      const value = 2 + cost[pos + len];
+      if (value < bestCost) {
+        bestCost = value;
+        bestOp = 2;
+        bestLen = len;
+      }
+    }
+    for (const len of candidateLens(runLen, false, true)) {
+      if (len < 64) continue;
+      const value = 4 + cost[pos + len];
+      if (value < bestCost) {
+        bestCost = value;
+        bestOp = 2;
+        bestLen = len;
+      }
+    }
+
+    cost[pos] = bestCost;
+    choiceOp[pos] = bestOp;
+    choiceLen[pos] = bestLen;
   }
+
+  const bytes = [];
+  let pos = 0;
 
   while (pos < total) {
-    const copyLen = copyLengthAt(pos);
-    const upLen = upLengthAt(pos);
-    const runLen = runLengthAt(pos);
-
-    if (copyLen >= 4 && copyLen >= upLen && copyLen >= runLen) {
-      bytes.push(copyLen - 1);
-      pos += copyLen;
-    } else if (upLen >= 4 && upLen >= runLen) {
-      bytes.push(64 + upLen - 1);
-      pos += upLen;
-    } else if (runLen >= 3) {
-      bytes.push(128 + runLen - 1, indices[pos] & 255);
-      pos += runLen;
+    const op = choiceOp[pos];
+    const len = choiceLen[pos] || 1;
+    if (len <= 63) {
+      bytes.push(op * 64 + len - 1);
     } else {
-      const start = pos;
-      pos++;
-      while (pos < total && pos - start < 64) {
-        if (copyLengthAt(pos) >= 4 || upLengthAt(pos) >= 4 || runLengthAt(pos) >= 3) break;
-        pos++;
-      }
-      const len = pos - start;
-      bytes.push(192 + len - 1);
-      for (let i = start; i < pos; i++) bytes.push(indices[i] & 255);
+      const extLen = len - 1;
+      bytes.push(0xFF);
+      bytes.push(op * 64 + Math.floor(extLen / 256));
+      bytes.push(extLen % 256);
     }
+    if (op === 2) {
+      bytes.push(indices[pos] & 255);
+    } else if (op === 3) {
+      for (let i = pos; i < pos + len; i++) bytes.push(indices[i] & 255);
+    }
+    pos += len;
   }
 
   return new Uint8Array(bytes);
@@ -1929,6 +2555,122 @@ function buildC3NfpaOutput(frameIndices, width, height, format, delayMs, loop) {
     previousFrame = indices;
   }
   return lines.join("\n");
+}
+
+function buildC4NfpcOutput(indices, width, height, format) {
+  const payload = bytesToBase64(encodeC4Bytes(indices, width, height, null));
+  return ["!NFPC " + width + " " + height + " " + format.mode + " C4", ...splitBase64Lines(payload)].join("\n");
+}
+
+function buildC4NfpaOutput(frameIndices, width, height, format, delayMs, loop) {
+  const lines = ["!NFPA " + width + " " + height + " " + format.mode + " " + delayMs + " " + loop + " " + frameIndices.length + " C4"];
+  let previousFrame = null;
+  for (const indices of frameIndices) {
+    const payload = bytesToBase64(encodeC4Bytes(indices, width, height, previousFrame));
+    lines.push(...splitBase64Lines(payload));
+    previousFrame = indices;
+  }
+  return lines.join("\n");
+}
+
+function writeVarUint(out, value) {
+  value = Math.max(0, Math.floor(value));
+  while (value >= 128) {
+    out.push((value & 127) | 128);
+    value = Math.floor(value / 128);
+  }
+  out.push(value);
+}
+
+function appendHashPosition(map, input, pos) {
+  if (pos + 2 >= input.length) return;
+  const key = (input[pos] << 16) | (input[pos + 1] << 8) | input[pos + 2];
+  let list = map.get(key);
+  if (!list) {
+    list = [];
+    map.set(key, list);
+  }
+  list.push(pos);
+  if (list.length > 96) list.splice(0, list.length - 96);
+}
+
+function lzssCompress(input) {
+  const out = [];
+  const map = new Map();
+  const maxDistance = 4096;
+  const maxLength = 18;
+  let pos = 0;
+
+  while (pos < input.length) {
+    const flagIndex = out.length;
+    let flags = 0;
+    out.push(0);
+
+    for (let bit = 0; bit < 8 && pos < input.length; bit++) {
+      let bestLen = 0;
+      let bestDist = 0;
+
+      if (pos + 2 < input.length) {
+        const key = (input[pos] << 16) | (input[pos + 1] << 8) | input[pos + 2];
+        const list = map.get(key) || [];
+        const start = Math.max(0, list.length - 72);
+        const max = Math.min(maxLength, input.length - pos);
+        for (let i = list.length - 1; i >= start; i--) {
+          const ref = list[i];
+          const dist = pos - ref;
+          if (dist <= 0 || dist > maxDistance) continue;
+          let len = 0;
+          while (len < max && input[ref + len] === input[pos + len]) len++;
+          if (len >= 3 && len > bestLen) {
+            bestLen = len;
+            bestDist = dist;
+            if (len === maxLength) break;
+          }
+        }
+      }
+
+      if (bestLen >= 3) {
+        flags |= (1 << bit);
+        const dist = bestDist - 1;
+        out.push(((bestLen - 3) << 4) | ((dist >> 8) & 15), dist & 255);
+        for (let i = 0; i < bestLen; i++) appendHashPosition(map, input, pos + i);
+        pos += bestLen;
+      } else {
+        out.push(input[pos]);
+        appendHashPosition(map, input, pos);
+        pos++;
+      }
+    }
+
+    out[flagIndex] = flags;
+  }
+
+  return new Uint8Array(out);
+}
+
+function buildC5Payload(frameIndices, width, height) {
+  const stream = [];
+  let previousFrame = null;
+  for (const indices of frameIndices) {
+    const frameBytes = encodeC3Bytes(indices, width, height, previousFrame);
+    writeVarUint(stream, frameBytes.length);
+    for (let i = 0; i < frameBytes.length; i++) stream.push(frameBytes[i]);
+    previousFrame = indices;
+  }
+  return bytesToBase64(lzssCompress(new Uint8Array(stream)));
+}
+
+function buildC5NfpcOutput(indices, width, height, format) {
+  const payload = buildC5Payload([indices], width, height);
+  return ["!NFPC " + width + " " + height + " " + format.mode + " C5", ...splitBase64Lines(payload)].join("\n");
+}
+
+function buildC5NfpaOutput(frameIndices, width, height, format, delayMs, loop) {
+  const payload = buildC5Payload(frameIndices, width, height);
+  return [
+    "!NFPA " + width + " " + height + " " + format.mode + " " + delayMs + " " + loop + " " + frameIndices.length + " C5",
+    ...splitBase64Lines(payload)
+  ].join("\n");
 }
 
 function shortestOutput(candidates) {
@@ -1952,13 +2694,26 @@ function buildOutput(indices, width, height, format) {
   const legacyOutput = legacyLines.join("\n");
   if (!format.compressed || !els.compact.checked) return legacyOutput;
 
+  const codec = selectedCodec();
+  if (codec === "c2") {
+    return [
+      "!NFPC " + width + " " + height + " " + mode + " C2",
+      ...buildCompactFrameLines(indices, width, height, mode, null)
+    ].join("\n");
+  }
+  if (codec === "c3") return buildC3NfpcOutput(indices, width, height, format);
+  if (codec === "c4") return buildC4NfpcOutput(indices, width, height, format);
+  if (codec === "c5") return buildC5NfpcOutput(indices, width, height, format);
+
   const c2Output = [
     "!NFPC " + width + " " + height + " " + mode + " C2",
     ...buildCompactFrameLines(indices, width, height, mode, null)
   ].join("\n");
   const c3Output = buildC3NfpcOutput(indices, width, height, format);
+  const c4Output = buildC4NfpcOutput(indices, width, height, format);
+  const c5Output = buildC5NfpcOutput(indices, width, height, format);
 
-  return shortestOutput([legacyOutput, c2Output, c3Output]);
+  return shortestOutput([legacyOutput, c2Output, c3Output, c4Output, c5Output]);
 }
 
 function buildNfpaOutput(frameIndices, width, height, format, delayMs, loop) {
@@ -1969,6 +2724,20 @@ function buildNfpaOutput(frameIndices, width, height, format, delayMs, loop) {
   const legacyOutput = legacyLines.join("\n");
   if (!els.compact.checked) return legacyOutput;
 
+  const codec = selectedCodec();
+  if (codec === "c2") {
+    const c2Lines = ["!NFPA " + width + " " + height + " " + format.mode + " " + delayMs + " " + loop + " " + frameIndices.length + " C2"];
+    let previousFrame = null;
+    for (const indices of frameIndices) {
+      c2Lines.push(...buildCompactFrameLines(indices, width, height, format.mode, previousFrame));
+      previousFrame = indices;
+    }
+    return c2Lines.join("\n");
+  }
+  if (codec === "c3") return buildC3NfpaOutput(frameIndices, width, height, format, delayMs, loop);
+  if (codec === "c4") return buildC4NfpaOutput(frameIndices, width, height, format, delayMs, loop);
+  if (codec === "c5") return buildC5NfpaOutput(frameIndices, width, height, format, delayMs, loop);
+
   const c2Lines = ["!NFPA " + width + " " + height + " " + format.mode + " " + delayMs + " " + loop + " " + frameIndices.length + " C2"];
   let previousFrame = null;
   for (const indices of frameIndices) {
@@ -1977,8 +2746,10 @@ function buildNfpaOutput(frameIndices, width, height, format, delayMs, loop) {
   }
   const c2Output = c2Lines.join("\n");
   const c3Output = buildC3NfpaOutput(frameIndices, width, height, format, delayMs, loop);
+  const c4Output = buildC4NfpaOutput(frameIndices, width, height, format, delayMs, loop);
+  const c5Output = buildC5NfpaOutput(frameIndices, width, height, format, delayMs, loop);
 
-  return shortestOutput([legacyOutput, c2Output, c3Output]);
+  return shortestOutput([legacyOutput, c2Output, c3Output, c4Output, c5Output]);
 }
 
 function drawSourcePreview(img, width, height) {
@@ -1992,6 +2763,9 @@ function drawSourcePreview(img, width, height) {
   setCanvasDisplaySize(els.sourceCanvas, width, height);
   els.sourceCanvas.hidden = false;
   els.sourceEmpty.hidden = true;
+  els.sourceStage.classList.add("has-canvas");
+  updateCanvasBadge(els.sourceBadge, width, height);
+  requestAnimationFrame(() => setCanvasVisible(els.sourceCanvas, true));
   return ctx.getImageData(0, 0, width, height);
 }
 
@@ -2004,6 +2778,9 @@ function drawResultPreview(imageData, width, height) {
   setCanvasDisplaySize(els.resultCanvas, width, height);
   els.resultCanvas.hidden = false;
   els.resultEmpty.hidden = true;
+  els.resultStage.classList.add("has-canvas");
+  updateCanvasBadge(els.resultBadge, width, height);
+  requestAnimationFrame(() => setCanvasVisible(els.resultCanvas, true));
 }
 
 function stopResultAnimation() {
@@ -2023,6 +2800,9 @@ function startResultAnimation(frames, width, height, delayMs) {
   setCanvasDisplaySize(els.resultCanvas, width, height);
   els.resultCanvas.hidden = false;
   els.resultEmpty.hidden = true;
+  els.resultStage.classList.add("has-canvas");
+  updateCanvasBadge(els.resultBadge, width, height);
+  setCanvasVisible(els.resultCanvas, true);
 
   let frame = 0;
   const draw = () => {
@@ -2034,9 +2814,8 @@ function startResultAnimation(frames, width, height, delayMs) {
 }
 
 function setCanvasDisplaySize(canvas, width, height) {
-  const longest = Math.max(width, height);
-  const scale = Math.max(1, Math.floor(360 / Math.max(1, longest)));
-  canvas.style.width = Math.max(width, width * scale) + "px";
+  canvas.style.width = "100%";
+  canvas.style.height = "auto";
 }
 
 function bytesOf(text) {
@@ -2113,6 +2892,8 @@ function clearGeneratedResult() {
   els.metricRatio.textContent = "-";
   els.resultCanvas.hidden = true;
   els.resultEmpty.hidden = false;
+  els.resultStage.classList.remove("has-canvas");
+  setCanvasVisible(els.resultCanvas, false);
 }
 
 function invalidateOutput(message) {
@@ -2201,11 +2982,24 @@ function renderSwatches() {
   const mode = format.mode;
   const palette = paletteFor(mode);
   const supportsCompression = format.compressed || format.animated;
+  const supportsLossy = supportsCompression && els.compact.checked;
   els.paletteName.textContent = mode + "-color palette";
   els.swatches.classList.toggle("mode-256", mode === 256);
   els.animationOptions.classList.toggle("hidden", !format.animated);
   els.compact.disabled = !supportsCompression;
   els.compactSwitch.classList.toggle("disabled", !supportsCompression);
+  if (!supportsCompression) els.compressionLossless.checked = true;
+  if (!supportsCompression) els.codecAuto.checked = true;
+  if (!supportsLossy && els.compressionLossy.checked) els.compressionLossless.checked = true;
+  const lossy = lossyActive(format);
+  els.compressionOptions.classList.toggle("disabled", !supportsCompression);
+  els.codecGroup.classList.toggle("disabled", !supportsCompression);
+  document.querySelectorAll("input[name='codec']").forEach(input => { input.disabled = !supportsCompression; });
+  els.compressionLossless.disabled = !supportsCompression;
+  els.compressionLossy.disabled = !supportsLossy;
+  els.quality.disabled = !lossy;
+  els.qualityField.classList.toggle("disabled", !lossy);
+  els.qualityValue.textContent = !supportsCompression ? "Not supported" : (lossy ? ("Q " + compressionQuality()) : "Lossless");
   els.swatches.innerHTML = "";
   for (let i = 0; i < palette.length; i++) {
     const swatch = document.createElement("span");
@@ -2489,6 +3283,7 @@ async function extractGifFrames(width, height, fps, maxSeconds) {
   targetCtx.imageSmoothingQuality = "high";
 
   const maxFrames = maxSeconds > 0 ? Math.max(1, Math.floor(maxSeconds * fps)) : Infinity;
+  const total = Math.min(reader.numFrames(), maxFrames);
   const frames = [];
   for (let i = 0; i < reader.numFrames() && frames.length < maxFrames; i++) {
     reader.decodeAndBlitFrameRGBA(i, srcData.data);
@@ -2496,7 +3291,9 @@ async function extractGifFrames(width, height, fps, maxSeconds) {
     targetCtx.clearRect(0, 0, width, height);
     targetCtx.drawImage(srcCanvas, 0, 0, width, height);
     frames.push(targetCtx.getImageData(0, 0, width, height));
-    if (i % 10 === 0) {
+    if (i % 3 === 0) {
+      const pct = Math.round((frames.length / total) * 100);
+      setProgress(true, pct, "GIF frame " + frames.length + "/" + total);
       setStatus("Extracting GIF frame " + (i + 1) + "/" + reader.numFrames() + "...");
       await waitForFrame();
     }
@@ -2516,11 +3313,14 @@ async function extractVideoFrames(width, height, fps, maxSeconds) {
     const time = Math.min(i * interval, Math.max(0, limit - 0.001));
     await seekVideo(sourceMedia, time);
     frames.push(drawMediaToImageData(sourceMedia, width, height));
-    if (i % 5 === 0) {
+    if (i % 2 === 0) {
+      const pct = Math.round((i / frameCount) * 100);
+      setProgress(true, pct, "Video frame " + (i + 1) + "/" + frameCount);
       setStatus("Extracting video frame " + (i + 1) + "/" + frameCount + "...");
       await waitForFrame();
     }
   }
+  setProgress(false);
   await seekVideo(sourceMedia, 0);
   drawSourcePreview(sourceMedia, width, height);
   return frames;
@@ -2541,6 +3341,7 @@ function quantizeFrame(imageData, width, height, mode) {
 async function loadSelectedFile(file) {
   if (!file) return;
   try {
+    setProgress(true, 10, "Loading source...");
     setStatus("Loading source...");
     setFileSummary(file.name, "Loading " + formatBytes(file.size) + "...");
     sourceImage = null;
@@ -2552,6 +3353,8 @@ async function loadSelectedFile(file) {
     clearGeneratedResult();
     els.sourceCanvas.hidden = true;
     els.sourceEmpty.hidden = false;
+    els.sourceStage.classList.remove("has-canvas");
+    setCanvasVisible(els.sourceCanvas, false);
     els.previewNote.textContent = "";
     if (sourceKind === "video") {
       sourceMedia = await loadVideoFromFile(file);
@@ -2580,15 +3383,20 @@ async function loadSelectedFile(file) {
       (detectedDuration > 0 ? "  " + detectedDuration.toFixed(2) + "s" : "");
     setFileSummary(file.name, describeLoadedSource(file, detectedDuration));
     updateOutputName(selectedFormat());
+    setProgress(false);
     setStatus("Loaded " + file.name, "good");
+    showToast("Loaded " + file.name, "good");
+    saveSettings();
   } catch (error) {
     sourceImage = null;
     sourceMedia = null;
     cleanupSourceVideoElement();
     cleanupSourceObjectUrl();
     updateDimensionLimits();
+    setProgress(false);
     setFileSummary(file.name, (error.message || "Could not load source") + " | " + formatBytes(file.size));
     setStatus(error.message, "bad");
+    showToast(error.message, "bad");
   }
 }
 
@@ -2599,6 +3407,7 @@ async function handleFileChange() {
 async function convert() {
   if (!sourceMedia) {
     setStatus("Choose a source first", "bad");
+    showToast("Choose a source first", "bad");
     return;
   }
 
@@ -2606,49 +3415,122 @@ async function convert() {
 
   const format = selectedFormat();
   setStatus("Converting...");
+  setProgress(true, 0, "Preparing...");
 
   await new Promise(resolve => requestAnimationFrame(resolve));
 
   try {
+    const useLossy = lossyActive(format);
+    const quality = compressionQuality();
     if (format.animated) {
       const fps = Math.round(clampNumber(els.fps.value, 1, 60, 10));
       const loop = Math.round(clampNumber(els.loop.value, 0, 65535, 0));
       const maxSeconds = clampNumber(els.duration.value, 0, 3600, 0);
       const delayMs = Math.max(1, Math.floor(1000 / fps));
+      setProgress(true, 5, "Extracting frames...");
       const sourceFrames = await extractSourceFrames(width, height, fps, maxSeconds);
       if (!sourceFrames.length) throw new Error("No frames extracted");
 
-      const frameIndices = [];
-      const previewFrames = [];
+      const losslessFrameIndices = [];
+      const losslessPreviewFrames = [];
+      const lossyFrameIndices = [];
+      const lossyPreviewFrames = [];
+      let previousLossyFrame = null;
+      let totalChanged = 0;
+
       for (let i = 0; i < sourceFrames.length; i++) {
         const quantized = quantizeFrame(sourceFrames[i], width, height, format.mode);
-        frameIndices.push(quantized.indices);
-        previewFrames.push(quantized.preview);
-        if (i % 5 === 0) {
-          setStatus("Encoding frame " + (i + 1) + "/" + sourceFrames.length + "...");
+        losslessFrameIndices.push(quantized.indices);
+        losslessPreviewFrames.push(quantized.preview);
+
+        if (useLossy) {
+          const lossyResult = applyLossyCompression(quantized.indices, width, height, format.mode, previousLossyFrame, quality);
+          lossyFrameIndices.push(lossyResult.indices);
+          lossyPreviewFrames.push(previewFromIndices(lossyResult.indices, width, height, format.mode));
+          previousLossyFrame = lossyResult.indices;
+          totalChanged += lossyResult.changed;
+        }
+
+        if (i % 3 === 0) {
+          const pct = Math.round(5 + (i / sourceFrames.length) * 90);
+          setProgress(true, pct, "Encoding frame " + (i + 1) + "/" + sourceFrames.length);
+          setStatus("Encoding frame " + (i + 1) + "/" + sourceFrames.length + (useLossy ? " lossy Q" + quality : "") + "...");
           await waitForFrame();
         }
       }
 
-      outputText = buildNfpaOutput(frameIndices, width, height, format, delayMs, loop);
+      const losslessOutput = buildNfpaOutput(losslessFrameIndices, width, height, format, delayMs, loop);
+      let outputText, previewFrames, frameIndices, actuallyUsedLossy;
+
+      if (useLossy) {
+        const lossyOutput = buildNfpaOutput(lossyFrameIndices, width, height, format, delayMs, loop);
+        if (bytesOf(lossyOutput) < bytesOf(losslessOutput)) {
+          outputText = lossyOutput;
+          previewFrames = lossyPreviewFrames;
+          frameIndices = lossyFrameIndices;
+          actuallyUsedLossy = true;
+        } else {
+          outputText = losslessOutput;
+          previewFrames = losslessPreviewFrames;
+          frameIndices = losslessFrameIndices;
+          actuallyUsedLossy = false;
+        }
+      } else {
+        outputText = losslessOutput;
+        previewFrames = losslessPreviewFrames;
+        frameIndices = losslessFrameIndices;
+        actuallyUsedLossy = false;
+      }
+
       els.output.value = outputText;
       startResultAnimation(previewFrames, width, height, delayMs);
       updateMetrics(width, height, format.mode, outputText, format, frameIndices.length);
     } else {
       const source = await getStaticFrame(width, height);
       const quantized = quantizeFrame(source, width, height, format.mode);
-      outputText = buildOutput(quantized.indices, width, height, format);
+      const losslessOutput = buildOutput(quantized.indices, width, height, format);
+      let outputText, preview, actuallyUsedLossy;
+
+      if (useLossy) {
+        const lossyResult = applyLossyCompression(quantized.indices, width, height, format.mode, null, quality);
+        const lossyOutput = buildOutput(lossyResult.indices, width, height, format);
+        if (bytesOf(lossyOutput) < bytesOf(losslessOutput)) {
+          outputText = lossyOutput;
+          preview = previewFromIndices(lossyResult.indices, width, height, format.mode);
+          actuallyUsedLossy = true;
+        } else {
+          outputText = losslessOutput;
+          preview = quantized.preview;
+          actuallyUsedLossy = false;
+        }
+      } else {
+        outputText = losslessOutput;
+        preview = quantized.preview;
+        actuallyUsedLossy = false;
+      }
+
       els.output.value = outputText;
-      drawResultPreview(quantized.preview, width, height);
+      drawResultPreview(preview, width, height);
       updateMetrics(width, height, format.mode, outputText, format);
     }
 
     updateOutputName(format);
     els.copy.disabled = false;
     els.download.disabled = false;
-    setStatus("Converted " + outputFileName, "good");
+    setProgress(false);
+    const codecName = detectCodec(outputText);
+    const msg = "Converted " + outputFileName + (actuallyUsedLossy ? " lossy Q" + quality : "") + (codecName ? " " + codecName : "");
+    setStatus(msg, "good");
+    showToast(msg, "good");
+
+    updateOutputName(format);
+    els.copy.disabled = false;
+    els.download.disabled = false;
+    setProgress(false);
   } catch (error) {
+    setProgress(false);
     setStatus(error.message || "Conversion failed", "bad");
+    showToast(error.message || "Conversion failed", "bad");
   }
 }
 
@@ -2658,11 +3540,13 @@ async function copyOutput() {
   try {
     await navigator.clipboard.writeText(text);
     setStatus("Copied", "good");
+    showToast("Copied to clipboard", "good");
   } catch (_) {
     els.output.focus();
     els.output.select();
     const ok = document.execCommand("copy");
     setStatus(ok ? "Copied" : "Copy failed", ok ? "good" : "bad");
+    showToast(ok ? "Copied to clipboard" : "Copy failed", ok ? "good" : "bad");
   }
 }
 
@@ -2678,6 +3562,7 @@ function downloadOutput() {
   link.remove();
   setTimeout(() => URL.revokeObjectURL(link.href), 500);
   setStatus("Downloaded " + outputFileName, "good");
+  showToast("Downloaded " + outputFileName, "good");
 }
 
 function useDroppedFile(file) {
@@ -2688,6 +3573,27 @@ function useDroppedFile(file) {
     els.file.files = transfer.files;
   }
   loadSelectedFile(file);
+}
+
+function resetAll() {
+  sourceImage = null;
+  sourceMedia = null;
+  sourceFile = null;
+  sourceFileName = "";
+  sourceKind = "image";
+  outputText = "";
+  cleanupSourceVideoElement();
+  cleanupSourceObjectUrl();
+  clearGeneratedResult();
+  els.sourceCanvas.hidden = true;
+  els.sourceEmpty.hidden = false;
+  els.sourceStage.classList.remove("has-canvas");
+  setCanvasVisible(els.sourceCanvas, false);
+  els.previewNote.textContent = "";
+  setFileSummary("", "");
+  setStatus("Ready");
+  updateDimensionLimits();
+  normalizeDimensions();
 }
 
 els.filePick.addEventListener("click", () => els.file.click());
@@ -2704,6 +3610,24 @@ els.fileDrop.addEventListener("drop", event => {
   els.fileDrop.classList.remove("drag");
   useDroppedFile(event.dataTransfer.files[0]);
 });
+
+window.addEventListener("dragover", event => {
+  event.preventDefault();
+  els.dragOverlay.classList.add("active");
+});
+window.addEventListener("dragleave", event => {
+  if (!event.relatedTarget || event.relatedTarget === document.documentElement) {
+    els.dragOverlay.classList.remove("active");
+  }
+});
+window.addEventListener("drop", event => {
+  event.preventDefault();
+  els.dragOverlay.classList.remove("active");
+  if (event.dataTransfer.files && event.dataTransfer.files[0]) {
+    useDroppedFile(event.dataTransfer.files[0]);
+  }
+});
+
 els.fit.addEventListener("click", () => {
   fitSize(128, 96);
   if (sourceMedia) {
@@ -2714,6 +3638,37 @@ els.fit.addEventListener("click", () => {
 els.convert.addEventListener("click", convert);
 els.copy.addEventListener("click", copyOutput);
 els.download.addEventListener("click", downloadOutput);
+els.reset.addEventListener("click", resetAll);
+
+document.addEventListener("keydown", event => {
+  if (event.ctrlKey || event.metaKey) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      convert();
+    } else if (event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      downloadOutput();
+    } else if (event.key.toLowerCase() === "c") {
+      if (document.activeElement !== els.output) {
+        event.preventDefault();
+        copyOutput();
+      }
+    } else if (event.key.toLowerCase() === "o") {
+      event.preventDefault();
+      els.file.click();
+    }
+  }
+  if (event.key === "Escape") {
+    if (els.dragOverlay.classList.contains("active")) {
+      els.dragOverlay.classList.remove("active");
+    } else if (!sourceMedia) {
+      resetAll();
+    }
+  }
+  if (event.key.toLowerCase() === "f" && document.activeElement.tagName !== "INPUT" && document.activeElement.tagName !== "TEXTAREA") {
+    els.fit.click();
+  }
+});
 
 els.width.addEventListener("input", () => {
   lastChangedSize = "width";
@@ -2724,6 +3679,7 @@ els.width.addEventListener("input", () => {
   } else {
     normalizeDimensions();
   }
+  saveSettings();
 });
 els.height.addEventListener("input", () => {
   lastChangedSize = "height";
@@ -2734,6 +3690,7 @@ els.height.addEventListener("input", () => {
   } else {
     normalizeDimensions();
   }
+  saveSettings();
 });
 els.ratio.addEventListener("change", () => {
   syncRatio(lastChangedSize);
@@ -2741,17 +3698,19 @@ els.ratio.addEventListener("change", () => {
     refreshSourcePreviewFromInputs();
     invalidateOutput("Size changed; convert again");
   }
+  saveSettings();
 });
-els.dither.addEventListener("change", () => invalidateOutput("Dither changed; convert again"));
-els.compact.addEventListener("change", () => invalidateOutput("Compression changed; convert again"));
-els.fps.addEventListener("input", () => invalidateOutput("Animation settings changed; convert again"));
-els.loop.addEventListener("input", () => invalidateOutput("Animation settings changed; convert again"));
-els.duration.addEventListener("input", () => invalidateOutput("Animation settings changed; convert again"));
+els.dither.addEventListener("change", () => { invalidateOutput("Dither changed; convert again"); saveSettings(); });
+els.compact.addEventListener("change", () => { invalidateOutput("Compression changed; convert again"); saveSettings(); });
+els.fps.addEventListener("input", () => { invalidateOutput("Animation settings changed; convert again"); saveSettings(); });
+els.loop.addEventListener("input", () => { invalidateOutput("Animation settings changed; convert again"); saveSettings(); });
+els.duration.addEventListener("input", () => { invalidateOutput("Animation settings changed; convert again"); saveSettings(); });
 
 for (const input of document.querySelectorAll("input[name='format']")) {
   input.addEventListener("change", () => {
     renderSwatches();
     invalidateOutput("Format changed; convert again");
+    saveSettings();
   });
 }
 
@@ -2764,7 +3723,29 @@ els.output.addEventListener("input", () => {
 });
 
 updateDimensionLimits();
+loadSettings();
 renderSwatches();
+document.querySelectorAll("input[name='compressionMode']").forEach(input => {
+  input.addEventListener("change", () => {
+    renderSwatches();
+    clearGeneratedResult();
+    saveSettings();
+  });
+});
+
+els.quality.addEventListener("input", () => {
+  renderSwatches();
+  clearGeneratedResult();
+  saveSettings();
+});
+
+els.compact.addEventListener("change", () => {
+  renderSwatches();
+});
+
+document.querySelectorAll("input[name='codec']").forEach(input => {
+  input.addEventListener("change", () => { invalidateOutput("Codec changed; convert again"); saveSettings(); });
+});
 </script>
 </body>
 </html>
