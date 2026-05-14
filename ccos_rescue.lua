@@ -32,8 +32,16 @@ local function join(base, name)
     return base .. "/" .. name
 end
 
+local function isSkippedMount(path)
+    if path == "/rom" or path:sub(1, 5) == "/rom/" then return true end
+    local first = path:match("^/([^/]+)")
+    if first and first:match("^disk%d*$") then return true end
+    return false
+end
+
 local function scan(path, out)
     out = out or {}
+    if isSkippedMount(path) then return out, 0 end
     local okDir, isDir = pcall(fs.isDir, path)
     if not okDir then return out, 0 end
 
@@ -64,6 +72,25 @@ local function printSpace()
     print("Capacity: " .. fmt(cap))
     if tonumber(free) == 0 and tonumber(cap) == 0 then
         print("Capacity is 0. Check CC:Tweaked computer_space_limit.")
+    elseif tonumber(free) == 0 then
+        print("HDD reports 0 writable bytes.")
+    end
+end
+
+local function printRootMounts()
+    local okList, list = pcall(fs.list, "/")
+    if not okList or not list then return end
+    print("Root mounts/files:")
+    for _, name in ipairs(list) do
+        local path = "/" .. name
+        local okDrive, drive = pcall(fs.getDrive, path)
+        local okSize, size = pcall(fs.getSize, path)
+        local okRo, ro = pcall(fs.isReadOnly, path)
+        print(string.format("  %-14s %-6s %9s %s",
+            path,
+            okDrive and tostring(drive) or "?",
+            okSize and fmt(size) or "?",
+            okRo and (ro and "ro" or "rw") or "?"))
     end
 end
 
@@ -78,14 +105,37 @@ local function listLargest()
     print("Largest paths:")
     local shown = 0
     for _, it in ipairs(items) do
-        if it.path ~= "/rom" and it.path:sub(1, 5) ~= "/rom/" then
+        if it.path ~= "/" then
             shown = shown + 1
             local suffix = it.dir and "/" or ""
             print(string.format("%2d. %9s  %s%s", shown, fmt(it.size), it.path, suffix))
             if shown >= 18 then break end
         end
     end
-    if shown == 0 then print("(nothing outside /rom)") end
+    if shown == 0 then print("(no writable files outside /rom and /disk*)") end
+    print("")
+    printRootMounts()
+end
+
+local function writeProbe()
+    local probe = "/.__ccos_probe"
+    if fs.exists(probe) then pcall(fs.delete, probe) end
+    local f, err = fs.open(probe, "w")
+    if not f then
+        print("Open failed: " .. tostring(err or "unknown"))
+        return
+    end
+    local ok, writeErr = pcall(function()
+        f.write("x")
+    end)
+    f.close()
+    if ok then
+        print("1-byte write worked.")
+    else
+        print("Write failed: " .. tostring(writeErr))
+    end
+    if fs.exists(probe) then pcall(fs.delete, probe) end
+    printSpace()
 end
 
 local function wipeUserRoot()
@@ -137,7 +187,8 @@ while true do
     print("1 - List largest paths")
     print("2 - Wipe user files except /rom and /disk*")
     print("3 - Run CCOS installer")
-    print("4 - Exit")
+    print("4 - Try 1-byte write probe")
+    print("5 - Exit")
     print("")
     write("> ")
     local choice = read()
@@ -167,6 +218,12 @@ while true do
         print("Press Enter...")
         read()
     elseif choice == "4" then
+        print("")
+        writeProbe()
+        print("")
+        print("Press Enter...")
+        read()
+    elseif choice == "5" then
         return
     end
 end
