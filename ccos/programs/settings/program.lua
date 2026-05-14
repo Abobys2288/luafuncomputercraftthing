@@ -78,7 +78,7 @@ local function appSettings()
             local ok, err = true, nil
             if D.saveConfig then ok, err = D.saveConfig() end
             if ok then setStatus("Settings saved", "ok")
-            else setStatus("Save failed: " .. tostring(err)) end
+            else setStatus(tostring(err or "Save failed")) end
         elseif id == "reload" then
             if D.loadPrograms then D.loadPrograms() end
             setStatus("Programs reloaded", "ok")

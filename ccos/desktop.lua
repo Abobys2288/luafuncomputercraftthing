@@ -404,6 +404,18 @@ end
 D.configPath = "/ccos/config/desktop.cfg"
 local ensureDir
 
+local function friendlyFsError(err, fallback)
+    local msg = tostring(err or fallback or "Unknown error")
+    msg = msg:gsub("^.-:%d+:%s*", "")
+    if msg:lower():find("out of space", 1, true) then
+        return "Disk full: free space needed"
+    end
+    if msg == "" then
+        return fallback or "Unknown error"
+    end
+    return msg
+end
+
 function D.loadConfig()
     if not fs.exists(D.configPath) then return end
     local f = fs.open(D.configPath, "r")
@@ -442,6 +454,15 @@ end
 
 function D.saveConfig()
     local ok, err = pcall(function()
+        local freeSpace
+        pcall(function()
+            freeSpace = fs.getFreeSpace("/")
+        end)
+        local freeNumber = tonumber(freeSpace)
+        if freeNumber and freeNumber < 128 then
+            error("Disk full: free space needed", 0)
+        end
+
         local cfg = {
             windows = {},
             inputLayout = D.inputLayout,
@@ -458,15 +479,26 @@ function D.saveConfig()
                 })
             end
         end
-        ensureDir(D.configPath)
-        local f = fs.open(D.configPath, "w")
-        if not f then error("Cannot open " .. D.configPath) end
-        f.write(textutils.serialize(cfg))
+        local dirOk, dirErr = pcall(ensureDir, D.configPath)
+        if not dirOk then
+            error(friendlyFsError(dirErr, "Cannot create config folder"), 0)
+        end
+        local f, openErr = fs.open(D.configPath, "w")
+        if not f then
+            error(friendlyFsError(openErr, "Cannot open " .. D.configPath), 0)
+        end
+        local writeOk, writeErr = pcall(function()
+            f.write(textutils.serialize(cfg))
+        end)
         f.close()
+        if not writeOk then
+            error(friendlyFsError(writeErr, "Cannot write " .. D.configPath), 0)
+        end
     end)
     if not ok then
-        if D.notify then D.notify("Save Session", tostring(err), "error", 5) end
-        return false, err
+        local cleanErr = friendlyFsError(err, "Save failed")
+        if D.notify then D.notify("Save Session", cleanErr, "error", 5) end
+        return false, cleanErr
     end
     if D.notify then D.notify("Save Session", "Saved", "ok", 3) end
     return true
