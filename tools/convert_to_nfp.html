@@ -3275,7 +3275,7 @@ function loadVideoFromUrl(url, file, sourceLabel) {
   video.style.pointerEvents = "none";
   document.body.appendChild(video);
 
-  return waitForVideoReady(video, file, sourceLabel || "video source").then(() => {
+  return waitForVideoReady(video, file, url, sourceLabel || "video source").then(() => {
     sourceVideoElement = video;
     return video;
   }).catch(error => {
@@ -3308,7 +3308,7 @@ function waitForDecodedVideoFrame(video, timeoutMs = 450) {
   });
 }
 
-function waitForVideoReady(video, file, sourceLabel) {
+function waitForVideoReady(video, file, url, sourceLabel) {
   return new Promise((resolve, reject) => {
     let settled = false;
     let nudged = false;
