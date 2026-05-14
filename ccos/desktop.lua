@@ -73,6 +73,18 @@ D._contentWin = nil
 D._dirtyWindows = {}
 D._clockDirty = false
 D.programs = {}
+D.notifications = {}
+D.notificationsEnabled = true
+D.crashLogPath = "/ccos/logs/crashes.log"
+D.crashCount = 0
+D.themeName = "classic"
+D.soundEnabled = true
+D.themes = {
+    classic = {label="Classic", desktop=30, title=19, window=2, light=3, dark=4},
+    ocean = {label="Ocean", desktop=27, title=7, window=2, light=3, dark=4},
+    graphite = {label="Graphite", desktop=23, title=18, window=24, light=3, dark=4},
+    coconut = {label="Coconut", desktop=15, title=14, window=2, light=3, dark=4},
+}
 
 D.iconCache = {}
 D.lastIconCacheW = 0
@@ -402,6 +414,13 @@ function D.loadConfig()
         if cfg.inputLayout == "RU" or cfg.inputLayout == "EN" then
             D.inputLayout = cfg.inputLayout
         end
+        if cfg.themeName and D.themes[cfg.themeName] then
+            D.applyTheme(cfg.themeName)
+        else
+            D.applyTheme(D.themeName)
+        end
+        if cfg.soundEnabled ~= nil then D.soundEnabled = cfg.soundEnabled ~= false end
+        if cfg.notificationsEnabled ~= nil then D.notificationsEnabled = cfg.notificationsEnabled ~= false end
         if cfg.windows then
             for _, cw in ipairs(cfg.windows) do
                 for _, prog in ipairs(D.programs) do
@@ -421,7 +440,13 @@ function D.loadConfig()
 end
 
 function D.saveConfig()
-    local cfg = {windows = {}, inputLayout = D.inputLayout}
+    local cfg = {
+        windows = {},
+        inputLayout = D.inputLayout,
+        themeName = D.themeName,
+        soundEnabled = D.soundEnabled ~= false,
+        notificationsEnabled = D.notificationsEnabled ~= false,
+    }
     for _, w in ipairs(D.windows) do
         if w.visible and not w.modal then
             table.insert(cfg.windows, {
@@ -458,11 +483,103 @@ D.startMenuScroll = 0
 D.startMenuSel = 1
 D.startMenuMaxVisible = 99
 
+function D.applyTheme(name)
+    local picked = D.themes[name] and name or "classic"
+    local t = D.themes[picked]
+    D.themeName = picked
+    K.DESKTOP = t.desktop or 30
+    K.DBLUE = t.title or 19
+    K.GRAY = t.window or 2
+    K.LGRAY = t.light or 3
+    K.DGRAY = t.dark or 4
+    D.lastIconCacheW = 0
+    D.lastIconCacheH = 0
+    D.markDirty()
+    return picked
+end
+
+function D.nextTheme()
+    local order = {"classic", "ocean", "graphite", "coconut"}
+    local idx = 1
+    for i, name in ipairs(order) do
+        if name == D.themeName then idx = i; break end
+    end
+    idx = idx + 1
+    if idx > #order then idx = 1 end
+    return D.applyTheme(order[idx])
+end
+
+function D.notify(title, message, tone, duration)
+    if D.notificationsEnabled == false then return end
+    table.insert(D.notifications, {
+        title = tostring(title or "CCOS"),
+        message = tostring(message or ""),
+        tone = tone or "info",
+        expires = os.clock() + (duration or 4),
+    })
+    while #D.notifications > 4 do table.remove(D.notifications, 1) end
+    D.markDirty()
+end
+
+function D.pruneNotifications()
+    local now = os.clock()
+    local changed = false
+    for i = #D.notifications, 1, -1 do
+        if (D.notifications[i].expires or 0) <= now then
+            table.remove(D.notifications, i)
+            changed = true
+        end
+    end
+    if changed then D.markDirty() end
+end
+
+local function ensureDir(path)
+    if not path or path == "/" then return end
+    local dir = path:match("(.+)/[^/]+")
+    if not dir or dir == "" or fs.isDir(dir) then return end
+    local build = ""
+    for part in dir:gmatch("[^/]+") do
+        build = build .. "/" .. part
+        if not fs.exists(build) then fs.makeDir(build) end
+    end
+end
+
+function D.logCrash(source, err)
+    D.crashCount = (D.crashCount or 0) + 1
+    ensureDir(D.crashLogPath)
+    local ok = pcall(function()
+        local f = fs.open(D.crashLogPath, "a")
+        if f then
+            local stamp = "day " .. tostring(os.day and os.day() or "?") .. " " .. tostring(os.time and os.time() or "?")
+            f.writeLine(stamp .. " | " .. tostring(source or "unknown") .. " | " .. tostring(err or "unknown error"))
+            f.close()
+        end
+    end)
+    return ok
+end
+
+function D.reportCrash(source, err)
+    D.logCrash(source, err)
+    D.notify("Crash Reporter", tostring(source or "Application") .. " failed", "error", 6)
+end
+
+function D.callWindow(w, label, handler, ...)
+    if not handler then return true end
+    local ok, err = pcall(handler, w, ...)
+    if not ok then
+        if w then w.errors = (w.errors or 0) + 1 end
+        D.reportCrash(tostring(label or "Window") .. ": " .. tostring(w and w.title or "?"), err)
+        return false, err
+    end
+    return true
+end
+
 -- ============================================================
 -- ERROR HANDLER
 -- ============================================================
 function D.showError(title, message)
     D.playSound("error")
+    D.notify(title or "Error", tostring(message or "Unknown error"), "error", 6)
     local wx, wy, ww, wh = D.fitWin(240, 80)
     local w = D.createWindow(title or "Error", wx, wy, ww, wh)
     w.modal = true
@@ -537,6 +654,7 @@ function D.safeRun(fn, ...)
     local ok, err = pcall(fn, ...)
     if not ok then
         D.playSound("error")
+        D.reportCrash("Application", err)
         D.showError("Application Error", tostring(err))
         return false, err
     end
@@ -579,6 +697,7 @@ D._getSpeaker = function()
 end
 
 D.playSound = function(event)
+    if D.soundEnabled == false then return end
     local sp = D._getSpeaker()
     if not sp then return end
     local sounds = {
@@ -621,13 +740,16 @@ end
 
 function D.createWindow(title, cx, cy, cw, ch)
     local id = D.nextWinId; D.nextWinId = id + 1
-    local w = {id=id,title=title or "Win",cx=cx or 30,cy=cy or 20,cw=cw or 200,ch=ch or 120,visible=true,minimized=false,onDraw=nil,onKey=nil,onClick=nil,onDoubleClick=nil}
+    local w = {id=id,title=title or "Win",cx=cx or 30,cy=cy or 20,cw=cw or 200,ch=ch or 120,visible=true,minimized=false,onDraw=nil,onKey=nil,onClick=nil,onDoubleClick=nil,created=os.clock(),errors=0}
     D.clampWindow(w)
     table.insert(D.windows,w); D.activeWin=w; D.markDirty(); return w
 end
 
 function D.destroyWindow(w)
-    if w.onClose then pcall(w.onClose, w) end
+    if w.onClose then
+        local ok, err = pcall(w.onClose, w)
+        if not ok then D.reportCrash("Close: " .. tostring(w.title), err) end
+    end
     for i,v in ipairs(D.windows) do if v.id==w.id then table.remove(D.windows,i); break end end
     D.activeWin=D.windows[#D.windows]; w.visible=false; D.markDirty()
 end
@@ -677,6 +799,25 @@ function D._startMenuMetrics()
     return mw, mh, my, sx, innerY, innerH, maxVisible, totalItems, itemH, pad, needsScroll
 end
 
+function D.drawNotifications()
+    D.pruneNotifications()
+    if #D.notifications == 0 then return end
+    local tw = math.min(190, math.max(96, R.w - 12))
+    local th = 28
+    local x = math.max(2, R.w - tw - 4)
+    local y = 6
+    for i = #D.notifications, 1, -1 do
+        local n = D.notifications[i]
+        local tone = n.tone == "error" and K.RED or (n.tone == "ok" and 9 or K.DBLUE)
+        R.fillRect(x, y, tw, th, K.GRAY)
+        R.drawW95Raised(x, y, tw, th)
+        R.fillRect(x + 2, y + 2, 4, th - 4, tone)
+        drawTextClip(x + 10, y + 5, n.title, K.BLACK, K.GRAY, tw - 14)
+        drawTextClip(x + 10, y + 16, n.message, K.DGRAY, K.GRAY, tw - 14)
+        y = y + th + 4
+    end
+end
+
 -- ============================================================
 -- DRAW
 -- ============================================================
@@ -712,7 +853,16 @@ function D._drawFull()
         -- Background + content
         R.fillRect(x,y,ww,hh,K.GRAY)
         R.fillRect(x+2,y+17,math.max(0,ww-4),math.max(0,hh-19),K.GRAY)
-        if w.onDraw then pcall(w.onDraw,w,x+3,y+18,ww-6,hh-21) end
+        if w.onDraw then
+            local ok, err = pcall(w.onDraw,w,x+3,y+18,ww-6,hh-21)
+            if not ok then
+                w.errors = (w.errors or 0) + 1
+                D.reportCrash("Draw: " .. tostring(w.title), err)
+                R.fillRect(x+3,y+18,math.max(0,ww-6),math.max(0,hh-21),K.GRAY)
+                drawTextClip(x+7,y+24,"App draw error",K.RED,K.GRAY,ww-14)
+                drawTextClip(x+7,y+36,tostring(err),K.DGRAY,K.GRAY,ww-14)
+            end
+        end
         drawWindowChrome(w, x, y, ww, hh, act)
     end end
 
@@ -774,6 +924,8 @@ function D._drawFull()
         end
     end
 
+    D.drawNotifications()
+
     -- Context menu (draw last, on top of everything)
     if D.contextMenu then
         local m = D.contextMenu
@@ -804,7 +956,16 @@ function D._drawWindow(w)
     local act = D.activeWin and D.activeWin.id == w.id
     R.fillRect(x, y, ww, hh, K.GRAY)
     R.fillRect(x + 2, y + 17, math.max(0, ww - 4), math.max(0, hh - 19), K.GRAY)
-    if w.onDraw then pcall(w.onDraw, w, x + 3, y + 18, ww - 6, hh - 21) end
+    if w.onDraw then
+        local ok, err = pcall(w.onDraw, w, x + 3, y + 18, ww - 6, hh - 21)
+        if not ok then
+            w.errors = (w.errors or 0) + 1
+            D.reportCrash("Draw: " .. tostring(w.title), err)
+            R.fillRect(x + 3, y + 18, math.max(0, ww - 6), math.max(0, hh - 21), K.GRAY)
+            drawTextClip(x + 7, y + 24, "App draw error", K.RED, K.GRAY, ww - 14)
+            drawTextClip(x + 7, y + 36, tostring(err), K.DGRAY, K.GRAY, ww - 14)
+        end
+    end
     drawWindowChrome(w, x, y, ww, hh, act)
 end
 
@@ -836,6 +997,7 @@ function D.drawAll()
         end
         if D._clockDirty then local by=R.h-D.taskbarH; R.fillRect(R.w-48,by+3,44,14,K.GRAY); R.drawW95Sunken(R.w-48,by+3,44,14); R.drawText(R.w-44,by+6,D.clock,K.BLACK,K.GRAY); D._clockDirty=false end
     end
+    D.drawNotifications()
     R.endDraw()
 end
 
@@ -850,7 +1012,7 @@ function D.click(mx,my,btn)
         local w=D.winAt(mx,my)
         if w then
             D.bringToFront(w)
-            if w.onRightClick then pcall(w.onRightClick,w,mx-w.cx-3,my-w.cy-18) end
+            if w.onRightClick then D.callWindow(w, "Right click", w.onRightClick, mx-w.cx-3, my-w.cy-18) end
             return nil
         end
         if R.w ~= D.lastIconCacheW or R.h ~= D.lastIconCacheH then D.rebuildIconCache() end
@@ -949,10 +1111,10 @@ function D.click(mx,my,btn)
         local now = os.clock()
         local last = D.lastClick
         local isDouble = last and last.win == w.id and last.btn == btn and now - last.time < 0.45 and math.abs(last.x - mx) <= 3 and math.abs(last.y - my) <= 3
-        if w.onClick then pcall(w.onClick,w,rx,ry) end
+        if w.onClick then D.callWindow(w, "Click", w.onClick, rx, ry) end
         if isDouble and w.onDoubleClick then
             D.lastClick = nil
-            pcall(w.onDoubleClick,w,rx,ry)
+            D.callWindow(w, "Double click", w.onDoubleClick, rx, ry)
         else
             D.lastClick = {win=w.id, btn=btn, x=mx, y=my, time=now}
         end
@@ -989,7 +1151,7 @@ function D.drag(mx,my)
         local dy = my - D.dragAppOY
         D.dragAppOX = mx
         D.dragAppOY = my
-        if w.onDrag then pcall(w.onDrag, w, dx, dy) end
+        if w.onDrag then D.callWindow(w, "Drag", w.onDrag, dx, dy) end
         return
     end
     w=D.dragWin; if not w then
@@ -1053,13 +1215,15 @@ function D.run()
             local e,a,b,c,d=os.pullEvent()
             -- Background tasks
             for _, task in ipairs(D.bgTasks or {}) do
-                pcall(task, e, a, b, c, d)
+                local okTask, taskErr = pcall(task, e, a, b, c, d)
+                if not okTask then D.reportCrash("Background task", taskErr) end
             end
             if e=="timer" then
+                D.pruneNotifications()
                 local t=os.time and os.time() or 0; local h=math.floor(t); local m=math.floor((t-h)*60); local nc=string.format("%02d:%02d",h,m); if nc~=D.clock then D.clock=nc; D.markClockDirty() end
             end
             if e=="mouse_click" then D.mouse.x=b; D.mouse.y=c; D.click(b,c,a)
-            elseif e=="mouse_double_click" then D.mouse.x=b; D.mouse.y=c; local w=D.winAt(b,c); if w then D.bringToFront(w); if w.onDoubleClick then pcall(w.onDoubleClick,w,b-w.cx-3,c-w.cy-18) end end
+            elseif e=="mouse_double_click" then D.mouse.x=b; D.mouse.y=c; local w=D.winAt(b,c); if w then D.bringToFront(w); if w.onDoubleClick then D.callWindow(w, "Double click", w.onDoubleClick, b-w.cx-3, c-w.cy-18) end end
             elseif e=="mouse_drag" then D.mouse.x=b; D.mouse.y=c; D.drag(b,c)
             elseif e=="mouse_up" then D.drop()
             elseif e=="mouse_scroll" then
@@ -1080,7 +1244,7 @@ function D.run()
                     if w and w.onScroll then
                         D.bringToFront(w)
                         handled = true
-                        pcall(w.onScroll, w, a, b - w.cx - 3, c - w.cy - 18)
+                        D.callWindow(w, "Scroll", w.onScroll, a, b - w.cx - 3, c - w.cy - 18)
                     end
                     if not handled then
                         -- Desktop icon scroll
@@ -1130,7 +1294,7 @@ function D.run()
                     elseif a==keys.escape then
                         D.startMenuOpen=false; D.startMenuScroll=0; D.markDirty()
                     end
-                elseif D.activeWin and D.activeWin.onKey then pcall(D.activeWin.onKey,D.activeWin,a,nil) end
+                elseif D.activeWin and D.activeWin.onKey then D.callWindow(D.activeWin, "Key", D.activeWin.onKey, a, nil) end
             elseif e=="key_up" then
                 if isCtrlKey(a) then D.ctrlDown = false end
             elseif e=="char" then
@@ -1138,7 +1302,7 @@ function D.run()
                     D.skipNextCharAt = nil
                 elseif not D.startMenuOpen and D.activeWin and D.activeWin.onKey then
                     D.skipNextCharAt = nil
-                    pcall(D.activeWin.onKey,D.activeWin,nil,D.translateChar(a))
+                    D.callWindow(D.activeWin, "Char", D.activeWin.onKey, nil, D.translateChar(a))
                 end
             end
         end

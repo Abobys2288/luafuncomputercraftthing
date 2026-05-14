@@ -9,24 +9,44 @@ local function text(x, y, value, fg, bg, w)
     else R.drawText(x, y, tostring(value or ""), fg, bg) end
 end
 
-local function button(x, y, w, label)
+local function button(x, y, w, label, active)
     if w <= 0 then return end
-    if R.drawButtonText then R.drawButtonText(x, y, w, 14, label, false, K.BLACK, K.GRAY)
-    else R.drawButton(x, y, w, 14, false); text(x + 4, y + 3, label, K.BLACK, K.GRAY, w - 8) end
+    if R.drawButtonText then R.drawButtonText(x, y, w, 14, label, active, K.BLACK, K.GRAY)
+    else R.drawButton(x, y, w, 14, active); text(x + 4, y + 3, label, K.BLACK, K.GRAY, w - 8) end
+end
+
+local function fileSize(path)
+    local ok, size = pcall(fs.getSize, path)
+    return ok and tostring(size) or "0"
+end
+
+local function readTail(path, maxLines)
+    if not fs.exists(path) then return {"No crash log yet."} end
+    local f = fs.open(path, "r")
+    if not f then return {"Cannot open crash log."} end
+    local lines = {}
+    while true do
+        local line = f.readLine()
+        if not line then break end
+        lines[#lines + 1] = line
+        if #lines > maxLines then table.remove(lines, 1) end
+    end
+    f.close()
+    if #lines == 0 then lines[1] = "Crash log is empty." end
+    return lines
 end
 
 local function appSettings()
-    local wx, wy, ww, wh = D.fitWin(260, 170)
-    local win = D.createWindow("Settings", wx, wy, ww, wh)
-    local status = "Ready"
+    local wx, wy, ww, wh = API.fitWindow(330, 210)
+    local win = API.window("Settings", wx, wy, ww, wh)
+    if not win then return end
 
-    local actions = {
-        {id="label",  label="Label"},
-        {id="layout", label="Layout"},
-        {id="save",   label="Save"},
-        {id="reload", label="Reload"},
-        {id="reboot", label="Reboot"},
-        {id="power",  label="Power"},
+    local tab = "system"
+    local status = "Ready"
+    local tabs = {
+        {id="system", label="System", w=54},
+        {id="appearance", label="Look", w=44},
+        {id="logs", label="Logs", w=42},
     }
 
     local function freeSpace()
@@ -35,29 +55,47 @@ local function appSettings()
         return free
     end
 
-    local function setStatus(value)
+    local function setStatus(value, tone)
         status = value
+        if API and API.notify and tone then API.notify("Settings", value, tone, 3) end
         D.markContentDirty(win)
     end
 
-    local function runAction(id)
+    local function themeLabel()
+        local theme = D.themes and D.themes[D.themeName or "classic"]
+        return (theme and theme.label) or tostring(D.themeName or "classic")
+    end
+
+    local function action(id)
         if id == "label" then
             D.inputDialog("Set Label", "Computer label:", os.getComputerLabel and (os.getComputerLabel() or "") or "", function(name)
-                if name and os.setComputerLabel then
-                    os.setComputerLabel(name)
-                    setStatus("Label saved")
-                end
+                if name and os.setComputerLabel then os.setComputerLabel(name); setStatus("Label saved", "ok") end
             end)
         elseif id == "layout" then
             D.inputLayout = D.inputLayout == "RU" and "EN" or "RU"
-            setStatus("Layout: " .. D.inputLayout)
+            setStatus("Layout: " .. D.inputLayout, "ok")
         elseif id == "save" then
             if D.saveConfig then D.saveConfig() end
-            setStatus("Session saved")
+            setStatus("Settings saved", "ok")
         elseif id == "reload" then
             if D.loadPrograms then D.loadPrograms() end
+            setStatus("Programs reloaded", "ok")
             D.markDirty()
-            setStatus("Programs reloaded")
+        elseif id == "theme" then
+            if D.nextTheme then D.nextTheme() end
+            setStatus("Theme: " .. themeLabel(), "ok")
+        elseif id == "sound" then
+            D.soundEnabled = D.soundEnabled == false
+            setStatus("Sound: " .. (D.soundEnabled and "on" or "off"), "ok")
+        elseif id == "notify" then
+            D.notificationsEnabled = D.notificationsEnabled == false
+            setStatus("Notifications: " .. (D.notificationsEnabled and "on" or "off"), "ok")
+        elseif id == "testnotify" then
+            if API and API.notify then API.notify("CCOS", "Notifications are working", "ok", 4) end
+        elseif id == "clearlog" then
+            if fs.exists(D.crashLogPath) then fs.delete(D.crashLogPath) end
+            D.crashCount = 0
+            setStatus("Crash log cleared", "ok")
         elseif id == "reboot" then
             os.reboot()
         elseif id == "power" then
@@ -65,57 +103,127 @@ local function appSettings()
         end
     end
 
-    win.onDraw = function(_, cx, cy, cw, ch)
-        R.fillRect(cx, cy, cw, ch, K.GRAY)
-
-        local label = os.getComputerLabel and (os.getComputerLabel() or "None") or "None"
-        local id = os.getComputerID and os.getComputerID() or "?"
-        text(cx + 4, cy + 4, "Label: " .. label, K.BLACK, K.GRAY, cw - 8)
-        text(cx + 4, cy + 16, "ID: " .. id, K.BLACK, K.GRAY, cw - 8)
-        text(cx + 4, cy + 28, "Screen: " .. R.w .. "x" .. R.h, K.BLACK, K.GRAY, cw - 8)
-        text(cx + 4, cy + 40, "Free: " .. freeSpace() .. " bytes", K.BLACK, K.GRAY, cw - 8)
-        text(cx + 4, cy + 52, "Layout: " .. tostring(D.inputLayout or "EN"), K.BLACK, K.GRAY, cw - 8)
-        text(cx + 4, cy + 64, "Windows: " .. tostring(#(D.windows or {})), K.BLACK, K.GRAY, cw - 8)
-        text(cx + 4, cy + 78, status, status == "Ready" and K.DGRAY or K.GREEN, K.GRAY, cw - 8)
-
-        local cols = cw >= 190 and 3 or 2
-        local gap = 6
-        local bw = math.floor((cw - 8 - (cols - 1) * gap) / cols)
-        local startY = cy + ch - (cols == 3 and 38 or 56)
-        for i, action in ipairs(actions) do
-            local col = (i - 1) % cols
-            local row = math.floor((i - 1) / cols)
-            button(cx + 4 + col * (bw + gap), startY + row * 20, bw, action.label)
+    local function drawTabs(cx, cy)
+        local x = cx
+        for _, t in ipairs(tabs) do
+            button(x, cy, t.w, t.label, tab == t.id)
+            x = x + t.w + 2
         end
     end
 
-    win.onClick = function(_, mx, my)
-        local cw, ch = win.cw - 6, win.ch - 21
-        local cols = cw >= 190 and 3 or 2
+    local function hitTab(mx, my)
+        if my < 0 or my >= 14 then return nil end
+        local x = 0
+        for _, t in ipairs(tabs) do
+            if mx >= x and mx < x + t.w then return t.id end
+            x = x + t.w + 2
+        end
+        return nil
+    end
+
+    local function drawActionGrid(cx, cy, cw, y, actions)
+        local cols = cw >= 220 and 3 or 2
         local gap = 6
         local bw = math.floor((cw - 8 - (cols - 1) * gap) / cols)
-        local startY = ch - (cols == 3 and 38 or 56)
-        for i, action in ipairs(actions) do
+        for i, a in ipairs(actions) do
+            local col = (i - 1) % cols
+            local row = math.floor((i - 1) / cols)
+            button(cx + 4 + col * (bw + gap), cy + y + row * 20, bw, a.label)
+        end
+        return cols, bw, gap
+    end
+
+    local function actionAt(mx, my, startY, actions, cw)
+        local cols = cw >= 220 and 3 or 2
+        local gap = 6
+        local bw = math.floor((cw - 8 - (cols - 1) * gap) / cols)
+        for i, a in ipairs(actions) do
             local col = (i - 1) % cols
             local row = math.floor((i - 1) / cols)
             local x = 4 + col * (bw + gap)
             local y = startY + row * 20
-            if mx >= x and mx < x + bw and my >= y and my < y + 14 then
-                runAction(action.id)
-                return
+            if mx >= x and mx < x + bw and my >= y and my < y + 14 then return a.id end
+        end
+        return nil
+    end
+
+    local systemActions = {
+        {id="label", label="Label"},
+        {id="layout", label="Layout"},
+        {id="save", label="Save"},
+        {id="reload", label="Reload"},
+        {id="reboot", label="Reboot"},
+        {id="power", label="Power"},
+    }
+    local lookActions = {
+        {id="theme", label="Theme"},
+        {id="sound", label="Sound"},
+        {id="notify", label="Notify"},
+        {id="testnotify", label="Test"},
+        {id="save", label="Save"},
+    }
+    local logActions = {
+        {id="clearlog", label="Clear Log"},
+        {id="save", label="Save"},
+    }
+
+    win.onDraw = function(_, cx, cy, cw, ch)
+        R.fillRect(cx, cy, cw, ch, K.GRAY)
+        drawTabs(cx, cy)
+        local y = 22
+
+        if tab == "system" then
+            local label = os.getComputerLabel and (os.getComputerLabel() or "None") or "None"
+            local id = os.getComputerID and os.getComputerID() or "?"
+            text(cx + 4, cy + y, "Label: " .. label, K.BLACK, K.GRAY, cw - 8); y = y + 12
+            text(cx + 4, cy + y, "ID: " .. id .. "  Screen: " .. R.w .. "x" .. R.h, K.BLACK, K.GRAY, cw - 8); y = y + 12
+            text(cx + 4, cy + y, "Free: " .. freeSpace() .. " bytes", K.BLACK, K.GRAY, cw - 8); y = y + 12
+            text(cx + 4, cy + y, "Windows: " .. tostring(#(D.windows or {})) .. "  Programs: " .. tostring(#(D.programs or {})), K.BLACK, K.GRAY, cw - 8); y = y + 18
+            drawActionGrid(cx, cy, cw, y, systemActions)
+        elseif tab == "appearance" then
+            text(cx + 4, cy + y, "Theme: " .. themeLabel(), K.BLACK, K.GRAY, cw - 8); y = y + 12
+            text(cx + 4, cy + y, "Layout: " .. tostring(D.inputLayout or "EN"), K.BLACK, K.GRAY, cw - 8); y = y + 12
+            text(cx + 4, cy + y, "Sound: " .. (D.soundEnabled == false and "off" or "on"), K.BLACK, K.GRAY, cw - 8); y = y + 12
+            text(cx + 4, cy + y, "Notifications: " .. (D.notificationsEnabled == false and "off" or "on"), K.BLACK, K.GRAY, cw - 8); y = y + 18
+            drawActionGrid(cx, cy, cw, y, lookActions)
+        else
+            local logPath = D.crashLogPath or "/ccos/logs/crashes.log"
+            text(cx + 4, cy + y, "Crash log: " .. fileSize(logPath) .. " bytes", K.BLACK, K.GRAY, cw - 8); y = y + 12
+            text(cx + 4, cy + y, "Crashes this session: " .. tostring(D.crashCount or 0), K.BLACK, K.GRAY, cw - 8); y = y + 12
+            for _, line in ipairs(readTail(logPath, math.max(3, math.floor((ch - 96) / 9)))) do
+                text(cx + 4, cy + y, line, K.DGRAY, K.GRAY, cw - 8)
+                y = y + 9
             end
+            drawActionGrid(cx, cy, cw, ch - 42, logActions)
+        end
+
+        text(cx + 4, cy + ch - 10, status, status == "Ready" and K.DGRAY or K.GREEN, K.GRAY, cw - 8)
+    end
+
+    win.onClick = function(_, mx, my)
+        local hit = hitTab(mx, my)
+        if hit then tab = hit; D.markContentDirty(win); return end
+        local cw = win.cw - 6
+        if tab == "system" then
+            local id = actionAt(mx, my, 76, systemActions, cw)
+            if id then action(id) end
+        elseif tab == "appearance" then
+            local id = actionAt(mx, my, 76, lookActions, cw)
+            if id then action(id) end
+        else
+            local id = actionAt(mx, my, (win.ch - 21) - 42, logActions, cw)
+            if id then action(id) end
         end
     end
 
     win.onKey = function(_, k, ch)
-        if k == keys.escape then D.destroyWindow(win)
-        elseif ch == "l" or ch == "L" then runAction("layout")
-        elseif ch == "s" or ch == "S" then runAction("save") end
+        if k == keys.escape then API.close(win)
+        elseif ch == "1" then tab = "system"; D.markContentDirty(win)
+        elseif ch == "2" then tab = "appearance"; D.markContentDirty(win)
+        elseif ch == "3" then tab = "logs"; D.markContentDirty(win)
+        elseif ch == "t" or ch == "T" then action("theme")
+        elseif ch == "s" or ch == "S" then action("save") end
     end
 end
 
-return {
-    name = "Settings",
-    icon = "settings",
-    run = appSettings
-}
+return {name = "Settings", icon = "settings", run = appSettings}

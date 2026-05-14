@@ -363,4 +363,37 @@ function api.showError(title, message)
     end
 end
 
+function api.notify(title, message, tone, duration)
+    local desktop = getDesktop()
+    if desktop and desktop.notify then
+        desktop.notify(title or "CCOS", message or "", tone, duration)
+    end
+end
+
+function api.listThemes()
+    local desktop = getDesktop()
+    local names = {}
+    if desktop and desktop.themes then
+        for name in pairs(desktop.themes) do names[#names + 1] = name end
+        table.sort(names)
+    end
+    return names
+end
+
+function api.getThemeName()
+    local desktop = getDesktop()
+    return (desktop and desktop.themeName) or "classic"
+end
+
+function api.setTheme(name)
+    local desktop = getDesktop()
+    if desktop and desktop.applyTheme then return desktop.applyTheme(name) end
+    return nil
+end
+
+function api.getCrashLogPath()
+    local desktop = getDesktop()
+    return (desktop and desktop.crashLogPath) or "/ccos/logs/crashes.log"
+end
+
 return api

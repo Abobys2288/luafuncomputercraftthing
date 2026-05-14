@@ -10,6 +10,7 @@ local BRANCH = "main"
 local BASE_URL = "https://raw.githubusercontent.com/" .. REPO .. "/" .. BRANCH .. "/ccos/programs/"
 local ICON_URL = "https://raw.githubusercontent.com/" .. REPO .. "/" .. BRANCH .. "/ccos/icons/"
 local MANIFEST_URL = "https://raw.githubusercontent.com/" .. REPO .. "/" .. BRANCH .. "/ccos/packages.lua"
+local CORE = {fm=true, shell=true, settings=true, pkgman=true, tasks=true, imgview=true}
 
 local function clip(text, w)
     if API and API.clipText then return API.clipText(text, w) end
@@ -46,16 +47,16 @@ local function loadLocalManifest()
         end
     end
     return {
-        {name="fm", title="File Manager", desc="Browse files", icon="files"},
+        {name="fm", title="File Explorer", desc="Explorer 2.0 with preview", icon="files"},
         {name="edit", title="Text Editor", desc="Edit text files", icon="edit"},
-        {name="settings", title="System Info", desc="System settings", icon="settings"},
+        {name="settings", title="Settings", desc="System, appearance and logs", icon="settings"},
         {name="shell", title="Shell", desc="Terminal emulator", icon="shell"},
         {name="calc", title="Calculator", desc="Calculator app", icon="calc"},
-        {name="tasks", title="Task Manager", desc="Manage windows", icon="tasks"},
+        {name="tasks", title="Task Manager", desc="Manage windows and background tasks", icon="tasks"},
         {name="netbrowse", title="Network Browser", desc="Browse network", icon="net"},
         {name="chat", title="Chat", desc="Network chat", icon="chat"},
         {name="pkgman", title="Packages", desc="Install packages", icon="pkg"},
-        {name="imgview", title="Image Viewer", desc="View images", icon="img"},
+        {name="imgview", title="Image Viewer Pro", desc="View images safely", icon="img"},
         {name="music", title="Music", desc="Speaker player", icon="music"},
         {name="fastfetch", title="Fastfetch", desc="System overview", icon="fastfetch"},
         {name="sites", title="Sites Browser", desc="Browse pages", icon="sites"},
@@ -79,6 +80,7 @@ local function appPkgMan()
     local installed = {}
     local sel, scroll = 1, 0
     local status = "F5 refresh  Enter install/remove"
+    local detail = "Select a package"
 
     local function scanInstalled()
         installed = {}
@@ -125,6 +127,7 @@ local function appPkgMan()
         end
         installed[pkg.name] = true
         D.loadPrograms()
+        if API and API.notify then API.notify("Packages", "Installed " .. pkg.name, "ok", 4) end
         return true
     end
 
@@ -154,12 +157,19 @@ local function appPkgMan()
 
     local function removePackage(pkg)
         if not pkg then return end
+        if CORE[pkg.name] then
+            status = "Core package protected"
+            if API and API.notify then API.notify("Packages", pkg.name .. " is protected", "error", 4) end
+            D.markDirty()
+            return
+        end
         local path = "/ccos/programs/" .. pkg.name
         if fs.exists(path) then
             fs.delete(path)
             installed[pkg.name] = nil
             status = "Removed: " .. pkg.name
             D.loadPrograms()
+            if API and API.notify then API.notify("Packages", "Removed " .. pkg.name, "ok", 4) end
         else
             status = "Not installed"
         end
@@ -185,22 +195,40 @@ local function appPkgMan()
         fetchList()
     end
 
-    local wx, wy, ww, wh = API.fitWindow(290, 180)
+    local function installFromFile(path)
+        if not path or path == "" then return end
+        if not fs.exists(path) or fs.isDir(path) then status = "File not found"; D.markDirty(); return end
+        local content = API.readFile(path)
+        if not content then status = "Cannot read file"; D.markDirty(); return end
+        local pkg = parsePackage(content)
+        if not pkg then
+            local name = (path:match("/([^/%?]+)%.lua$") or path:match("/([^/%?]+)%.ccpkg$") or "local")
+            pkg = {name=name, content=content}
+        end
+        local okWrite, err = writePackage(pkg)
+        status = okWrite and ("Installed: " .. pkg.name) or tostring(err)
+        fetchList()
+    end
+
+    local wx, wy, ww, wh = API.fitWindow(360, 200)
     local w = API.window("Packages", wx, wy, ww, wh)
     if not w then return end
 
     w.onDraw = function(_, cx, cy, cw, ch)
         button(cx, cy, math.min(50, cw), "Refresh")
         if cw >= 130 then button(cx + 54, cy, 70, "Install URL") end
-        if cw >= 188 then button(cx + 128, cy, 54, "Remove") end
-        if cw >= 226 then drawText(cx + 188, cy + 3, status, K.DGRAY, K.GRAY, cw - 192) end
+        if cw >= 188 then button(cx + 128, cy, 54, "File") end
+        if cw >= 246 then button(cx + 186, cy, 54, "Remove") end
+        if cw >= 286 then drawText(cx + 246, cy + 3, status, K.DGRAY, K.GRAY, cw - 250) end
 
         local listY = cy + 20
+        local detailW = cw >= 330 and math.max(96, math.floor(cw * 0.34)) or 0
+        local listW = detailW > 0 and (cw - detailW - 6) or cw
         local rows = math.max(1, math.floor((ch - 34) / 8))
         local hasHit = false
         for i = 1, rows do
             local iy = listY + (i - 1) * 8
-            if D.mouse.x >= cx + 2 and D.mouse.x < cx + cw - 2 and D.mouse.y >= iy and D.mouse.y < iy + 8 then hasHit = true; break end
+            if D.mouse.x >= cx + 2 and D.mouse.x < cx + listW - 2 and D.mouse.y >= iy and D.mouse.y < iy + 8 then hasHit = true; break end
         end
 
         for i = 1, rows do
@@ -208,16 +236,33 @@ local function appPkgMan()
             local pkg = packages[idx]
             if not pkg then break end
             local iy = listY + (i - 1) * 8
-            local hit = D.mouse.x >= cx + 2 and D.mouse.x < cx + cw - 2 and D.mouse.y >= iy and D.mouse.y < iy + 8
+            local hit = D.mouse.x >= cx + 2 and D.mouse.x < cx + listW - 2 and D.mouse.y >= iy and D.mouse.y < iy + 8
             local active = (hasHit and hit) or (not hasHit and idx == sel)
-            if active then R.fillRect(cx + 2, iy, cw - 4, 8, K.DBLUE) end
+            if active then R.fillRect(cx + 2, iy, listW - 4, 8, K.DBLUE) end
             local fg, bg = active and K.WHITE or K.BLACK, active and K.DBLUE or K.GRAY
             local mark = installed[pkg.name] and "[+] " or "[ ] "
+            if CORE[pkg.name] then mark = "[*] " end
             local text = mark .. (pkg.title or pkg.name) .. " - " .. (pkg.desc or "")
-            drawText(cx + 4, iy, text, fg, bg, cw - 8)
+            drawText(cx + 4, iy, text, fg, bg, listW - 8)
         end
 
-        drawText(cx + 4, cy + ch - 10, "Enter toggles  F5 refresh  U install URL", K.DGRAY, K.GRAY, cw - 8)
+        local pkg = packages[sel]
+        if detailW > 0 then
+            local px = cx + listW + 6
+            R.drawW95Sunken(px, listY, detailW, ch - 34)
+            if pkg then
+                detail = (pkg.title or pkg.name or "?")
+                drawText(px + 4, listY + 5, detail, K.BLACK, K.GRAY, detailW - 8)
+                drawText(px + 4, listY + 17, "Name: " .. tostring(pkg.name or "?"), K.DGRAY, K.GRAY, detailW - 8)
+                drawText(px + 4, listY + 29, installed[pkg.name] and "Installed" or "Not installed", installed[pkg.name] and K.GREEN or K.RED, K.GRAY, detailW - 8)
+                drawText(px + 4, listY + 41, CORE[pkg.name] and "Core package" or "Optional", K.DGRAY, K.GRAY, detailW - 8)
+                drawText(px + 4, listY + 53, tostring(pkg.desc or ""), K.DGRAY, K.GRAY, detailW - 8)
+            else
+                drawText(px + 4, listY + 5, detail, K.DGRAY, K.GRAY, detailW - 8)
+            end
+        end
+
+        drawText(cx + 4, cy + ch - 10, "Enter toggles  F5 refresh  U URL  L local file", K.DGRAY, K.GRAY, cw - 8)
     end
 
     w.onClick = function(_, mx, my)
@@ -232,13 +277,23 @@ local function appPkgMan()
                     end
                 end)
                 return
-            elseif mx >= 128 and mx < 182 then removePackage(packages[sel]); return end
+            elseif mx >= 128 and mx < 182 then
+                if API.chooseFile then
+                    API.chooseFile({title="Install Package", path="/", extensions={"ccpkg","lua"}}, function(path) installFromFile(path) end)
+                else
+                    D.inputDialog("Install File", "Path:", "/", installFromFile)
+                end
+                return
+            elseif mx >= 186 and mx < 240 then removePackage(packages[sel]); return end
         end
 
         local rows = math.max(1, math.floor((w.ch - 21 - 34) / 8))
+        local cw = w.cw - 6
+        local detailW = cw >= 330 and math.max(96, math.floor(cw * 0.34)) or 0
+        local listW = detailW > 0 and (cw - detailW - 6) or cw
         for i = 1, rows do
             local iy = 20 + (i - 1) * 8
-            if my >= iy and my < iy + 8 then sel = math.min(#packages, scroll + i); D.markContentDirty(w); return end
+            if mx < listW and my >= iy and my < iy + 8 then sel = math.min(#packages, scroll + i); D.markContentDirty(w); return end
         end
     end
 
@@ -249,6 +304,12 @@ local function appPkgMan()
             D.inputDialog("Install URL", "program.lua or .ccpkg URL:", "https://", function(url)
                 if url then D.inputDialog("Package name", "Name if plain Lua:", "", function(name) installFromUrl(url, name ~= "" and name or nil) end) end
             end)
+        elseif ch == "l" or ch == "L" then
+            if API.chooseFile then
+                API.chooseFile({title="Install Package", path="/", extensions={"ccpkg","lua"}}, function(path) installFromFile(path) end)
+            else
+                D.inputDialog("Install File", "Path:", "/", installFromFile)
+            end
         elseif k == keys.up and sel > 1 then sel = sel - 1; if sel <= scroll then scroll = math.max(0, scroll - 1) end; D.markContentDirty(w)
         elseif k == keys.down and sel < #packages then sel = sel + 1; if sel > scroll + rows then scroll = scroll + 1 end; D.markContentDirty(w)
         elseif k == keys.enter then

@@ -12,6 +12,10 @@ for i = 1, #NFP32_KEYS do
     NFP32_MAP[NFP32_KEYS:sub(i, i)] = i - 1
 end
 
+local LARGE_FILE_BYTES = 5 * 1024 * 1024
+local MAX_DECODE_PIXELS = 1200000
+local SAFE_PREVIEW_ROWS = 96
+
 local function clip(text, w)
     if API and API.clipText then return API.clipText(text, w) end
     if R.clipText then return R.clipText(text, w) end
@@ -40,6 +44,42 @@ local function readLines(path)
     end
     f.close()
     return lines
+end
+
+local function readFirstLine(path)
+    local f = fs.open(path, "r")
+    if not f then return nil end
+    local line = f.readLine()
+    f.close()
+    return line
+end
+
+local function safeSize(path)
+    local ok, size = pcall(fs.getSize, path)
+    return ok and tonumber(size) or 0
+end
+
+local function formatSize(bytes)
+    bytes = tonumber(bytes) or 0
+    if bytes < 1024 then return tostring(bytes) .. " B" end
+    if bytes < 1024 * 1024 then return string.format("%.1f KB", bytes / 1024) end
+    return string.format("%.2f MB", bytes / (1024 * 1024))
+end
+
+local function parseHeader(line)
+    line = tostring(line or "")
+    if line:match("^!NFPA") then
+        local _, _, w, h, mode, delay, loop, frames, codec = line:find("^!NFPA%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s*(%S*)")
+        if w then
+            return {kind="NFPA", w=tonumber(w) or 0, h=tonumber(h) or 0, mode=tonumber(mode) or 32, delay=tonumber(delay) or 100, loop=tonumber(loop) or 0, frames=tonumber(frames) or 0, codec=codec}
+        end
+    elseif line:match("^!NFPC") then
+        local _, _, w, h, mode, codec = line:find("^!NFPC%s+(%d+)%s+(%d+)%s+(%d+)%s*(%S*)")
+        if w then
+            return {kind="NFPC", w=tonumber(w) or 0, h=tonumber(h) or 0, mode=tonumber(mode) or 32, frames=1, codec=codec}
+        end
+    end
+    return nil
 end
 
 local function looksNfp256(line)
@@ -358,6 +398,9 @@ local function appImageViewer(initialPath)
     local status = "Open an image file"
     local formatName = ""
     local scale, ox, oy = 1, 0, 0
+    local fileSize = 0
+    local largeMode = false
+    local infoLines = {}
 
     -- Animation state
     local animFrames, animFrame, animDelay = {}, 1, 0
@@ -399,11 +442,72 @@ local function appImageViewer(initialPath)
         animTimer = os.startTimer(animDelay)
     end
 
+    local function setInfoOnly(path, header, reason)
+        pixels = {}
+        largeMode = true
+        infoLines = {}
+        imgW = header and header.w or 0
+        imgH = header and header.h or 0
+        formatName = header and header.kind or "Image"
+        if header and header.kind == "NFPA" then
+            infoLines[#infoLines + 1] = "Animation: " .. header.w .. "x" .. header.h .. " x" .. header.frames
+            infoLines[#infoLines + 1] = "Palette: " .. header.mode .. "  Codec: " .. (header.codec ~= "" and header.codec or "RLE")
+            infoLines[#infoLines + 1] = "Delay: " .. header.delay .. " ms"
+        elseif header and header.kind == "NFPC" then
+            infoLines[#infoLines + 1] = "Image: " .. header.w .. "x" .. header.h
+            infoLines[#infoLines + 1] = "Palette: " .. header.mode .. "  Codec: " .. (header.codec ~= "" and header.codec or "RLE")
+        end
+        infoLines[#infoLines + 1] = "File: " .. formatSize(fileSize)
+        infoLines[#infoLines + 1] = reason or "Safe preview mode"
+        infoLines[#infoLines + 1] = path
+        status = (header and (header.kind .. " " .. header.w .. "x" .. header.h) or "Large image") .. " safe preview"
+        if API and API.notify then API.notify("Image Viewer", "Opened in safe preview mode", "info", 5) end
+        return true
+    end
+
+    local function loadLargeRawPreview(path, ext)
+        local f = fs.open(path, "r")
+        if not f then return false end
+        local stats = {bad=0}
+        local rows, maxW, count = {}, 0, 0
+        while count < SAFE_PREVIEW_ROWS do
+            local line = f.readLine()
+            if not line then break end
+            if line ~= "" then
+                local row = (ext == "nfp256") and parseNfp256(line, stats) or parseNfp32(line, stats)
+                if #row > 0 then
+                    rows[#rows + 1] = row
+                    maxW = math.max(maxW, #row)
+                    count = count + 1
+                end
+            end
+        end
+        f.close()
+        if #rows == 0 or maxW == 0 then return false end
+        pixels = rows
+        imgW, imgH = maxW, #rows
+        largeMode = true
+        infoLines = {
+            "Large raw image: " .. formatSize(fileSize),
+            "Showing first " .. #rows .. " rows only",
+            "Convert to .nfpc C3 for full viewing",
+            path,
+        }
+        formatName = ext == "nfp256" and "NFP256 preview" or "NFP preview"
+        status = imgW .. "x" .. imgH .. " " .. formatName
+        if stats.bad > 0 then status = status .. " (" .. stats.bad .. " bad chars)" end
+        if API and API.notify then API.notify("Image Viewer", "Large raw image previewed safely", "info", 5) end
+        return true
+    end
+
     local function loadImage(path, quiet)
         stopAnimation()
         pixels, imgW, imgH = {}, 0, 0
         formatName = ""
         ox, oy = 0, 0
+        fileSize = 0
+        largeMode = false
+        infoLines = {}
         animFrames, animFrame, animDelay = {}, 1, 0
         isAnimation = false
 
@@ -424,6 +528,23 @@ local function appImageViewer(initialPath)
             return false
         end
 
+        local ext = (fp:match("%.([^%.]+)$") or ""):lower()
+        fileSize = safeSize(fp)
+        local first = readFirstLine(fp) or ""
+        local header = parseHeader(first)
+        if fileSize >= LARGE_FILE_BYTES then
+            if header then return setInfoOnly(fp, header, "File is over 5 MB") end
+            if ext == "nfp" or ext == "nfp256" then
+                if loadLargeRawPreview(fp, ext) then return true end
+            end
+        end
+        if header then
+            local total = (header.w or 0) * (header.h or 0) * math.max(1, header.frames or 1)
+            if total > MAX_DECODE_PIXELS then
+                return setInfoOnly(fp, header, "Decoded pixels exceed safe limit")
+            end
+        end
+
         local lines, err = readLines(fp)
         if not lines then
             status = err
@@ -431,7 +552,6 @@ local function appImageViewer(initialPath)
             return false
         end
 
-        local ext = (fp:match("%.([^%.]+)$") or ""):lower()
         local is256 = ext == "nfp256"
         local isNfpc = ext == "nfpc"
         local isNfpa = ext == "nfpa"
@@ -587,15 +707,25 @@ local function appImageViewer(initialPath)
         R.fillRect(viewX, viewY, viewW, viewH, K.BLACK)
 
         if #pixels == 0 then
-            drawText(viewX + 4, viewY + 4, "No image loaded.", K.WHITE, K.BLACK, viewW - 8)
-            drawText(viewX + 4, viewY + 16, "Open .nfp/.nfp256/.nfpc/.nfpa", K.LGRAY, K.BLACK, viewW - 8)
+            if largeMode and #infoLines > 0 then
+                drawText(viewX + 4, viewY + 4, "Safe preview", K.CYAN, K.BLACK, viewW - 8)
+                for i, line in ipairs(infoLines) do
+                    local yy = viewY + 16 + (i - 1) * 10
+                    if yy > viewY + viewH - 10 then break end
+                    drawText(viewX + 4, yy, line, i == #infoLines and K.DGRAY or K.LGRAY, K.BLACK, viewW - 8)
+                end
+            else
+                drawText(viewX + 4, viewY + 4, "No image loaded.", K.WHITE, K.BLACK, viewW - 8)
+                drawText(viewX + 4, viewY + 16, "Open .nfp/.nfp256/.nfpc/.nfpa", K.LGRAY, K.BLACK, viewW - 8)
+            end
             drawText(cx + 4, cy + ch - 10, clip(status, cw - 8), K.DGRAY, K.GRAY)
             return
         end
 
         clampPan(cw, ch)
         drawImageViewport(viewX, viewY, viewW, viewH)
-        drawText(cx + 4, cy + ch - 10, "Scale " .. scale .. "x  " .. status, K.DGRAY, K.GRAY, cw - 8)
+        local suffix = largeMode and "  SAFE" or ""
+        drawText(cx + 4, cy + ch - 10, "Scale " .. scale .. "x  " .. status .. suffix, K.DGRAY, K.GRAY, cw - 8)
     end
 
     win.onClick = function(_, mx, my)
