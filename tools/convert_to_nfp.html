@@ -3422,6 +3422,8 @@ async function convert() {
   try {
     const useLossy = lossyActive(format);
     const quality = compressionQuality();
+    let generatedText = "";
+    let actuallyUsedLossy = false;
     if (format.animated) {
       const fps = Math.round(clampNumber(els.fps.value, 1, 60, 10));
       const loop = Math.round(clampNumber(els.loop.value, 0, 65535, 0));
@@ -3460,65 +3462,66 @@ async function convert() {
       }
 
       const losslessOutput = buildNfpaOutput(losslessFrameIndices, width, height, format, delayMs, loop);
-      let outputText, previewFrames, frameIndices, actuallyUsedLossy;
+      let previewFrames, frameIndices;
 
       if (useLossy) {
         const lossyOutput = buildNfpaOutput(lossyFrameIndices, width, height, format, delayMs, loop);
         if (bytesOf(lossyOutput) < bytesOf(losslessOutput)) {
-          outputText = lossyOutput;
+          generatedText = lossyOutput;
           previewFrames = lossyPreviewFrames;
           frameIndices = lossyFrameIndices;
           actuallyUsedLossy = true;
         } else {
-          outputText = losslessOutput;
+          generatedText = losslessOutput;
           previewFrames = losslessPreviewFrames;
           frameIndices = losslessFrameIndices;
           actuallyUsedLossy = false;
         }
       } else {
-        outputText = losslessOutput;
+        generatedText = losslessOutput;
         previewFrames = losslessPreviewFrames;
         frameIndices = losslessFrameIndices;
         actuallyUsedLossy = false;
       }
 
-      els.output.value = outputText;
+      els.output.value = generatedText;
       startResultAnimation(previewFrames, width, height, delayMs);
-      updateMetrics(width, height, format.mode, outputText, format, frameIndices.length);
+      updateMetrics(width, height, format.mode, generatedText, format, frameIndices.length);
     } else {
       const source = await getStaticFrame(width, height);
       const quantized = quantizeFrame(source, width, height, format.mode);
       const losslessOutput = buildOutput(quantized.indices, width, height, format);
-      let outputText, preview, actuallyUsedLossy;
+      let preview;
 
       if (useLossy) {
         const lossyResult = applyLossyCompression(quantized.indices, width, height, format.mode, null, quality);
         const lossyOutput = buildOutput(lossyResult.indices, width, height, format);
         if (bytesOf(lossyOutput) < bytesOf(losslessOutput)) {
-          outputText = lossyOutput;
+          generatedText = lossyOutput;
           preview = previewFromIndices(lossyResult.indices, width, height, format.mode);
           actuallyUsedLossy = true;
         } else {
-          outputText = losslessOutput;
+          generatedText = losslessOutput;
           preview = quantized.preview;
           actuallyUsedLossy = false;
         }
       } else {
-        outputText = losslessOutput;
+        generatedText = losslessOutput;
         preview = quantized.preview;
         actuallyUsedLossy = false;
       }
 
-      els.output.value = outputText;
+      els.output.value = generatedText;
       drawResultPreview(preview, width, height);
-      updateMetrics(width, height, format.mode, outputText, format);
+      updateMetrics(width, height, format.mode, generatedText, format);
     }
 
+    outputText = generatedText;
     updateOutputName(format);
     els.copy.disabled = false;
     els.download.disabled = false;
     setProgress(false);
-    const codecName = detectCodec(outputText);
+    const codecName = detectCodec(generatedText);
     const msg = "Converted " + outputFileName + (actuallyUsedLossy ? " lossy Q" + quality : "") + (codecName ? " " + codecName : "");
     setStatus(msg, "good");
     showToast(msg, "good");
