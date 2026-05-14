@@ -316,7 +316,7 @@
   }
 
   .segment.codec {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 
   .segment input,
@@ -888,6 +888,7 @@
             <label><input id="codecC3" type="radio" name="codec" value="c3"><span>C3</span></label>
             <label><input id="codecC4" type="radio" name="codec" value="c4"><span>C4</span></label>
             <label><input id="codecC5" type="radio" name="codec" value="c5"><span>C5</span></label>
+            <label><input id="codecC6" type="radio" name="codec" value="c6"><span>C6</span></label>
           </div>
         </div>
         <label class="switch">
@@ -1846,6 +1847,7 @@ const els = {
   codecC3: document.getElementById("codecC3"),
   codecC4: document.getElementById("codecC4"),
   codecC5: document.getElementById("codecC5"),
+  codecC6: document.getElementById("codecC6"),
   quality: document.getElementById("qualityInput"),
   qualityValue: document.getElementById("qualityValue"),
   qualityField: document.getElementById("qualityField"),
@@ -2091,6 +2093,7 @@ function selectedCodec() {
 function detectCodec(text) {
   if (!text) return "";
   const first = text.split("\n")[0] || "";
+  if (first.endsWith(" C6")) return "C6";
   if (first.endsWith(" C5")) return "C5";
   if (first.endsWith(" C4")) return "C4";
   if (first.endsWith(" C3")) return "C3";
@@ -2122,7 +2125,8 @@ function paletteDistanceSq(a, b, mode) {
 function lossyThresholdForQuality(quality, mode) {
   if (quality >= 100) return 0;
   const softness = (100 - quality) / 100;
-  const channelDelta = (mode === 256 ? 350 : 250) * softness;
+  const ditherScale = els.dither && els.dither.checked ? 0.55 : 1;
+  const channelDelta = (mode === 256 ? 180 : 120) * softness * ditherScale;
   return channelDelta * channelDelta * 3;
 }
 
@@ -2135,8 +2139,9 @@ function applyLossyCompression(indices, width, height, mode, previousFrame, qual
   if (threshold <= 0) return { indices, changed: 0 };
 
   const out = new Uint16Array(indices);
-  const verticalThreshold = threshold * 0.7;
-  const horizontalThreshold = threshold * 0.4;
+  const allowSpatial = quality <= 82 && !(els.dither && els.dither.checked && quality >= 70);
+  const verticalThreshold = allowSpatial ? threshold * 0.55 : -1;
+  const horizontalThreshold = allowSpatial ? threshold * 0.35 : -1;
   const total = width * height;
   let changed = 0;
 
@@ -2146,11 +2151,11 @@ function applyLossyCompression(indices, width, height, mode, previousFrame, qual
       if (out[i] !== previousFrame[i]) { out[i] = previousFrame[i]; changed++; }
       continue;
     }
-    if (i >= width && closeEnoughIndex(value, out[i - width], verticalThreshold, mode)) {
+    if (verticalThreshold >= 0 && i >= width && closeEnoughIndex(value, out[i - width], verticalThreshold, mode)) {
       if (out[i] !== out[i - width]) { out[i] = out[i - width]; changed++; }
       continue;
     }
-    if (i % width !== 0 && closeEnoughIndex(value, out[i - 1], horizontalThreshold, mode)) {
+    if (horizontalThreshold >= 0 && i % width !== 0 && closeEnoughIndex(value, out[i - 1], horizontalThreshold, mode)) {
       if (out[i] !== out[i - 1]) { out[i] = out[i - 1]; changed++; }
     }
   }
@@ -2648,6 +2653,170 @@ function lzssCompress(input) {
   return new Uint8Array(out);
 }
 
+function lzwCompressIndices(values, mode) {
+  const minCodeSize = mode === 256 ? 8 : 5;
+  const clearCode = 1 << minCodeSize;
+  const eoiCode = clearCode + 1;
+  const out = [];
+  let bitBuffer = 0;
+  let bitCount = 0;
+
+  function emit(code) {
+    bitBuffer |= code << bitCount;
+    bitCount += 12;
+    while (bitCount >= 8) {
+      out.push(bitBuffer & 255);
+      bitBuffer >>= 8;
+      bitCount -= 8;
+    }
+  }
+
+  function reset(dictState) {
+    dictState.map.clear();
+    dictState.nextCode = eoiCode + 1;
+  }
+
+  const dict = { map: new Map(), nextCode: eoiCode + 1 };
+  emit(clearCode);
+  if (!values || values.length === 0) {
+    emit(eoiCode);
+    if (bitCount > 0) out.push(bitBuffer & 255);
+    return new Uint8Array(out);
+  }
+
+  const literalMask = mode === 256 ? 255 : 31;
+  let prefix = values[0] & literalMask;
+  for (let i = 1; i < values.length; i++) {
+    const value = values[i] & literalMask;
+    const key = prefix * 256 + value;
+    const found = dict.map.get(key);
+    if (found !== undefined) {
+      prefix = found;
+      continue;
+    }
+
+    emit(prefix);
+    if (dict.nextCode < 4096) {
+      dict.map.set(key, dict.nextCode++);
+    } else {
+      emit(clearCode);
+      reset(dict);
+    }
+    prefix = value;
+  }
+
+  emit(prefix);
+  emit(eoiCode);
+  if (bitCount > 0) out.push(bitBuffer & 255);
+  return new Uint8Array(out);
+}
+
+function frameDiffRect(indices, previousFrame, width, height) {
+  if (!previousFrame) return { x: 0, y: 0, w: width, h: height, full: true };
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y++) {
+    const rowOffset = y * width;
+    for (let x = 0; x < width; x++) {
+      const idx = rowOffset + x;
+      if (indices[idx] !== previousFrame[idx]) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < minX || maxY < minY) return null;
+  return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1, full: minX === 0 && minY === 0 && maxX === width - 1 && maxY === height - 1 };
+}
+
+function extractRectIndices(indices, width, rect) {
+  const out = new Uint16Array(rect.w * rect.h);
+  let p = 0;
+  for (let y = 0; y < rect.h; y++) {
+    const rowOffset = (rect.y + y) * width + rect.x;
+    for (let x = 0; x < rect.w; x++) out[p++] = indices[rowOffset + x];
+  }
+  return out;
+}
+
+function rawIndexBytes(values) {
+  const out = new Uint8Array(values.length);
+  for (let i = 0; i < values.length; i++) out[i] = values[i] & 255;
+  return out;
+}
+
+function c6FrameCandidate(type, rect, payload) {
+  const out = [type];
+  if (type === 2 || type === 4) {
+    writeVarUint(out, rect.x);
+    writeVarUint(out, rect.y);
+    writeVarUint(out, rect.w);
+    writeVarUint(out, rect.h);
+  }
+  writeVarUint(out, payload.length);
+  for (let i = 0; i < payload.length; i++) out.push(payload[i]);
+  return out;
+}
+
+function appendC6Frame(stream, indices, width, height, mode, previousFrame) {
+  const rect = frameDiffRect(indices, previousFrame, width, height);
+  if (!rect) {
+    stream.push(0);
+    return;
+  }
+
+  const full = rect.full ? indices : null;
+  const rectValues = rect.full ? indices : extractRectIndices(indices, width, rect);
+  const candidates = [];
+
+  if (full) {
+    candidates.push(c6FrameCandidate(1, null, lzwCompressIndices(full, mode)));
+    candidates.push(c6FrameCandidate(3, null, rawIndexBytes(full)));
+  } else {
+    candidates.push(c6FrameCandidate(2, rect, lzwCompressIndices(rectValues, mode)));
+    candidates.push(c6FrameCandidate(4, rect, rawIndexBytes(rectValues)));
+    if (rect.w * rect.h > width * height * 0.65) {
+      candidates.push(c6FrameCandidate(1, null, lzwCompressIndices(indices, mode)));
+      candidates.push(c6FrameCandidate(3, null, rawIndexBytes(indices)));
+    }
+  }
+
+  let best = candidates[0];
+  for (const candidate of candidates) {
+    if (candidate.length < best.length) best = candidate;
+  }
+  for (let i = 0; i < best.length; i++) stream.push(best[i]);
+}
+
+function buildC6Payload(frameIndices, width, height, mode) {
+  const stream = [];
+  let previousFrame = null;
+  for (const indices of frameIndices) {
+    appendC6Frame(stream, indices, width, height, mode, previousFrame);
+    previousFrame = indices;
+  }
+
+  const frameStream = new Uint8Array(stream);
+  const lzss = lzssCompress(frameStream);
+  const useLzss = lzss.length < frameStream.length;
+  const body = new Uint8Array((useLzss ? lzss.length : frameStream.length) + 1);
+  body[0] = useLzss ? 1 : 0;
+  body.set(useLzss ? lzss : frameStream, 1);
+  return bytesToBase64(body);
+}
+
+function buildC6NfpaOutput(frameIndices, width, height, format, delayMs, loop) {
+  const payload = buildC6Payload(frameIndices, width, height, format.mode);
+  return [
+    "!NFPA " + width + " " + height + " " + format.mode + " " + delayMs + " " + loop + " " + frameIndices.length + " C6",
+    ...splitBase64Lines(payload)
+  ].join("\n");
+}
+
 function buildC5Payload(frameIndices, width, height) {
   const stream = [];
   let previousFrame = null;
@@ -2737,6 +2906,7 @@ function buildNfpaOutput(frameIndices, width, height, format, delayMs, loop) {
   if (codec === "c3") return buildC3NfpaOutput(frameIndices, width, height, format, delayMs, loop);
   if (codec === "c4") return buildC4NfpaOutput(frameIndices, width, height, format, delayMs, loop);
   if (codec === "c5") return buildC5NfpaOutput(frameIndices, width, height, format, delayMs, loop);
+  if (codec === "c6") return buildC6NfpaOutput(frameIndices, width, height, format, delayMs, loop);
 
   const c2Lines = ["!NFPA " + width + " " + height + " " + format.mode + " " + delayMs + " " + loop + " " + frameIndices.length + " C2"];
   let previousFrame = null;
@@ -2748,8 +2918,9 @@ function buildNfpaOutput(frameIndices, width, height, format, delayMs, loop) {
   const c3Output = buildC3NfpaOutput(frameIndices, width, height, format, delayMs, loop);
   const c4Output = buildC4NfpaOutput(frameIndices, width, height, format, delayMs, loop);
   const c5Output = buildC5NfpaOutput(frameIndices, width, height, format, delayMs, loop);
+  const c6Output = buildC6NfpaOutput(frameIndices, width, height, format, delayMs, loop);
 
-  return shortestOutput([legacyOutput, c2Output, c3Output, c4Output, c5Output]);
+  return shortestOutput([legacyOutput, c2Output, c3Output, c4Output, c5Output, c6Output]);
 }
 
 function drawSourcePreview(img, width, height) {
@@ -2982,6 +3153,7 @@ function renderSwatches() {
   const mode = format.mode;
   const palette = paletteFor(mode);
   const supportsCompression = format.compressed || format.animated;
+  const supportsC6 = supportsCompression && format.animated;
   const supportsLossy = supportsCompression && els.compact.checked;
   els.paletteName.textContent = mode + "-color palette";
   els.swatches.classList.toggle("mode-256", mode === 256);
@@ -2990,11 +3162,14 @@ function renderSwatches() {
   els.compactSwitch.classList.toggle("disabled", !supportsCompression);
   if (!supportsCompression) els.compressionLossless.checked = true;
   if (!supportsCompression) els.codecAuto.checked = true;
+  if (!supportsC6 && els.codecC6.checked) els.codecAuto.checked = true;
   if (!supportsLossy && els.compressionLossy.checked) els.compressionLossless.checked = true;
   const lossy = lossyActive(format);
   els.compressionOptions.classList.toggle("disabled", !supportsCompression);
   els.codecGroup.classList.toggle("disabled", !supportsCompression);
-  document.querySelectorAll("input[name='codec']").forEach(input => { input.disabled = !supportsCompression; });
+  document.querySelectorAll("input[name='codec']").forEach(input => {
+    input.disabled = !supportsCompression || (input.value === "c6" && !supportsC6);
+  });
   els.compressionLossless.disabled = !supportsCompression;
   els.compressionLossy.disabled = !supportsLossy;
   els.quality.disabled = !lossy;

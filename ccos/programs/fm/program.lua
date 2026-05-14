@@ -44,7 +44,13 @@ end
 
 local function isProtectedPath(path)
     path = tostring(path or "")
-    return PROTECTED_PATHS[path] == true
+    if PROTECTED_PATHS[path] == true then return true end
+    for protected in pairs(PROTECTED_PATHS) do
+        if protected ~= "/" and path:sub(1, #protected + 1) == protected .. "/" then
+            return true
+        end
+    end
+    return false
 end
 
 local function extOf(name)
@@ -257,17 +263,22 @@ local function appFM()
             return
         end
         local prompt = it.dir and ("Type folder name: " .. it.name) or "Type DELETE to remove:"
-        D.inputDialog("Delete", prompt, "", function(answer)
+        D.inputDialog("Delete", prompt, it.dir and "" or "DELETE", function(answer)
             local confirmed = (it.dir and answer == it.name) or ((not it.dir) and answer == "DELETE")
             if confirmed and fs.exists(fp) then
-                local ok, err = pcall(fs.delete, fp)
-                if ok then
+                local ok, err = pcall(function() fs.delete(fp) end)
+                if ok and not fs.exists(fp) then
                     setStatus("Deleted: " .. it.name, "ok")
                     sel = math.max(1, sel - 1)
                     refresh(); D.markDirty()
                 else
                     setStatus("Delete failed: " .. tostring(err))
                 end
+            elseif confirmed then
+                setStatus("Already gone")
+                refresh(); D.markDirty()
+            else
+                setStatus("Delete cancelled")
             end
         end)
     end
@@ -326,6 +337,7 @@ local function appFM()
         {id="copy", label="Copy", w=42},
         {id="cut", label="Cut", w=34},
         {id="paste", label="Paste", w=44},
+        {id="delete", label="Del", w=34},
         {id="sort", label="Sort", w=38},
         {id="refresh", label="Rfr", w=32},
     }
@@ -376,11 +388,11 @@ local function appFM()
     end
 
     local function showContext(mx, my)
-        selectAt(mx, my)
-        local it = selected()
+        local hit = selectAt(mx, my)
+        local it = hit and selected() or nil
         local canFile = it and not it.empty and not it.up
         local menu = {
-            {"Open", function() activate() end},
+            {"Open", function() if canFile then activate() end end},
             {"Edit", function() if canFile then openFile(fullPath(it), true) end end},
             {nil, nil},
             {"Copy", function() if canFile then copySelected(false) end end},
@@ -507,6 +519,7 @@ local function appFM()
         elseif hit == "copy" then copySelected(false); return
         elseif hit == "cut" then copySelected(true); return
         elseif hit == "paste" then pasteClipboard(); return
+        elseif hit == "delete" then deleteSelected(); return
         elseif hit == "sort" then cycleSort(); return
         elseif hit == "refresh" then refresh(); D.markDirty(); return end
 

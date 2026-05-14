@@ -411,6 +411,122 @@ local function readVarUint(bytes, idx)
     return value, idx
 end
 
+local function bytesSlice(bytes, idx, len)
+    local out = {}
+    for i = 1, len do
+        out[i] = bytes[idx + i - 1] or 0
+    end
+    return out
+end
+
+local function flatToRows(flat, w, h)
+    local rows = {}
+    local p = 1
+    for y = 1, h do
+        local row = {}
+        for x = 1, w do
+            row[x] = flat[p] or 0
+            p = p + 1
+        end
+        rows[y] = row
+    end
+    return rows
+end
+
+local function copyFlat(prevFlat, total)
+    local flat = {}
+    for i = 1, total do
+        flat[i] = prevFlat and prevFlat[i] or 0
+    end
+    return flat
+end
+
+local function lzwDecompressIndices(bytes, mode, expected, stats)
+    local minCodeSize = (mode == 256) and 8 or 5
+    local clearCode = 2 ^ minCodeSize
+    local eoiCode = clearCode + 1
+    local nextCode = eoiCode + 1
+    local prefixes, suffixes = {}, {}
+    local idx, bitBuffer, bitCount = 1, 0, 0
+    local out = {}
+
+    local function reset()
+        prefixes, suffixes = {}, {}
+        nextCode = eoiCode + 1
+    end
+
+    local function readCode()
+        while bitCount < 12 and idx <= #bytes do
+            bitBuffer = bitBuffer + (bytes[idx] or 0) * (2 ^ bitCount)
+            bitCount = bitCount + 8
+            idx = idx + 1
+        end
+        if bitCount < 12 then return nil end
+        local base = 4096
+        local code = bitBuffer % base
+        bitBuffer = math.floor(bitBuffer / base)
+        bitCount = bitCount - 12
+        return code
+    end
+
+    local function addEntry(prefix, suffix)
+        if nextCode >= 4096 then return end
+        prefixes[nextCode] = prefix
+        suffixes[nextCode] = suffix
+        nextCode = nextCode + 1
+    end
+
+    local function outputCode(code, extra)
+        local stack = {}
+        local cur = code
+        while cur >= clearCode and prefixes[cur] ~= nil do
+            stack[#stack + 1] = suffixes[cur]
+            cur = prefixes[cur]
+        end
+        if cur == nil or cur >= clearCode then
+            if stats then stats.bad = stats.bad + 1 end
+            cur = 0
+        end
+        local first = cur % (mode == 256 and 256 or 32)
+        out[#out + 1] = first
+        for i = #stack, 1, -1 do
+            out[#out + 1] = stack[i]
+        end
+        if extra ~= nil then out[#out + 1] = extra end
+        return first
+    end
+
+    local oldCode, firstChar = nil, nil
+    while #out < expected do
+        local code = readCode()
+        if code == nil then break end
+        if code == clearCode then
+            reset()
+            oldCode, firstChar = nil, nil
+        elseif code == eoiCode then
+            break
+        elseif oldCode == nil then
+            firstChar = outputCode(code)
+            oldCode = code
+        elseif code < nextCode then
+            local currentFirst = outputCode(code)
+            addEntry(oldCode, currentFirst)
+            oldCode, firstChar = code, currentFirst
+        elseif code == nextCode then
+            local currentFirst = outputCode(oldCode, firstChar)
+            addEntry(oldCode, firstChar or 0)
+            oldCode, firstChar = code, currentFirst
+        else
+            if stats then stats.bad = stats.bad + 1 end
+            break
+        end
+    end
+
+    for i = #out + 1, expected do out[i] = 0 end
+    for i = expected + 1, #out do out[i] = nil end
+    return out
+end
+
 local function decodeC5Frames(payload, mode, w, h, frameCount, stats)
     local stream = lzssDecompress(base64Bytes(payload))
     local frames, idx, prevFlat = {}, 1, nil
@@ -425,6 +541,74 @@ local function decodeC5Frames(payload, mode, w, h, frameCount, stats)
         local rows, flat = decodeC3FrameBytes(frameBytes, mode, w, h, prevFlat, stats)
         frames[f] = rows
         prevFlat = flat
+    end
+    return frames
+end
+
+local function decodeC6Frames(payload, mode, w, h, frameCount, stats)
+    local packed = base64Bytes(payload)
+    local method = packed[1] or 0
+    local body = {}
+    for i = 2, #packed do body[#body + 1] = packed[i] end
+    local stream = method == 1 and lzssDecompress(body) or body
+    local total = w * h
+    local frames, idx, prevFlat, prevRows = {}, 1, nil, nil
+
+    for f = 1, frameCount do
+        local kind = stream[idx] or 0
+        idx = idx + 1
+        local flat, rows
+
+        if kind == 0 then
+            if prevFlat then
+                flat = prevFlat
+                rows = prevRows
+            else
+                flat = copyFlat(nil, total)
+                rows = flatToRows(flat, w, h)
+            end
+        else
+            local x, y, rw, rh = 0, 0, w, h
+            if kind == 2 or kind == 4 then
+                x, idx = readVarUint(stream, idx)
+                y, idx = readVarUint(stream, idx)
+                rw, idx = readVarUint(stream, idx)
+                rh, idx = readVarUint(stream, idx)
+            end
+            local payloadLen
+            payloadLen, idx = readVarUint(stream, idx)
+            local frameBytes = bytesSlice(stream, idx, payloadLen)
+            idx = idx + payloadLen
+
+            local expected = math.max(0, rw * rh)
+            local values = (kind == 1 or kind == 2) and lzwDecompressIndices(frameBytes, mode, expected, stats) or frameBytes
+
+            if kind == 1 or kind == 3 then
+                flat = {}
+                for i = 1, total do
+                    local v = values[i] or 0
+                    flat[i] = mode == 256 and v or (v % 32)
+                end
+            else
+                flat = copyFlat(prevFlat, total)
+                local p = 1
+                for yy = 0, rh - 1 do
+                    local base = (y + yy) * w + x + 1
+                    for xx = 0, rw - 1 do
+                        local at = base + xx
+                        if at >= 1 and at <= total then
+                            local v = values[p] or 0
+                            flat[at] = mode == 256 and v or (v % 32)
+                        end
+                        p = p + 1
+                    end
+                end
+            end
+            rows = flatToRows(flat, w, h)
+        end
+
+        frames[f] = rows
+        prevFlat, prevRows = flat, rows
     end
     return frames
 end
@@ -446,7 +630,11 @@ local function parseNfpc(lines, stats)
     local h = tonumber(hStr) or 0
 
     local pixels = {}
-    if codec == "C5" then
+    if codec == "C6" then
+        local payload = readC3Blob(lines, 2)
+        local frames = decodeC6Frames(payload, mode, w, h, 1, stats)
+        pixels = frames[1] or {}
+    elseif codec == "C5" then
         local payload = readC3Blob(lines, 2)
         local frames = decodeC5Frames(payload, mode, w, h, 1, stats)
         pixels = frames[1] or {}
@@ -485,7 +673,11 @@ local function parseNfpa(lines, stats)
 
     local frames = {}
     local idx = 2
-    if codec == "C5" then
+    if codec == "C6" then
+        local payload
+        payload, idx = readC3Blob(lines, idx)
+        frames = decodeC6Frames(payload, mode, w, h, frameCount, stats)
+    elseif codec == "C5" then
         local payload
         payload, idx = readC3Blob(lines, idx)
         frames = decodeC5Frames(payload, mode, w, h, frameCount, stats)
@@ -728,7 +920,7 @@ local function appImageViewer(initialPath)
                 imgH = fh or #pixels
                 animDelay = (delay or 100) / 1000
                 isAnimation = true
-                formatName = ((lines[1] or ""):find("C5") and "NFPA C5") or ((lines[1] or ""):find("C4") and "NFPA C4") or ((lines[1] or ""):find("C3") and "NFPA C3") or ((lines[1] or ""):find("C2") and "NFPA C2" or "NFPA")
+                formatName = ((lines[1] or ""):find("C6") and "NFPA C6") or ((lines[1] or ""):find("C5") and "NFPA C5") or ((lines[1] or ""):find("C4") and "NFPA C4") or ((lines[1] or ""):find("C3") and "NFPA C3") or ((lines[1] or ""):find("C2") and "NFPA C2" or "NFPA")
                 startAnimation()
             else
                 status = "Invalid NFPA: " .. tostring(result)
@@ -741,7 +933,7 @@ local function appImageViewer(initialPath)
                 pixels = result
                 imgW = fw or 0
                 imgH = fh or #pixels
-                formatName = ((lines[1] or ""):find("C5") and "NFPC C5") or ((lines[1] or ""):find("C4") and "NFPC C4") or ((lines[1] or ""):find("C3") and "NFPC C3") or ((lines[1] or ""):find("C2") and "NFPC C2" or "NFPC")
+                formatName = ((lines[1] or ""):find("C6") and "NFPC C6") or ((lines[1] or ""):find("C5") and "NFPC C5") or ((lines[1] or ""):find("C4") and "NFPC C4") or ((lines[1] or ""):find("C3") and "NFPC C3") or ((lines[1] or ""):find("C2") and "NFPC C2" or "NFPC")
             else
                 status = "Invalid NFPC: " .. tostring(result)
                 if not quiet then API.showError("Image Viewer", status) end
