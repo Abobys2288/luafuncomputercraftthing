@@ -5,7 +5,6 @@ local R = API and API.getRenderer and API.getRenderer() or _G.ccos_render
 local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,DBLUE=19,RED=11,GREEN=9,CYAN=7}
 
 local LARGE_WARN = 5 * 1024 * 1024
-local ROW_HIT_Y_OFFSET = 24
 local IMAGE_EXT = {nfp=true, nfp256=true, nfpc=true, nfpa=true}
 local TEXT_EXT = {txt=true, lua=true, cfg=true, log=true, json=true, md=true, ccpkg=true}
 local PROTECTED_PATHS = {["/"]=true, ["/rom"]=true, ["/ccos"]=true, ["/www"]=true}
@@ -346,20 +345,19 @@ local function appFM()
     local function layout(cw, ch)
         local previewW = cw >= 300 and math.max(94, math.floor(cw * 0.34)) or 0
         local listW = previewW > 0 and (cw - previewW - 6) or cw
-        local listY = 38
+        local listY = 44
         local footerY = ch - 10
         local rowH = 8
-        local rows = math.max(1, math.floor((footerY - listY - 10) / rowH))
+        local rows = math.max(1, math.floor((footerY - listY - 8) / rowH))
         return listW, previewW, listY, footerY, rowH, rows
     end
 
     local function selectAt(mx, my)
         local listW, _, listY, _, rowH, rows = layout(w.cw - 6, w.ch - 21)
         if mx < 0 or mx >= listW then return false end
-        local hitY = my + ROW_HIT_Y_OFFSET
         for i = 1, rows do
             local iy = listY + (i - 1) * rowH
-            if hitY >= iy and hitY < iy + rowH then
+            if my >= iy and my < iy + rowH then
                 sel = math.min(#items, scroll + i)
                 return true
             end
@@ -452,15 +450,19 @@ local function appFM()
         local nameW = math.max(56, listW - 102)
         local typeX = cx + 6 + nameW
         local sizeX = cx + listW - 50
+        local headerY = cy + listY - 9
+        local listTop = cy + listY
+        local footerAbsY = cy + footerY
 
-        R.fillRect(cx, listY - 9, listW, 9, K.LGRAY)
-        drawText(cx + 6, listY - 8, "Name", K.BLACK, K.LGRAY, nameW - 2)
-        if listW >= 145 then drawText(typeX, listY - 8, "Type", K.BLACK, K.LGRAY, 38) end
-        if listW >= 200 then drawText(sizeX, listY - 8, "Size", K.BLACK, K.LGRAY, 48) end
+        R.fillRect(cx, headerY, listW, 9, K.LGRAY)
+        drawText(cx + 6, headerY + 1, "Name", K.BLACK, K.LGRAY, nameW - 2)
+        if listW >= 145 then drawText(typeX, headerY + 1, "Type", K.BLACK, K.LGRAY, 38) end
+        if listW >= 200 then drawText(sizeX, headerY + 1, "Size", K.BLACK, K.LGRAY, 48) end
+        R.fillRect(cx, listTop, listW, rows * rowH, K.GRAY)
 
         local hoverIndex = nil
         local localMouseX = D.mouse.x - cx
-        local localMouseY = D.mouse.y - cy + ROW_HIT_Y_OFFSET
+        local localMouseY = D.mouse.y - cy
         if localMouseX >= 0 and localMouseX < listW then
             for i = 1, rows do
                 local iy = listY + (i - 1) * rowH
@@ -475,7 +477,7 @@ local function appFM()
             local idx = scroll + i
             local it = items[idx]
             if not it then break end
-            local iy = listY + (i - 1) * rowH
+            local iy = listTop + (i - 1) * rowH
             local active = (hoverIndex and idx == hoverIndex) or (not hoverIndex and idx == sel)
             if active then R.fillRect(cx + 2, iy, listW - 4, rowH, K.DBLUE) end
             local fg, bg = active and K.WHITE or K.BLACK, active and K.DBLUE or K.GRAY
@@ -488,12 +490,12 @@ local function appFM()
         local maxScroll = math.max(0, #items - rows)
         if maxScroll > 0 and listW >= 12 then
             local barH = math.max(8, math.floor((rows / #items) * (rows * rowH)))
-            local barY = listY + math.floor(((rows * rowH) - barH) * scroll / maxScroll)
+            local barY = listTop + math.floor(((rows * rowH) - barH) * scroll / maxScroll)
             R.fillRect(cx + listW - 5, barY, 3, barH, K.DGRAY)
         end
 
         if previewW > 0 then drawPreview(cx, cy, listW + 6, listY - 9, previewW, footerY - listY + 8) end
-        drawText(cx + 4, footerY, status .. "  Enter=open  C/X/V copy/cut/paste", K.DGRAY, K.GRAY, cw - 8)
+        drawText(cx + 4, footerAbsY, status .. "  Enter=open  C/X/V copy/cut/paste", K.DGRAY, K.GRAY, cw - 8)
     end
 
     w.onClick = function(_, mx, my)
