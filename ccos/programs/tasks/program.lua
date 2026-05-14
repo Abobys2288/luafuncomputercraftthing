@@ -107,7 +107,7 @@ local function appTasks()
         elseif id == "min" then toggleMinimize()
         elseif id == "kill" then closeSelected()
         elseif id == "gc" then
-            collectgarbage("collect")
+            if collectgarbage then collectgarbage("collect") end
             status = "GC complete"
             D.markContentDirty(w)
         end
@@ -120,7 +120,7 @@ local function appTasks()
             if tx - cx + b.w <= cw then button(tx, cy, b.w, b.label); tx = tx + b.w + 2 end
         end
 
-        local mem = collectgarbage("count")
+        local mem = (collectgarbage and collectgarbage("count")) or 0
         local uptime = math.floor(os.clock() - startClock)
         local top = "Win:" .. tostring(#(D.windows or {})) .. " BG:" .. tostring(#(D.bgTasks or {})) .. " Lua:" .. string.format("%.0fKB", mem) .. " Up:" .. uptime .. "s"
         drawText(cx + 4, cy + 18, top, K.BLACK, K.GRAY, cw - 8)

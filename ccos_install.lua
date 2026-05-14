@@ -74,6 +74,9 @@ local SERVER_DOWNLOADS = {
 local W, H = term.getSize()
 local C = term.isColor and term.isColor() or false
 
+local BG = colors.lightGray
+local FG = colors.black
+
 local function set(bg, fg)
     if not C then return end
     if bg then term.setBackgroundColor(bg) end
@@ -82,8 +85,8 @@ end
 
 local function reset()
     if not C then return end
-    term.setBackgroundColor(colors.black)
-    term.setTextColor(colors.white)
+    term.setBackgroundColor(BG)
+    term.setTextColor(FG)
 end
 
 local function cls()
@@ -114,18 +117,24 @@ local function box(x, y, bw, bh, bg, border)
     if bg and C then fill(x + 1, y + 1, bw - 2, bh - 2, bg) end
 end
 
+local function clearBoxLine(x, y, w2)
+    term.setCursorPos(x, y)
+    set(BG, FG)
+    term.write(string.rep(" ", w2))
+end
+
 local function progress(x, y, pw, done, total)
     done = math.min(done, total)
     local filled = math.floor((done / total) * (pw - 2))
     if C then
         term.setCursorPos(x, y)
-        set(colors.black, colors.white)
+        set(BG, colors.white)
         term.write("[")
-        set(colors.cyan, colors.black)
+        set(colors.cyan, BG)
         term.write(string.rep("\127", filled))
         set(colors.gray, colors.lightGray)
         term.write(string.rep("\127", pw - 2 - filled))
-        set(colors.black, colors.white)
+        set(BG, colors.white)
         term.write("]")
     else
         term.setCursorPos(x, y)
@@ -170,24 +179,23 @@ end
 
 local function main()
     cls()
-    if C then fill(1, 1, W, H, colors.black) end
 
     local bw = math.min(64, W - 4)
     local bh = math.min(18, H - 4)
     local bx = math.floor((W - bw) / 2) + 1
     local by = math.floor((H - bh) / 2) + 1
 
-    box(bx, by, bw, bh, colors.black, colors.cyan)
-    set(colors.black, colors.cyan)
+    box(bx, by, bw, bh, BG, colors.cyan)
+    set(BG, colors.cyan)
     term.setCursorPos(bx + 2, by + 1)
     term.write("  CCOS v3 Installer")
-    set(colors.black, colors.lightGray)
+    set(BG, colors.gray)
     term.setCursorPos(bx + 2, by + 2)
     term.write("  github.com/" .. REPO)
     reset()
 
-    term.setCursorPos(bx + 2, by + 3)
-    set(colors.black, colors.gray)
+    clearBoxLine(bx + 2, by + 3, bw - 4)
+    set(BG, colors.gray)
     term.write(string.rep("\143", bw - 4))
     reset()
 
@@ -196,8 +204,8 @@ local function main()
     local pbW = bw - 6
 
     if not http then
-        term.setCursorPos(bx + 3, by + bh - 2)
-        set(colors.black, colors.red)
+        clearBoxLine(bx + 3, by + bh - 2, bw - 6)
+        set(BG, colors.red)
         term.write("ERROR: HTTP API not enabled!")
         reset() sleep(5)
         return
@@ -223,17 +231,19 @@ local function main()
         if i > maxLines then
             -- shuffle up, remove oldest from screen
             for j = 2, maxLines do
-                term.setCursorPos(bx + 3, listY + j - 1)
-                set(colors.black, colors.gray)
+                clearBoxLine(bx + 3, listY + j - 1, bw - 6)
                 local old = FILES[i - maxLines + j] or ""
                 if #old > 34 then old = "..." .. old:sub(-31) end
+                term.setCursorPos(bx + 3, listY + j - 1)
+                set(BG, colors.gray)
                 term.write(old)
             end
             listIdx = maxLines
         end
 
+        clearBoxLine(bx + 3, listY + listIdx - 1, bw - 6)
         term.setCursorPos(bx + 3, listY + listIdx - 1)
-        set(colors.black, colors.lightGray)
+        set(BG, colors.lightGray)
         term.write(display)
 
         local url = BASE_URL .. file
@@ -243,11 +253,11 @@ local function main()
         local okX = bx + bw - 8
         term.setCursorPos(okX, listY + listIdx - 1)
         if ok then
-            set(colors.black, colors.lime)
+            set(BG, colors.lime)
             term.write("[OK]")
             success = success + 1
         else
-            set(colors.black, colors.red)
+            set(BG, colors.red)
             term.write("[ERR]")
             failed = failed + 1
             table.insert(logLines, file .. ": " .. tostring(err2))
@@ -255,7 +265,7 @@ local function main()
         reset()
 
         term.setCursorPos(pbX + pbW - 6, pbY)
-        set(colors.black, colors.white)
+        set(BG, colors.white)
         term.write(string.format("%3d%%", pct))
         reset()
 
@@ -271,19 +281,18 @@ local function main()
             serverLine = serverLine + 1
             progress(pbX, pbY, pbW, serverStep, total)
             local rowY = listY + ((serverLine - 1) % maxLines)
+            clearBoxLine(bx + 3, rowY, bw - 6)
             term.setCursorPos(bx + 3, rowY)
-            term.write(string.rep(" ", bw - 6))
-            term.setCursorPos(bx + 3, rowY)
-            set(colors.black, colors.lightGray)
+            set(BG, colors.lightGray)
             term.write((server.label .. ": " .. path):sub(1, bw - 12))
             local ok2, err2 = downloadFile(server.url, path)
             term.setCursorPos(bx + bw - 8, rowY)
             if ok2 then
-                set(colors.black, colors.lime)
+                set(BG, colors.lime)
                 term.write("[OK]")
                 success = success + 1
             else
-                set(colors.black, colors.red)
+                set(BG, colors.red)
                 term.write("[ERR]")
                 failed = failed + 1
                 table.insert(logLines, path .. ": " .. tostring(err2))
@@ -293,19 +302,21 @@ local function main()
     end
 
     local statusY = by + bh - 4
+    clearBoxLine(bx + 3, statusY, bw - 6)
     term.setCursorPos(bx + 3, statusY)
     if failed == 0 then
-        set(colors.black, colors.lime)
+        set(BG, colors.lime)
         term.write("Install complete! ")
-        set(colors.black, colors.white)
+        set(BG, colors.white)
         term.write(success .. "/" .. total .. " files.")
     else
-        set(colors.black, colors.red)
+        set(BG, colors.red)
         term.write("Failed: " .. failed .. "  See errors below.")
         for j, line in ipairs(logLines) do
             if j <= 2 then
+                clearBoxLine(bx + 3, statusY + j, bw - 6)
                 term.setCursorPos(bx + 3, statusY + j)
-                set(colors.black, colors.red)
+                set(BG, colors.red)
                 term.write(line:sub(1, bw - 6))
             end
         end
@@ -313,16 +324,18 @@ local function main()
     reset()
 
     if failed == 0 then
+        clearBoxLine(bx + 3, by + bh - 1, bw - 6)
         term.setCursorPos(bx + 3, by + bh - 1)
-        set(colors.black, colors.lightGray)
+        set(BG, colors.lightGray)
         term.write("Press any key to start CCOS...")
         reset()
         os.pullEvent("key")
         cls()
         shell.run("/ccos/init.lua")
     else
+        clearBoxLine(bx + 3, by + bh - 1, bw - 6)
         term.setCursorPos(bx + 3, by + bh - 1)
-        set(colors.black, colors.lightGray)
+        set(BG, colors.lightGray)
         term.write("Press any key to exit...")
         reset()
         os.pullEvent("key")
