@@ -489,9 +489,9 @@ function D.applyTheme(name)
     D.themeName = picked
     K.DESKTOP = t.desktop or 30
     K.DBLUE = t.title or 19
-    K.GRAY = t.window or 2
-    K.LGRAY = t.light or 3
-    K.DGRAY = t.dark or 4
+    K.GRAY = 2
+    K.LGRAY = 3
+    K.DGRAY = 4
     D.lastIconCacheW = 0
     D.lastIconCacheH = 0
     D.markDirty()
@@ -546,8 +546,8 @@ end
 
 function D.logCrash(source, err)
     D.crashCount = (D.crashCount or 0) + 1
-    ensureDir(D.crashLogPath)
     local ok = pcall(function()
+        ensureDir(D.crashLogPath)
         local f = fs.open(D.crashLogPath, "a")
         if f then
             local stamp = "day " .. tostring(os.day and os.day() or "?") .. " " .. tostring(os.time and os.time() or "?")

@@ -333,8 +333,9 @@ local function appFM()
         return listW, previewW, listY, footerY, rowH, rows
     end
 
-    local function selectAt(my)
-        local _, _, listY, _, rowH, rows = layout(w.cw - 6, w.ch - 21)
+    local function selectAt(mx, my)
+        local listW, _, listY, _, rowH, rows = layout(w.cw - 6, w.ch - 21)
+        if mx < 0 or mx >= listW then return false end
         for i = 1, rows do
             local iy = listY + (i - 1) * rowH
             if my >= iy and my < iy + rowH then
@@ -356,7 +357,7 @@ local function appFM()
     end
 
     local function showContext(mx, my)
-        selectAt(my)
+        selectAt(mx, my)
         local it = selected()
         local canFile = it and not it.empty and not it.up
         local menu = {
@@ -473,10 +474,13 @@ local function appFM()
         elseif hit == "sort" then cycleSort(); return
         elseif hit == "refresh" then refresh(); D.markDirty(); return end
 
-        if selectAt(my) then D.markContentDirty(w); return end
+        if selectAt(mx, my) then D.markContentDirty(w); return end
     end
 
-    w.onDoubleClick = function() activate() end
+    w.onDoubleClick = function(_, mx, my)
+        selectAt(mx, my)
+        activate()
+    end
     w.onRightClick = function(_, mx, my) showContext(mx, my) end
 
     w.onKey = function(_, k, ch)
