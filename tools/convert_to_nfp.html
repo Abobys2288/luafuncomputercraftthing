@@ -3204,29 +3204,65 @@ async function loadImageFromFile(file) {
 async function loadVideoFromFile(file) {
   cleanupSourceVideoElement();
   cleanupSourceObjectUrl();
-  const blobUrl = URL.createObjectURL(file);
-  sourceObjectUrl = blobUrl;
-  try {
-    return await loadVideoFromUrl(blobUrl, file);
-  } catch (firstError) {
-    cleanupSourceVideoElement();
-    cleanupSourceObjectUrl();
-    if (file.size <= 128 * 1024 * 1024) {
-      setStatus("Retrying video load...");
-      try {
-        const dataUrl = await readFileAsDataUrl(file);
-        return await loadVideoFromUrl(dataUrl, file);
-      } catch (_) {
-        cleanupSourceVideoElement();
-      }
+  const errors = [];
+
+  async function tryVideoUrl(url, label, revokeOnFail) {
+    sourceObjectUrl = url;
+    try {
+      return await loadVideoFromUrl(url, file, label);
+    } catch (error) {
+      errors.push(error);
+      cleanupSourceVideoElement();
+      if (revokeOnFail && url.startsWith("blob:")) URL.revokeObjectURL(url);
+      if (sourceObjectUrl === url) sourceObjectUrl = "";
+      throw error;
     }
-    throw firstError;
   }
+
+  const blobUrl = URL.createObjectURL(file);
+  try {
+    return await tryVideoUrl(blobUrl, "blob URL", true);
+  } catch (_) {
+    cleanupSourceVideoElement();
+  }
+
+  if (file.type) {
+    setStatus("Retrying video load without MIME...");
+    const rawBlobUrl = URL.createObjectURL(new Blob([file], { type: "" }));
+    try {
+      return await tryVideoUrl(rawBlobUrl, "raw blob URL", true);
+    } catch (_) {
+      cleanupSourceVideoElement();
+    }
+  }
+
+  if (!file.type && /\.mp4$/i.test(file.name || "")) {
+    setStatus("Retrying video load as MP4...");
+    const typedBlobUrl = URL.createObjectURL(new Blob([file], { type: "video/mp4" }));
+    try {
+      return await tryVideoUrl(typedBlobUrl, "MP4 blob URL", true);
+    } catch (_) {
+      cleanupSourceVideoElement();
+    }
+  }
+
+  if (file.size <= 128 * 1024 * 1024) {
+    setStatus("Retrying video load as data URL...");
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      return await tryVideoUrl(dataUrl, "data URL", false);
+    } catch (_) {
+      cleanupSourceVideoElement();
+    }
+  }
+
+  throw new Error(summarizeVideoLoadErrors(file, errors));
 }
 
-function loadVideoFromUrl(url, file) {
+function loadVideoFromUrl(url, file, sourceLabel) {
   const video = document.createElement("video");
   video.muted = true;
+  video.defaultMuted = true;
   video.playsInline = true;
   video.preload = "auto";
   video.controls = false;
@@ -3239,7 +3275,7 @@ function loadVideoFromUrl(url, file) {
   video.style.pointerEvents = "none";
   document.body.appendChild(video);
 
-  return waitForVideoReady(video, file, url).then(() => {
+  return waitForVideoReady(video, file, sourceLabel || "video source").then(() => {
     sourceVideoElement = video;
     return video;
   }).catch(error => {
@@ -3248,7 +3284,31 @@ function loadVideoFromUrl(url, file) {
   });
 }
 
-function waitForVideoReady(video, file, url) {
+function waitForDecodedVideoFrame(video, timeoutMs = 450) {
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    if (typeof video.requestVideoFrameCallback === "function") {
+      const timeout = setTimeout(finish, timeoutMs);
+      try {
+        video.requestVideoFrameCallback(() => {
+          clearTimeout(timeout);
+          finish();
+        });
+        return;
+      } catch (_) {
+        clearTimeout(timeout);
+      }
+    }
+    requestAnimationFrame(() => requestAnimationFrame(finish));
+  });
+}
+
+function waitForVideoReady(video, file, sourceLabel) {
   return new Promise((resolve, reject) => {
     let settled = false;
     let nudged = false;
@@ -3264,7 +3324,9 @@ function waitForVideoReady(video, file, url) {
       video.removeEventListener("timeupdate", onReady);
       video.removeEventListener("error", onError);
     };
-    const done = () => {
+    const done = async () => {
+      if (settled) return;
+      await waitForDecodedVideoFrame(video);
       if (settled) return;
       settled = true;
       cleanup();
@@ -3293,7 +3355,7 @@ function waitForVideoReady(video, file, url) {
       if (video.readyState >= 1) nudgeFrameDecode();
     }
     function onError() {
-      fail(describeVideoLoadError(video, file, url));
+      fail(describeVideoLoadError(video, file, sourceLabel));
     }
 
     video.addEventListener("loadedmetadata", onReady);
@@ -3307,16 +3369,16 @@ function waitForVideoReady(video, file, url) {
       if (video.videoWidth > 0 && video.videoHeight > 0 && video.readyState >= 1) {
         done();
       } else {
-        fail("Video load timed out. Try H.264 MP4 or VP9/WebM.");
+        fail("Video load timed out. Try H.264/AAC MP4 or VP9/WebM.");
       }
-    }, 15000);
+    }, 30000);
 
     video.src = url;
     video.load();
   });
 }
 
-function describeVideoLoadError(video, file, url) {
+function describeVideoLoadError(video, file, sourceLabel) {
   const code = video.error ? video.error.code : 0;
   const reasons = {
     1: "Video load was aborted",
@@ -3324,12 +3386,23 @@ function describeVideoLoadError(video, file, url) {
     3: "Chrome could not decode this video codec",
     4: "Chrome does not support this video type or codec"
   };
-  const reason = reasons[code] || "Chrome could not load this video";
   const type = file.type || "unknown MIME";
   const support = type !== "unknown MIME" ? video.canPlayType(type) : "";
+  const reason = code === 4 && support
+    ? "Chrome can open this container only as '" + support + "', but failed to decode the actual stream"
+    : (reasons[code] || "Chrome could not load this video");
   const supportNote = support ? "support: " + support : "support: unknown";
-  const sourceNote = url.startsWith("data:") ? "data URL" : "blob URL";
-  return reason + ". Use H.264 MP4 or VP8/VP9 WebM. (" + type + ", " + supportNote + ", " + sourceNote + ")";
+  return reason + ". Use H.264/AAC MP4 or VP8/VP9 WebM. (" + type + ", " + supportNote + ", " + sourceLabel + ")";
+}
+
+function summarizeVideoLoadErrors(file, errors) {
+  const last = errors[errors.length - 1];
+  if (!last) return "Cannot load video";
+  const prefix = last.message || "Cannot load video";
+  if ((file.name || "").toLowerCase().endsWith(".mp4")) {
+    return prefix + ". If this is HEVC/H.265, AV1, or an old MPEG-4 stream inside .mp4, Chrome may reject it even when video/mp4 says maybe.";
+  }
+  return prefix;
 }
 
 function readFileAsDataUrl(file) {
@@ -3375,7 +3448,7 @@ function seekVideo(video, time) {
   const duration = Number.isFinite(video.duration) ? video.duration : 0;
   const target = duration > 0 ? Math.max(0, Math.min(time, Math.max(0, duration - 0.001))) : 0;
   if (Math.abs(video.currentTime - target) < 0.001 && video.readyState >= 2) {
-    return Promise.resolve();
+    return waitForDecodedVideoFrame(video);
   }
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -3399,9 +3472,15 @@ function seekVideo(video, time) {
       cleanup();
       reject(error);
     };
-    const onSeeked = () => done();
+    const tryDone = () => {
+      if (settled) return;
+      if (video.readyState >= 2 && !video.seeking && Math.abs(video.currentTime - target) < 0.12) {
+        waitForDecodedVideoFrame(video).then(done);
+      }
+    };
+    const onSeeked = () => tryDone();
     const onReady = () => {
-      if (video.readyState >= 2 && Math.abs(video.currentTime - target) < 0.08) done();
+      tryDone();
     };
     const onError = () => {
       fail(new Error("Cannot seek video"));
@@ -3413,7 +3492,7 @@ function seekVideo(video, time) {
     timeout = setTimeout(() => fail(new Error("Cannot seek video: timed out")), 10000);
     try {
       video.currentTime = target;
-      onReady();
+      setTimeout(tryDone, 0);
     } catch (error) {
       fail(error);
     }
@@ -3483,7 +3562,8 @@ async function extractVideoFrames(width, height, fps, maxSeconds) {
 
   const interval = 1 / fps;
   const frames = [];
-  const frameCount = Math.max(1, Math.floor(limit * fps));
+  const frameCount = Math.max(1, Math.round(limit * fps));
+  sourceMedia.pause();
   for (let i = 0; i < frameCount; i++) {
     const time = Math.min(i * interval, Math.max(0, limit - 0.001));
     await seekVideo(sourceMedia, time);
@@ -3496,6 +3576,7 @@ async function extractVideoFrames(width, height, fps, maxSeconds) {
     }
   }
   setProgress(false);
+  sourceMedia.pause();
   await seekVideo(sourceMedia, 0);
   drawSourcePreview(sourceMedia, width, height);
   return frames;
@@ -3603,7 +3684,7 @@ async function convert() {
       const fps = Math.round(clampNumber(els.fps.value, 1, 60, 10));
       const loop = Math.round(clampNumber(els.loop.value, 0, 65535, 0));
       const maxSeconds = clampNumber(els.duration.value, 0, 3600, 0);
-      const delayMs = Math.max(1, Math.floor(1000 / fps));
+      const delayMs = Math.max(1, Math.round(1000 / fps));
       setProgress(true, 5, "Extracting frames...");
       const sourceFrames = await extractSourceFrames(width, height, fps, maxSeconds);
       if (!sourceFrames.length) throw new Error("No frames extracted");
