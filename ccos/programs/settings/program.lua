@@ -75,8 +75,10 @@ local function appSettings()
             D.inputLayout = D.inputLayout == "RU" and "EN" or "RU"
             setStatus("Layout: " .. D.inputLayout, "ok")
         elseif id == "save" then
-            if D.saveConfig then D.saveConfig() end
-            setStatus("Settings saved", "ok")
+            local ok, err = true, nil
+            if D.saveConfig then ok, err = D.saveConfig() end
+            if ok then setStatus("Settings saved", "ok")
+            else setStatus("Save failed: " .. tostring(err)) end
         elseif id == "reload" then
             if D.loadPrograms then D.loadPrograms() end
             setStatus("Programs reloaded", "ok")

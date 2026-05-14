@@ -5,8 +5,10 @@ local R = API and API.getRenderer and API.getRenderer() or _G.ccos_render
 local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,DBLUE=19,RED=11,GREEN=9,CYAN=7}
 
 local LARGE_WARN = 5 * 1024 * 1024
+local ROW_HIT_Y_OFFSET = 24
 local IMAGE_EXT = {nfp=true, nfp256=true, nfpc=true, nfpa=true}
 local TEXT_EXT = {txt=true, lua=true, cfg=true, log=true, json=true, md=true, ccpkg=true}
+local PROTECTED_PATHS = {["/"]=true, ["/rom"]=true, ["/ccos"]=true, ["/www"]=true}
 
 local function clip(text, w)
     if API and API.clipText then return API.clipText(text, w) end
@@ -39,6 +41,11 @@ end
 local function fileName(path)
     if API and API.getFileName then return API.getFileName(path) end
     return tostring(path or ""):match("([^/]+)$") or ""
+end
+
+local function isProtectedPath(path)
+    path = tostring(path or "")
+    return PROTECTED_PATHS[path] == true
 end
 
 local function extOf(name)
@@ -230,6 +237,7 @@ local function appFM()
     local function renameSelected()
         local it = selected()
         if not it or it.empty or it.up then return end
+        if isProtectedPath(fullPath(it)) then setStatus("Protected folder"); return end
         D.inputDialog("Rename", "New name:", it.name, function(name)
             if name and name ~= "" and name ~= it.name then
                 local src, dst = fullPath(it), join(path, name)
@@ -244,12 +252,23 @@ local function appFM()
         local it = selected()
         if not it or it.empty or it.up then return end
         local fp = fullPath(it)
-        D.inputDialog("Delete", "Type DELETE to remove:", "", function(answer)
-            if answer == "DELETE" and fs.exists(fp) then
-                fs.delete(fp)
-                setStatus("Deleted: " .. it.name, "ok")
-                sel = math.max(1, sel - 1)
-                refresh(); D.markDirty()
+        if isProtectedPath(fp) then
+            setStatus("Protected folder")
+            if API and API.notify then API.notify("File Explorer", fp .. " is protected", "error", 4) end
+            return
+        end
+        local prompt = it.dir and ("Type folder name: " .. it.name) or "Type DELETE to remove:"
+        D.inputDialog("Delete", prompt, "", function(answer)
+            local confirmed = (it.dir and answer == it.name) or ((not it.dir) and answer == "DELETE")
+            if confirmed and fs.exists(fp) then
+                local ok, err = pcall(fs.delete, fp)
+                if ok then
+                    setStatus("Deleted: " .. it.name, "ok")
+                    sel = math.max(1, sel - 1)
+                    refresh(); D.markDirty()
+                else
+                    setStatus("Delete failed: " .. tostring(err))
+                end
             end
         end)
     end
@@ -257,6 +276,7 @@ local function appFM()
     local function copySelected(cut)
         local it = selected()
         if not it or it.empty or it.up then return end
+        if cut and isProtectedPath(fullPath(it)) then setStatus("Protected folder"); return end
         D.fileClipboard = {path=fullPath(it), cut=cut}
         setStatus((cut and "Cut: " or "Copied: ") .. it.name, "ok")
         D.markContentDirty(D.activeWin)
@@ -336,9 +356,10 @@ local function appFM()
     local function selectAt(mx, my)
         local listW, _, listY, _, rowH, rows = layout(w.cw - 6, w.ch - 21)
         if mx < 0 or mx >= listW then return false end
+        local hitY = my + ROW_HIT_Y_OFFSET
         for i = 1, rows do
             local iy = listY + (i - 1) * rowH
-            if my >= iy and my < iy + rowH then
+            if hitY >= iy and hitY < iy + rowH then
                 sel = math.min(#items, scroll + i)
                 return true
             end
@@ -437,12 +458,25 @@ local function appFM()
         if listW >= 145 then drawText(typeX, listY - 8, "Type", K.BLACK, K.LGRAY, 38) end
         if listW >= 200 then drawText(sizeX, listY - 8, "Size", K.BLACK, K.LGRAY, 48) end
 
+        local hoverIndex = nil
+        local localMouseX = D.mouse.x - cx
+        local localMouseY = D.mouse.y - cy + ROW_HIT_Y_OFFSET
+        if localMouseX >= 0 and localMouseX < listW then
+            for i = 1, rows do
+                local iy = listY + (i - 1) * rowH
+                if localMouseY >= iy and localMouseY < iy + rowH then
+                    hoverIndex = scroll + i
+                    break
+                end
+            end
+        end
+
         for i = 1, rows do
             local idx = scroll + i
             local it = items[idx]
             if not it then break end
             local iy = listY + (i - 1) * rowH
-            local active = idx == sel
+            local active = (hoverIndex and idx == hoverIndex) or (not hoverIndex and idx == sel)
             if active then R.fillRect(cx + 2, iy, listW - 4, rowH, K.DBLUE) end
             local fg, bg = active and K.WHITE or K.BLACK, active and K.DBLUE or K.GRAY
             local prefix = it.up and "^ " or (it.dir and "[] " or (IMAGE_EXT[it.ext] and "## " or "   "))

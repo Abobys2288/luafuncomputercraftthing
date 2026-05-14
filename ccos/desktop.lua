@@ -402,6 +402,7 @@ end
 -- CONFIG PERSISTENCE
 -- ============================================================
 D.configPath = "/ccos/config/desktop.cfg"
+local ensureDir
 
 function D.loadConfig()
     if not fs.exists(D.configPath) then return end
@@ -440,27 +441,47 @@ function D.loadConfig()
 end
 
 function D.saveConfig()
-    local cfg = {
-        windows = {},
-        inputLayout = D.inputLayout,
-        themeName = D.themeName,
-        soundEnabled = D.soundEnabled ~= false,
-        notificationsEnabled = D.notificationsEnabled ~= false,
-    }
-    for _, w in ipairs(D.windows) do
-        if w.visible and not w.modal then
-            table.insert(cfg.windows, {
-                title = w.title,
-                cx = w.cx, cy = w.cy,
-                cw = w.cw, ch = w.ch
-            })
+    local ok, err = pcall(function()
+        local cfg = {
+            windows = {},
+            inputLayout = D.inputLayout,
+            themeName = D.themeName,
+            soundEnabled = D.soundEnabled ~= false,
+            notificationsEnabled = D.notificationsEnabled ~= false,
+        }
+        for _, w in ipairs(D.windows) do
+            if w.visible and not w.modal then
+                table.insert(cfg.windows, {
+                    title = w.title,
+                    cx = w.cx, cy = w.cy,
+                    cw = w.cw, ch = w.ch
+                })
+            end
         end
-    end
-    if not fs.isDir("/ccos/config") then fs.makeDir("/ccos/config") end
-    local f = fs.open(D.configPath, "w")
-    if f then
+        ensureDir(D.configPath)
+        local f = fs.open(D.configPath, "w")
+        if not f then error("Cannot open " .. D.configPath) end
         f.write(textutils.serialize(cfg))
         f.close()
+    end)
+    if not ok then
+        if D.notify then D.notify("Save Session", tostring(err), "error", 5) end
+        return false, err
+    end
+    if D.notify then D.notify("Save Session", "Saved", "ok", 3) end
+    return true
+end
+
+function ensureDir(path)
+    if not path or path == "/" then return end
+    local dir = path:match("(.+)/[^/]+")
+    if not dir or dir == "" or fs.isDir(dir) then return end
+    local build = ""
+    for part in dir:gmatch("[^/]+") do
+        build = build .. "/" .. part
+        if not fs.exists(build) then
+            fs.makeDir(build)
+        end
     end
 end
 
@@ -531,17 +552,6 @@ function D.pruneNotifications()
         end
     end
     if changed then D.markDirty() end
-end
-
-local function ensureDir(path)
-    if not path or path == "/" then return end
-    local dir = path:match("(.+)/[^/]+")
-    if not dir or dir == "" or fs.isDir(dir) then return end
-    local build = ""
-    for part in dir:gmatch("[^/]+") do
-        build = build .. "/" .. part
-        if not fs.exists(build) then fs.makeDir(build) end
-    end
 end
 
 function D.logCrash(source, err)
