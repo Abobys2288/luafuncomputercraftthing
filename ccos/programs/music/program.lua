@@ -147,9 +147,10 @@ local function appSpeakerPanel(initialPath)
     local lastError = ""
     local state = "stopped"
     local volume = 1.0
-    local speaker, speakerName = nil, nil
+    local speakers, speakerLabel = {}, nil
     local decoder, handle, response = nil, nil, nil
     local pendingBuffer = nil
+    local pendingAccepted = {}
     local totalBytes, readBytes = 0, 0
     local timerId = nil
     local closed = false
@@ -163,30 +164,40 @@ local function appSpeakerPanel(initialPath)
     end
 
     local function setStatus(text, err)
-        status = tostring(text or "")
-        lastError = err and tostring(err) or ""
+        local nextStatus = tostring(text or "")
+        local nextError = err and tostring(err) or ""
+        if status == nextStatus and lastError == nextError then return end
+        status = nextStatus
+        lastError = nextError
         mark()
     end
 
-    local function refreshSpeaker()
-        speaker, speakerName = nil, nil
+    local function refreshSpeakers()
+        local newNames = {}
+        speakers, speakerLabel = {}, nil
         if peripheral and peripheral.getNames then
             for _, name in ipairs(peripheral.getNames()) do
                 if peripheral.getType(name) == "speaker" then
                     local sp = peripheral.wrap(name)
                     if sp and type(sp.playAudio) == "function" then
-                        speaker = sp
-                        speakerName = name
-                        break
+                        speakers[#speakers + 1] = {name=name, device=sp}
+                        newNames[name] = true
                     end
                 end
             end
         elseif peripheral and peripheral.find then
-            speaker = peripheral.find("speaker")
-            if speaker and type(speaker.playAudio) ~= "function" then speaker = nil end
-            speakerName = speaker and "speaker" or nil
+            local sp = peripheral.find("speaker")
+            if sp and type(sp.playAudio) == "function" then
+                speakers[#speakers + 1] = {name="speaker", device=sp}
+                newNames.speaker = true
+            end
         end
-        return speaker ~= nil
+        for name in pairs(pendingAccepted or {}) do
+            if not newNames[name] then pendingAccepted[name] = nil end
+        end
+        if #speakers == 1 then speakerLabel = speakers[1].name
+        elseif #speakers > 1 then speakerLabel = tostring(#speakers) .. " speakers" end
+        return #speakers > 0
     end
 
     local function closeStream()
@@ -195,6 +206,7 @@ local function appSpeakerPanel(initialPath)
         if response then pcall(function() response.close() end) end
         if handle then pcall(function() handle.close() end) end
         response, handle, decoder, pendingBuffer = nil, nil, nil, nil
+        pendingAccepted = {}
         totalBytes, readBytes = 0, 0
     end
 
@@ -257,7 +269,9 @@ local function appSpeakerPanel(initialPath)
     local function stopAudio(keepTitle)
         state = "stopped"
         closeStream()
-        if speaker and speaker.stop then pcall(function() speaker.stop() end) end
+        for _, item in ipairs(speakers or {}) do
+            if item.device and item.device.stop then pcall(function() item.device.stop() end) end
+        end
         if not keepTitle then
             current = #playlist > 0 and math.max(1, math.min(current, #playlist)) or 0
         end
@@ -267,7 +281,7 @@ local function appSpeakerPanel(initialPath)
     local function openCurrent()
         closeStream()
         if not OK_DFPWM then state = "stopped"; setStatus("DFPWM decoder missing"); return end
-        if not speaker and not refreshSpeaker() then state = "stopped"; setStatus("No speaker attached"); return end
+        if #speakers == 0 and not refreshSpeakers() then state = "stopped"; setStatus("No speaker attached"); return end
         local src = playlist[current]
         if not src then state = "stopped"; setStatus("Playlist empty"); return end
 
@@ -329,11 +343,6 @@ local function appSpeakerPanel(initialPath)
     end
 
     local function readBuffer()
-        if pendingBuffer then
-            local buf = pendingBuffer
-            pendingBuffer = nil
-            return buf
-        end
         if not decoder then return nil, "No decoder" end
         local chunk
         if response then chunk = response.read(CHUNK_SIZE)
@@ -346,21 +355,57 @@ local function appSpeakerPanel(initialPath)
         return buffer
     end
 
+    local function acceptPendingBuffer()
+        if not pendingBuffer then return true end
+        if #speakers == 0 and not refreshSpeakers() then return false end
+
+        local allAccepted = true
+        for _, item in ipairs(speakers) do
+            if not pendingAccepted[item.name] then
+                local ok, played = pcall(function() return item.device.playAudio(pendingBuffer, volume) end)
+                if ok and played then
+                    pendingAccepted[item.name] = true
+                else
+                    allAccepted = false
+                end
+            end
+        end
+
+        if allAccepted then
+            pendingBuffer = nil
+            pendingAccepted = {}
+            return true
+        end
+        return false
+    end
+
     local function pump()
         if closed or state ~= "playing" then return end
-        if not speaker and not refreshSpeaker() then setStatus("No speaker attached"); return end
+        if #speakers == 0 and not refreshSpeakers() then setStatus("No speaker attached"); return end
+
+        if pendingBuffer then
+            if acceptPendingBuffer() then
+                setStatus("Playing on " .. tostring(#speakers) .. " speaker(s)")
+                schedule(0.01)
+            else
+                schedule(0.12)
+            end
+            return
+        end
+
         local buffer, err = readBuffer()
         if not buffer then
             if err == "eof" then finishTrack() else state = "stopped"; setStatus("Playback error", err) end
             return
         end
-        local ok, played = pcall(function() return speaker.playAudio(buffer, volume) end)
-        if ok and played then
-            setStatus("Playing")
-            schedule(0.10)
+
+        pendingBuffer = buffer
+        pendingAccepted = {}
+        if acceptPendingBuffer() then
+            setStatus("Playing on " .. tostring(#speakers) .. " speaker(s)")
+            schedule(0.01)
         else
-            pendingBuffer = buffer
-            schedule(0.18)
+            schedule(0.12)
         end
     end
 
@@ -369,7 +414,9 @@ local function appSpeakerPanel(initialPath)
             state = "paused"
             if timerId and os.cancelTimer then pcall(os.cancelTimer, timerId) end
             timerId = nil
-            if speaker and speaker.stop then pcall(function() speaker.stop() end) end
+            for _, item in ipairs(speakers or {}) do
+                if item.device and item.device.stop then pcall(function() item.device.stop() end) end
+            end
             setStatus("Paused")
         elseif state == "paused" then
             state = "playing"
@@ -435,8 +482,9 @@ local function appSpeakerPanel(initialPath)
     local function toolbarHit(mx, my)
         if my < 0 or my >= 14 then return nil end
         local x = 0
+        local contentW = win and math.max(0, win.cw - 6) or 9999
         for _, b in ipairs(toolbar) do
-            if mx >= x and mx < x + b.w then return b.id end
+            if x + b.w <= contentW and mx >= x and mx < x + b.w then return b.id end
             x = x + b.w + 2
         end
         return nil
@@ -484,9 +532,9 @@ local function appSpeakerPanel(initialPath)
             if x - cx + b.w <= cw then button(x, cy, b.w, b.label); x = x + b.w + 2 end
         end
 
-        local top = (speakerName and ("SPK:" .. speakerName) or "NO SPEAKER") ..
+        local top = (speakerLabel and ("SPK:" .. speakerLabel) or "NO SPEAKER") ..
             "  " .. state:upper() .. "  VOL:" .. tostring(math.floor(volume * 100)) .. "%"
-        drawText(cx + 4, cy + 18, top, speakerName and K.BLACK or K.RED, K.GRAY, cw - 8)
+        drawText(cx + 4, cy + 18, top, speakerLabel and K.BLACK or K.RED, K.GRAY, cw - 8)
 
         local track = current > 0 and playlist[current] or playlist[sel]
         drawText(cx + 4, cy + 30, "Track: " .. (track and fileName(track) or "-"), K.DBLUE, K.GRAY, cw - 8)
@@ -570,7 +618,7 @@ local function appSpeakerPanel(initialPath)
         mark()
     end
 
-    refreshSpeaker()
+    refreshSpeakers()
     scanDefaults()
     if initialPath and initialPath ~= "" then
         local path = normalizePath(initialPath)
