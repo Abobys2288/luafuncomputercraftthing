@@ -75,6 +75,8 @@ D._clockDirty = false
 D.programs = {}
 D.notifications = {}
 D.notificationsEnabled = true
+D._pendingErrorDialogs = {}
+D._drawing = false
 D.crashLogPath = "/ccos/logs/crashes.log"
 D.crashCount = 0
 D.themeName = "classic"
@@ -600,9 +602,44 @@ function D.logCrash(source, err)
     return ok
 end
 
-function D.reportCrash(source, err)
+function D.isForegroundWindow(w)
+    return w and D.activeWin and D.activeWin.id == w.id and w.visible and not w.minimized
+end
+
+function D.queueErrorDialog(title, message)
+    D._pendingErrorDialogs = D._pendingErrorDialogs or {}
+    table.insert(D._pendingErrorDialogs, {
+        title = tostring(title or "Application Error"),
+        message = tostring(message or "Unknown error"),
+    })
+    while #D._pendingErrorDialogs > 3 do table.remove(D._pendingErrorDialogs, 1) end
+    D.markDirty()
+end
+
+function D.flushErrorDialogs()
+    if not D._pendingErrorDialogs or #D._pendingErrorDialogs == 0 then return end
+    local pending = D._pendingErrorDialogs
+    D._pendingErrorDialogs = {}
+    for _, item in ipairs(pending) do
+        D.showError(item.title, item.message, true)
+    end
+end
+
+function D.reportCrash(source, err, opts)
+    opts = opts or {}
     D.logCrash(source, err)
-    D.notify("Crash Reporter", tostring(source or "Application") .. " failed", "error", 6)
+    local title = tostring(opts.title or source or "Application Error")
+    local message = tostring(err or "Unknown error")
+    local foreground = opts.foreground or D.isForegroundWindow(opts.window)
+    if foreground then
+        if D._drawing then
+            D.queueErrorDialog(title, message)
+        else
+            D.showError(title, message, true)
+        end
+    else
+        D.notify("Crash Reporter", tostring(source or "Application") .. " failed", "error", 6)
+    end
 end
 
 function D.callWindow(w, label, handler, ...)
@@ -610,18 +647,34 @@ function D.callWindow(w, label, handler, ...)
     local ok, err = pcall(handler, w, ...)
     if not ok then
         if w then w.errors = (w.errors or 0) + 1 end
-        D.reportCrash(tostring(label or "Window") .. ": " .. tostring(w and w.title or "?"), err)
+        D.reportCrash(tostring(label or "Window") .. ": " .. tostring(w and w.title or "?"), err, {window=w})
         return false, err
     end
     return true
 end
 
+function D.reportWindowDrawError(w, err, active)
+    if w then
+        w.errors = (w.errors or 0) + 1
+        local now = os.clock()
+        local message = tostring(err)
+        if w._lastDrawCrashMessage == message and now - (w._lastDrawCrashAt or 0) < 5 then
+            return
+        end
+        w._lastDrawCrashMessage = message
+        w._lastDrawCrashAt = now
+    end
+    D.reportCrash("Draw: " .. tostring(w and w.title or "?"), err, {window=w, foreground=active})
+end
+
 -- ============================================================
 -- ERROR HANDLER
 -- ============================================================
-function D.showError(title, message)
+function D.showError(title, message, suppressNotify)
     D.playSound("error")
-    D.notify(title or "Error", tostring(message or "Unknown error"), "error", 6)
+    if not suppressNotify then
+        D.notify(title or "Error", tostring(message or "Unknown error"), "error", 6)
+    end
     local wx, wy, ww, wh = D.fitWin(240, 80)
     local w = D.createWindow(title or "Error", wx, wy, ww, wh)
     w.modal = true
@@ -696,8 +749,7 @@ function D.safeRun(fn, ...)
     local ok, err = pcall(fn, ...)
     if not ok then
         D.playSound("error")
-        D.reportCrash("Application", err)
-        D.showError("Application Error", tostring(err))
+        D.reportCrash("Application Error", err, {foreground=true})
         return false, err
     end
     return true
@@ -790,7 +842,7 @@ end
 function D.destroyWindow(w)
     if w.onClose then
         local ok, err = pcall(w.onClose, w)
-        if not ok then D.reportCrash("Close: " .. tostring(w.title), err) end
+        if not ok then D.reportCrash("Close: " .. tostring(w.title), err, {window=w}) end
     end
     for i,v in ipairs(D.windows) do if v.id==w.id then table.remove(D.windows,i); break end end
     D.activeWin=D.windows[#D.windows]; w.visible=false; D.markDirty()
@@ -898,8 +950,7 @@ function D._drawFull()
         if w.onDraw then
             local ok, err = pcall(w.onDraw,w,x+3,y+18,ww-6,hh-21)
             if not ok then
-                w.errors = (w.errors or 0) + 1
-                D.reportCrash("Draw: " .. tostring(w.title), err)
+                D.reportWindowDrawError(w, err, act)
                 R.fillRect(x+3,y+18,math.max(0,ww-6),math.max(0,hh-21),K.GRAY)
                 drawTextClip(x+7,y+24,"App draw error",K.RED,K.GRAY,ww-14)
                 drawTextClip(x+7,y+36,tostring(err),K.DGRAY,K.GRAY,ww-14)
@@ -1001,8 +1052,7 @@ function D._drawWindow(w)
     if w.onDraw then
         local ok, err = pcall(w.onDraw, w, x + 3, y + 18, ww - 6, hh - 21)
         if not ok then
-            w.errors = (w.errors or 0) + 1
-            D.reportCrash("Draw: " .. tostring(w.title), err)
+            D.reportWindowDrawError(w, err, act)
             R.fillRect(x + 3, y + 18, math.max(0, ww - 6), math.max(0, hh - 21), K.GRAY)
             drawTextClip(x + 7, y + 24, "App draw error", K.RED, K.GRAY, ww - 14)
             drawTextClip(x + 7, y + 36, tostring(err), K.DGRAY, K.GRAY, ww - 14)
@@ -1024,6 +1074,7 @@ end
 
 function D.drawAll()
     if not D.dirty and not D._contentWin and not D._clockDirty then return end
+    D._drawing = true
     R.beginDraw()
     if D.dirty then
         D._drawFull(); D.dirty=false; D._contentWin=nil; D._dirtyWindows={}; D._clockDirty=false
@@ -1041,6 +1092,8 @@ function D.drawAll()
     end
     D.drawNotifications()
     R.endDraw()
+    D._drawing = false
+    D.flushErrorDialogs()
 end
 
 -- ============================================================

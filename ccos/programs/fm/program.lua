@@ -200,6 +200,10 @@ local function appFM()
 
         local ext = extOf(filePath)
         local size = safeSize(filePath)
+        if not forceEdit and ext == "ccpkg" then
+            if not openProgram("pkg", filePath) then setStatus("No package manager") end
+            return
+        end
         if not forceEdit and IMAGE_EXT[ext] then
             if size >= LARGE_WARN and API and API.notify then
                 API.notify("Image Viewer", "Large file opens in safe preview mode", "info", 5)
