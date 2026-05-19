@@ -204,6 +204,10 @@ local function appFM()
             if not openProgram("pkg", filePath) then setStatus("No package manager") end
             return
         end
+        if not forceEdit and ext == "dfpwm" then
+            if not openProgram("music", filePath) then setStatus("No speaker panel") end
+            return
+        end
         if not forceEdit and IMAGE_EXT[ext] then
             if size >= LARGE_WARN and API and API.notify then
                 API.notify("Image Viewer", "Large file opens in safe preview mode", "info", 5)

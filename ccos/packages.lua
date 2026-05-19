@@ -10,7 +10,7 @@ return {
     {name="chat", title="Chat", desc="Network chat", icon="chat"},
     {name="pkgman", title="Packages", desc="Install or run packages from URL, disk or folder", icon="pkg"},
     {name="imgview", title="Image Viewer Pro", desc="Safe viewer for .nfp, .nfp256, .nfpc and .nfpa images", icon="img"},
-    {name="music", title="Music", desc="Speaker note player", icon="music"},
+    {name="music", title="Speaker Panel", desc="Native DFPWM speaker player", icon="music"},
     {name="fastfetch", title="Fastfetch", desc="System overview", icon="fastfetch"},
     {name="sites", title="Sites Browser", desc="Browse CCOS pages", icon="sites"},
     {name="sitebuilder", title="Site Builder", desc="Create and host CCOS pages", icon="sitebuild"},

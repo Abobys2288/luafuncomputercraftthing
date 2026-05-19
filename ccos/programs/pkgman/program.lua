@@ -57,7 +57,7 @@ local function loadLocalManifest()
         {name="chat", title="Chat", desc="Network chat", icon="chat"},
         {name="pkgman", title="Packages", desc="Install or run packages from URL, disk or folder", icon="pkg"},
         {name="imgview", title="Image Viewer Pro", desc="View images safely", icon="img"},
-        {name="music", title="Music", desc="Speaker player", icon="music"},
+        {name="music", title="Speaker Panel", desc="Native DFPWM speaker player", icon="music"},
         {name="fastfetch", title="Fastfetch", desc="System overview", icon="fastfetch"},
         {name="sites", title="Sites Browser", desc="Browse pages", icon="sites"},
         {name="sitebuilder", title="Site Builder", desc="Create and host pages", icon="sitebuild"},
