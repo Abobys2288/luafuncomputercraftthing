@@ -570,9 +570,7 @@ local function appSpeakerPanel(initialPath)
         drawText(cx + 4, footerY, "Enter=play  Space=pause  A=add  F=scan  +/- volume", K.DGRAY, K.GRAY, cw - 8)
     end
 
-    win.onClick = function(_, mx, my)
-        local hit = toolbarHit(mx, my)
-        if hit then runToolbar(hit); return end
+    local function rowAt(mx, my)
         local listY = 70
         local footerY = win.ch - 21 - 10
         local rowH = 9
@@ -580,15 +578,30 @@ local function appSpeakerPanel(initialPath)
         for i = 1, visible do
             local iy = listY + (i - 1) * rowH
             if my >= iy and my < iy + rowH then
-                sel = math.min(#playlist, scroll + i)
-                mark()
-                return
+                local idx = scroll + i
+                if idx >= 1 and idx <= #playlist then return idx end
             end
+        end
+        return nil
+    end
+
+    win.onClick = function(_, mx, my)
+        local hit = toolbarHit(mx, my)
+        if hit then runToolbar(hit); return end
+        local idx = rowAt(mx, my)
+        if idx then
+            sel = idx
+            mark()
         end
     end
 
-    win.onDoubleClick = function()
-        playSelected()
+    win.onDoubleClick = function(_, mx, my)
+        if toolbarHit(mx or -1, my or -1) then return end
+        local idx = rowAt(mx or -1, my or -1)
+        if idx then
+            sel = idx
+            playSelected()
+        end
     end
 
     win.onKey = function(_, k, ch)
