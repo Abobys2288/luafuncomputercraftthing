@@ -3,7 +3,7 @@
 local D = _G._desktop
 local API = _G.ccos_api
 local R = API and API.getRenderer and API.getRenderer() or _G.ccos_render
-local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,DBLUE=19,RED=11,GREEN=9,CYAN=7,YELLOW=13,ORANGE=14,BROWN=15,NEAR_BLACK=23}
+local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,DBLUE=19,RED=11,GREEN=9,CYAN=7}
 
 local CHUNK_SIZE = 4 * 1024
 local SCAN_LIMIT = 256
@@ -536,17 +536,28 @@ local function appSpeakerPanel(initialPath)
         R.fillRect(x + 2, y + 2, math.floor(inner * pct), 4, fill or K.DBLUE)
     end
 
-    local function drawCone(cx, cy, w, h)
-        if w < 70 or h < 48 then return end
-        local x = cx + math.floor(w / 2)
-        local y = cy + math.floor(h / 2) - 18
-        R.fillRect(x - 18, y + 31, 36, 5, K.ORANGE)
-        R.fillRect(x - 13, y + 27, 26, 5, K.YELLOW)
-        R.fillRect(x - 9, y + 10, 18, 20, K.ORANGE)
-        R.fillRect(x - 11, y + 20, 22, 4, K.WHITE)
-        R.fillRect(x - 7, y + 13, 14, 4, K.YELLOW)
-        R.fillRect(x - 5, y + 5, 10, 7, K.ORANGE)
-        R.fillRect(x - 3, y + 3, 6, 3, K.YELLOW)
+    local function drawAudioPane(cx, cy, w, h)
+        if w < 86 or h < 54 then return end
+        local top = cy + 25
+        local bottom = cy + h - 20
+        if bottom <= top + 8 then return end
+
+        local bars = math.max(7, math.min(18, math.floor(w / 28)))
+        local gap = 3
+        local barW = math.max(3, math.min(10, math.floor((w - 58 - (bars - 1) * gap) / bars)))
+        local totalW = bars * barW + (bars - 1) * gap
+        local startX = cx + math.floor((w - totalW) / 2)
+        local maxH = bottom - top
+        local phase = state == "playing" and (math.floor(readBytes / CHUNK_SIZE) + math.floor(os.clock() * 6)) or 0
+
+        R.fillRect(startX, bottom + 2, totalW, 2, K.DGRAY)
+        for i = 1, bars do
+            local seed = (i * 5 + phase * 3) % 11
+            local ratio = state == "playing" and (0.22 + (seed / 13)) or (0.16 + ((i % 3) * 0.08))
+            local bh = math.max(3, math.floor(maxH * ratio))
+            local color = state == "playing" and (i % 4 == 0 and K.GREEN or K.CYAN) or K.DGRAY
+            R.fillRect(startX + (i - 1) * (barW + gap), bottom - bh, barW, bh, color)
+        end
     end
 
     local function drawControl(cx, cy, id, label, w)
@@ -614,7 +625,7 @@ local function appSpeakerPanel(initialPath)
         if viewH > ch - controlsH - footerH then viewH = math.max(48, ch - controlsH - footerH) end
 
         R.fillRect(cx, cy, cw, viewH, K.BLACK)
-        drawCone(cx, cy, cw, viewH)
+        drawAudioPane(cx, cy, cw, viewH)
         drawText(cx + 8, cy + 6, title, K.WHITE, K.BLACK, cw - 16)
         local mediaStatus = state:upper() .. "  " .. (speakerLabel and ("SPK " .. speakerLabel) or "NO SPEAKER")
         drawText(cx + 8, cy + viewH - 12, mediaStatus, speakerLabel and K.LGRAY or K.RED, K.BLACK, cw - 16)
