@@ -7,6 +7,7 @@ local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,DBLUE=19,RED=11,GREEN=9,CYAN=7
 
 local CHUNK_SIZE = 4 * 1024
 local SCAN_LIMIT = 256
+local PLAYLIST_PATH = "/ccos/config/speaker_panel.lst"
 
 local function makeFallbackDfpwm()
     return {
@@ -156,6 +157,10 @@ local function appSpeakerPanel(initialPath)
     local closed = false
     local bgTask = nil
     local win = nil
+    local savePlaylist = nil
+    local buttonBounds = {}
+    local drawOriginX, drawOriginY = 0, 0
+    local LIST_Y = 98
 
     local function mark()
         if win and win.visible then
@@ -216,7 +221,7 @@ local function appSpeakerPanel(initialPath)
         timerId = os.startTimer(delay or 0.08)
     end
 
-    local function addTrack(path)
+    local function addTrack(path, silent)
         path = normalizePath(path)
         if not path then return false, "Empty path" end
         if not isRemote(path) then
@@ -229,6 +234,7 @@ local function appSpeakerPanel(initialPath)
         playlist[#playlist + 1] = path
         if current == 0 then current = 1 end
         sel = #playlist
+        if savePlaylist and not silent then savePlaylist() end
         return true
     end
 
@@ -238,6 +244,36 @@ local function appSpeakerPanel(initialPath)
             if item == path then return i end
         end
         return nil
+    end
+
+    savePlaylist = function()
+        local lines = {"# CCOS Speaker Panel playlist", "volume=" .. tostring(volume)}
+        for _, path in ipairs(playlist) do
+            lines[#lines + 1] = path
+        end
+        if API and API.writeFile then
+            API.writeFile(PLAYLIST_PATH, table.concat(lines, "\n") .. "\n")
+        end
+    end
+
+    local function loadPlaylist()
+        local content = API and API.readFile and API.readFile(PLAYLIST_PATH) or nil
+        if not content then return 0 end
+        local added = 0
+        for line in content:gmatch("[^\r\n]+") do
+            line = trim(line)
+            if line ~= "" and line:sub(1, 1) ~= "#" then
+                local vol = tonumber(line:match("^volume=(.+)$") or "")
+                if vol then
+                    volume = math.max(0.05, math.min(3.0, vol))
+                else
+                    local ok = addTrack(line, true)
+                    if ok then added = added + 1 end
+                end
+            end
+        end
+        if added > 0 then sel = math.max(1, math.min(sel, #playlist)) end
+        return added
     end
 
     local function scanDir(dir)
@@ -253,7 +289,7 @@ local function appSpeakerPanel(initialPath)
             if fs.isDir(path) then
                 if name ~= "rom" and path ~= "/ccos" then added = added + scanDir(path) end
             elseif isDfpwm(path) then
-                local okAdd = addTrack(path)
+                local okAdd = addTrack(path, true)
                 if okAdd then added = added + 1 end
             end
         end
@@ -263,6 +299,7 @@ local function appSpeakerPanel(initialPath)
     local function scanDefaults()
         local added = 0
         for _, dir in ipairs({"/music", "/disk", "/disks"}) do added = added + scanDir(dir) end
+        if added > 0 and savePlaylist then savePlaylist() end
         setStatus(added > 0 and ("Scanned +" .. added) or "No new .dfpwm")
     end
 
@@ -445,11 +482,13 @@ local function appSpeakerPanel(initialPath)
         stopAudio(true)
         playlist, seen = {}, {}
         current, sel, scroll = 0, 1, 0
+        if savePlaylist then savePlaylist() end
         setStatus("Playlist cleared")
     end
 
     local function changeVolume(delta)
         volume = math.max(0.05, math.min(3.0, volume + delta))
+        if savePlaylist then savePlaylist() end
         setStatus("Volume " .. tostring(math.floor(volume * 100)) .. "%")
     end
 
@@ -459,6 +498,7 @@ local function appSpeakerPanel(initialPath)
             path = normalizePath(path)
             if path and not isRemote(path) and fs.exists(path) and fs.isDir(path) then
                 local added = scanDir(path)
+                if added > 0 and savePlaylist then savePlaylist() end
                 setStatus(added > 0 and ("Added +" .. added) or "No .dfpwm in folder")
             else
                 local ok, err = addTrack(path)
@@ -467,25 +507,25 @@ local function appSpeakerPanel(initialPath)
         end)
     end
 
-    local toolbar = {
-        {id="play", label="Play", w=38},
-        {id="stop", label="Stop", w=38},
-        {id="prev", label="<", w=22},
-        {id="next", label=">", w=22},
-        {id="add", label="Add", w=34},
-        {id="scan", label="Scan", w=40},
-        {id="clear", label="Clear", w=44},
-        {id="vold", label="-", w=20},
-        {id="volu", label="+", w=20},
-    }
+    local function drawMeter(x, y, w, pct, fill)
+        w = math.max(8, w or 8)
+        pct = math.max(0, math.min(1, pct or 0))
+        if R.drawW95Sunken then R.drawW95Sunken(x, y, w, 8)
+        else R.fillRect(x, y, w, 8, K.LGRAY) end
+        local inner = math.max(0, w - 4)
+        R.fillRect(x + 2, y + 2, math.floor(inner * pct), 4, fill or K.DBLUE)
+    end
+
+    local function drawControl(cx, cy, id, label, w)
+        button(cx, cy, w, label)
+        local rx, ry = cx - drawOriginX, cy - drawOriginY
+        buttonBounds[#buttonBounds + 1] = {id=id, x1=rx, x2=rx + w, y1=ry, y2=ry + 14}
+        return cx + w + 3
+    end
 
     local function toolbarHit(mx, my)
-        if my < 0 or my >= 14 then return nil end
-        local x = 0
-        local contentW = win and math.max(0, win.cw - 6) or 9999
-        for _, b in ipairs(toolbar) do
-            if x + b.w <= contentW and mx >= x and mx < x + b.w then return b.id end
-            x = x + b.w + 2
+        for _, b in ipairs(buttonBounds or {}) do
+            if mx >= b.x1 and mx < b.x2 and my >= b.y1 and my < b.y2 then return b.id end
         end
         return nil
     end
@@ -527,33 +567,50 @@ local function appSpeakerPanel(initialPath)
     end
 
     win.onDraw = function(_, cx, cy, cw, ch)
-        local x = cx
-        for _, b in ipairs(toolbar) do
-            if x - cx + b.w <= cw then button(x, cy, b.w, b.label); x = x + b.w + 2 end
+        buttonBounds = {}
+        drawOriginX, drawOriginY = cx, cy
+        local track = current > 0 and playlist[current] or playlist[sel]
+        local title = track and fileName(track) or "No track selected"
+        local pct = totalBytes > 0 and math.max(0, math.min(1, readBytes / totalBytes)) or 0
+        local volPct = math.max(0, math.min(1, volume / 3.0))
+
+        if R.drawW95Sunken then R.drawW95Sunken(cx, cy, cw, 54)
+        else R.fillRect(cx, cy, cw, 54, K.LGRAY) end
+        drawText(cx + 6, cy + 5, title, state == "playing" and K.DBLUE or K.BLACK, K.LGRAY, cw - 12)
+        drawText(cx + 6, cy + 17, state:upper(), state == "playing" and K.GREEN or (state == "paused" and K.CYAN or K.DGRAY), K.LGRAY, 58)
+        drawText(cx + 68, cy + 17, speakerLabel and ("SPK " .. speakerLabel) or "NO SPEAKER", speakerLabel and K.BLACK or K.RED, K.LGRAY, cw - 74)
+        drawMeter(cx + 6, cy + 31, math.max(40, cw - 12), pct, K.DBLUE)
+        drawText(cx + 8, cy + 41, tostring(math.floor(pct * 100)) .. "%  " .. status .. (lastError ~= "" and (" : " .. lastError) or ""), lastError ~= "" and K.RED or K.DGRAY, K.LGRAY, cw - 16)
+
+        local x = cx + 4
+        local y = cy + 60
+        x = drawControl(x, y, "prev", "<<", 28)
+        x = drawControl(x, y, "play", state == "playing" and "Pause" or "Play", 48)
+        x = drawControl(x, y, "stop", "Stop", 38)
+        x = drawControl(x, y, "next", ">>", 28)
+        x = x + 4
+        x = drawControl(x, y, "vold", "Vol-", 38)
+        x = drawControl(x, y, "volu", "Vol+", 38)
+        if x + 68 < cx + cw then
+            drawText(x + 3, y + 3, tostring(math.floor(volume * 100)) .. "%", K.BLACK, K.GRAY, 36)
+            drawMeter(x + 42, y + 3, math.max(20, cx + cw - x - 46), volPct, K.CYAN)
         end
 
-        local top = (speakerLabel and ("SPK:" .. speakerLabel) or "NO SPEAKER") ..
-            "  " .. state:upper() .. "  VOL:" .. tostring(math.floor(volume * 100)) .. "%"
-        drawText(cx + 4, cy + 18, top, speakerLabel and K.BLACK or K.RED, K.GRAY, cw - 8)
+        x = cx + 4
+        y = cy + 78
+        x = drawControl(x, y, "add", "Add", 34)
+        x = drawControl(x, y, "scan", "Scan", 40)
+        x = drawControl(x, y, "clear", "Clear", 44)
+        drawText(x + 4, y + 3, tostring(#playlist) .. " track(s)", K.DGRAY, K.GRAY, math.max(20, cx + cw - x - 8))
 
-        local track = current > 0 and playlist[current] or playlist[sel]
-        drawText(cx + 4, cy + 30, "Track: " .. (track and fileName(track) or "-"), K.DBLUE, K.GRAY, cw - 8)
-
-        local barW = math.max(8, math.min(32, math.floor((cw - 70) / 6)))
-        local pct = totalBytes > 0 and math.max(0, math.min(1, readBytes / totalBytes)) or 0
-        local filled = math.floor(barW * pct)
-        local bar = "[" .. string.rep("=", filled) .. string.rep("-", barW - filled) .. "]"
-        drawText(cx + 4, cy + 42, bar .. " " .. tostring(math.floor(pct * 100)) .. "%", K.BLACK, K.GRAY, cw - 8)
-        drawText(cx + 4, cy + 54, status .. (lastError ~= "" and (" : " .. lastError) or ""), lastError ~= "" and K.RED or K.DGRAY, K.GRAY, cw - 8)
-
-        local listY = cy + 70
+        local listY = cy + LIST_Y
         local footerY = cy + ch - 10
         local rowH = 9
         local visible = math.max(1, math.floor((footerY - listY - 2) / rowH))
         if sel <= scroll then scroll = math.max(0, sel - 1) end
         if sel > scroll + visible then scroll = sel - visible end
 
-        drawText(cx + 4, listY - 10, "Playlist (" .. #playlist .. ")", K.BLACK, K.LGRAY, cw - 8)
+        drawText(cx + 4, listY - 10, "Playlist", K.BLACK, K.LGRAY, cw - 8)
         for i = 1, visible do
             local idx = scroll + i
             local path = playlist[idx]
@@ -571,7 +628,7 @@ local function appSpeakerPanel(initialPath)
     end
 
     local function rowAt(mx, my)
-        local listY = 70
+        local listY = LIST_Y
         local footerY = win.ch - 21 - 10
         local rowH = 9
         local visible = math.max(1, math.floor((footerY - listY - 2) / rowH))
@@ -605,26 +662,29 @@ local function appSpeakerPanel(initialPath)
     end
 
     win.onKey = function(_, k, ch)
-        local rows = math.max(1, math.floor((win.ch - 21 - 82) / 9))
-        if k == keys.up and sel > 1 then
-            sel = sel - 1; if sel <= scroll then scroll = math.max(0, scroll - 1) end; mark()
-        elseif k == keys.down and sel < #playlist then
-            sel = sel + 1; if sel > scroll + rows then scroll = scroll + 1 end; mark()
-        elseif k == keys.enter then playSelected()
-        elseif k == keys.space then togglePause()
-        elseif k == keys.delete then clearList()
-        elseif k == keys.escape then API.close(win)
-        elseif ch == "a" or ch == "A" then promptAdd()
-        elseif ch == "f" or ch == "F" then scanDefaults()
-        elseif ch == "s" or ch == "S" then stopAudio()
-        elseif ch == "n" or ch == "N" then nextTrack()
-        elseif ch == "b" or ch == "B" then prevTrack()
-        elseif ch == "+" or ch == "=" then changeVolume(0.1)
-        elseif ch == "-" or ch == "_" then changeVolume(-0.1) end
+        local rows = math.max(1, math.floor((win.ch - LIST_Y - 33) / 9))
+        if k then
+            if keys.up and k == keys.up and sel > 1 then
+                sel = sel - 1; if sel <= scroll then scroll = math.max(0, scroll - 1) end; mark()
+            elseif keys.down and k == keys.down and sel < #playlist then
+                sel = sel + 1; if sel > scroll + rows then scroll = scroll + 1 end; mark()
+            elseif keys.enter and k == keys.enter then playSelected()
+            elseif keys.space and k == keys.space then togglePause()
+            elseif keys.delete and k == keys.delete then clearList()
+            elseif keys.escape and k == keys.escape then API.close(win) end
+        elseif ch then
+            if ch == "a" or ch == "A" then promptAdd()
+            elseif ch == "f" or ch == "F" then scanDefaults()
+            elseif ch == "s" or ch == "S" then stopAudio()
+            elseif ch == "n" or ch == "N" then nextTrack()
+            elseif ch == "b" or ch == "B" then prevTrack()
+            elseif ch == "+" or ch == "=" then changeVolume(0.1)
+            elseif ch == "-" or ch == "_" then changeVolume(-0.1) end
+        end
     end
 
     win.onScroll = function(_, dir)
-        local rows = math.max(1, math.floor((win.ch - 21 - 82) / 9))
+        local rows = math.max(1, math.floor((win.ch - LIST_Y - 33) / 9))
         local maxScroll = math.max(0, #playlist - rows)
         if dir < 0 then scroll = math.max(0, scroll - 3) else scroll = math.min(maxScroll, scroll + 3) end
         sel = math.max(1, math.min(#playlist, math.max(sel, scroll + 1)))
@@ -632,11 +692,13 @@ local function appSpeakerPanel(initialPath)
     end
 
     refreshSpeakers()
+    loadPlaylist()
     scanDefaults()
     if initialPath and initialPath ~= "" then
         local path = normalizePath(initialPath)
         if path and not isRemote(path) and fs.exists(path) and fs.isDir(path) then
-            scanDir(path)
+            local added = scanDir(path)
+            if added > 0 and savePlaylist then savePlaylist() end
         else
             addTrack(path)
             local idx = indexOfTrack(path)
