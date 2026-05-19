@@ -3,7 +3,7 @@
 local D = _G._desktop
 local API = _G.ccos_api
 local R = API and API.getRenderer and API.getRenderer() or _G.ccos_render
-local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,DBLUE=19,RED=11,GREEN=9,CYAN=7}
+local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,DBLUE=19,RED=11,GREEN=9,CYAN=7,YELLOW=13,ORANGE=14,BROWN=15,NEAR_BLACK=23}
 
 local CHUNK_SIZE = 4 * 1024
 local SCAN_LIMIT = 256
@@ -153,6 +153,7 @@ local function appSpeakerPanel(initialPath)
     local pendingBuffer = nil
     local pendingAccepted = {}
     local totalBytes, readBytes = 0, 0
+    local lastProgressBucket, lastProgressAt = -1, 0
     local timerId = nil
     local closed = false
     local bgTask = nil
@@ -160,7 +161,7 @@ local function appSpeakerPanel(initialPath)
     local savePlaylist = nil
     local buttonBounds = {}
     local drawOriginX, drawOriginY = 0, 0
-    local LIST_Y = 98
+    local listYRel = 108
 
     local function mark()
         if win and win.visible then
@@ -175,6 +176,21 @@ local function appSpeakerPanel(initialPath)
         status = nextStatus
         lastError = nextError
         mark()
+    end
+
+    local function progressPct()
+        if totalBytes <= 0 then return 0 end
+        return math.max(0, math.min(1, readBytes / totalBytes))
+    end
+
+    local function markProgress(force)
+        local bucket = totalBytes > 0 and math.floor(progressPct() * 100) or math.floor(readBytes / CHUNK_SIZE)
+        local now = os.clock()
+        if force or bucket ~= lastProgressBucket or now - lastProgressAt > 0.5 then
+            lastProgressBucket = bucket
+            lastProgressAt = now
+            mark()
+        end
     end
 
     local function refreshSpeakers()
@@ -213,6 +229,7 @@ local function appSpeakerPanel(initialPath)
         response, handle, decoder, pendingBuffer = nil, nil, nil, nil
         pendingAccepted = {}
         totalBytes, readBytes = 0, 0
+        lastProgressBucket = -1
     end
 
     local function schedule(delay)
@@ -324,6 +341,7 @@ local function appSpeakerPanel(initialPath)
 
         decoder = DFPWM.make_decoder()
         totalBytes, readBytes = 0, 0
+        lastProgressBucket = -1
         lastError = ""
 
         if isRemote(src) then
@@ -358,6 +376,7 @@ local function appSpeakerPanel(initialPath)
 
         state = "playing"
         setStatus("Playing")
+        markProgress(true)
         schedule(0.05)
     end
 
@@ -387,6 +406,7 @@ local function appSpeakerPanel(initialPath)
         else return nil, "No stream" end
         if not chunk or #chunk == 0 then return nil, "eof" end
         readBytes = readBytes + #chunk
+        markProgress(false)
         local ok, buffer = pcall(decoder, chunk)
         if not ok then return nil, tostring(buffer) end
         return buffer
@@ -516,6 +536,19 @@ local function appSpeakerPanel(initialPath)
         R.fillRect(x + 2, y + 2, math.floor(inner * pct), 4, fill or K.DBLUE)
     end
 
+    local function drawCone(cx, cy, w, h)
+        if w < 70 or h < 48 then return end
+        local x = cx + math.floor(w / 2)
+        local y = cy + math.floor(h / 2) - 18
+        R.fillRect(x - 18, y + 31, 36, 5, K.ORANGE)
+        R.fillRect(x - 13, y + 27, 26, 5, K.YELLOW)
+        R.fillRect(x - 9, y + 10, 18, 20, K.ORANGE)
+        R.fillRect(x - 11, y + 20, 22, 4, K.WHITE)
+        R.fillRect(x - 7, y + 13, 14, 4, K.YELLOW)
+        R.fillRect(x - 5, y + 5, 10, 7, K.ORANGE)
+        R.fillRect(x - 3, y + 3, 6, 3, K.YELLOW)
+    end
+
     local function drawControl(cx, cy, id, label, w)
         button(cx, cy, w, label)
         local rx, ry = cx - drawOriginX, cy - drawOriginY
@@ -542,7 +575,7 @@ local function appSpeakerPanel(initialPath)
         elseif id == "volu" then changeVolume(0.1) end
     end
 
-    local wx, wy, ww, wh = API.fitWindow(340, 190)
+    local wx, wy, ww, wh = API.fitWindow(520, 300)
     win = API.window("Speaker Panel", wx, wy, ww, wh)
     if not win then return end
 
@@ -571,46 +604,68 @@ local function appSpeakerPanel(initialPath)
         drawOriginX, drawOriginY = cx, cy
         local track = current > 0 and playlist[current] or playlist[sel]
         local title = track and fileName(track) or "No track selected"
-        local pct = totalBytes > 0 and math.max(0, math.min(1, readBytes / totalBytes)) or 0
+        local pct = progressPct()
         local volPct = math.max(0, math.min(1, volume / 3.0))
 
-        if R.drawW95Sunken then R.drawW95Sunken(cx, cy, cw, 54)
-        else R.fillRect(cx, cy, cw, 54, K.LGRAY) end
-        drawText(cx + 6, cy + 5, title, state == "playing" and K.DBLUE or K.BLACK, K.LGRAY, cw - 12)
-        drawText(cx + 6, cy + 17, state:upper(), state == "playing" and K.GREEN or (state == "paused" and K.CYAN or K.DGRAY), K.LGRAY, 58)
-        drawText(cx + 68, cy + 17, speakerLabel and ("SPK " .. speakerLabel) or "NO SPEAKER", speakerLabel and K.BLACK or K.RED, K.LGRAY, cw - 74)
-        drawMeter(cx + 6, cy + 31, math.max(40, cw - 12), pct, K.DBLUE)
-        drawText(cx + 8, cy + 41, tostring(math.floor(pct * 100)) .. "%  " .. status .. (lastError ~= "" and (" : " .. lastError) or ""), lastError ~= "" and K.RED or K.DGRAY, K.LGRAY, cw - 16)
+        local footerH = 10
+        local libraryH = ch >= 170 and math.min(64, math.floor(ch * 0.24)) or 36
+        local controlsH = 43
+        local viewH = math.max(48, ch - controlsH - libraryH - footerH)
+        if viewH > ch - controlsH - footerH then viewH = math.max(48, ch - controlsH - footerH) end
 
-        local x = cx + 4
-        local y = cy + 60
-        x = drawControl(x, y, "prev", "<<", 28)
-        x = drawControl(x, y, "play", state == "playing" and "Pause" or "Play", 48)
-        x = drawControl(x, y, "stop", "Stop", 38)
-        x = drawControl(x, y, "next", ">>", 28)
-        x = x + 4
-        x = drawControl(x, y, "vold", "Vol-", 38)
-        x = drawControl(x, y, "volu", "Vol+", 38)
-        if x + 68 < cx + cw then
-            drawText(x + 3, y + 3, tostring(math.floor(volume * 100)) .. "%", K.BLACK, K.GRAY, 36)
-            drawMeter(x + 42, y + 3, math.max(20, cx + cw - x - 46), volPct, K.CYAN)
+        R.fillRect(cx, cy, cw, viewH, K.BLACK)
+        drawCone(cx, cy, cw, viewH)
+        drawText(cx + 8, cy + 6, title, K.WHITE, K.BLACK, cw - 16)
+        local mediaStatus = state:upper() .. "  " .. (speakerLabel and ("SPK " .. speakerLabel) or "NO SPEAKER")
+        drawText(cx + 8, cy + viewH - 12, mediaStatus, speakerLabel and K.LGRAY or K.RED, K.BLACK, cw - 16)
+
+        local controlsY = cy + viewH
+        R.fillRect(cx, controlsY, cw, controlsH, K.LGRAY)
+        drawMeter(cx + 8, controlsY + 4, math.max(40, cw - 16), pct, K.DBLUE)
+        drawText(cx + 10, controlsY + 14, tostring(math.floor(pct * 100)) .. "%", K.DGRAY, K.LGRAY, 34)
+        drawText(cx + 48, controlsY + 14, status .. (lastError ~= "" and (" : " .. lastError) or ""), lastError ~= "" and K.RED or K.DGRAY, K.LGRAY, math.max(30, cw - 56))
+
+        local x = cx + 6
+        local y = controlsY + 25
+        local function ctl(id, label, w)
+            if x + w <= cx + cw - 4 then x = drawControl(x, y, id, label, w) end
+        end
+        ctl("prev", "|<", 24)
+        ctl("play", state == "playing" and "Pause" or "Play", 48)
+        ctl("stop", "Stop", 38)
+        ctl("next", ">|", 24)
+        if cw >= 230 then
+            x = x + 4
+            ctl("add", "Add", 34)
+            ctl("scan", "Scan", 40)
         end
 
-        x = cx + 4
-        y = cy + 78
-        x = drawControl(x, y, "add", "Add", 34)
-        x = drawControl(x, y, "scan", "Scan", 40)
-        x = drawControl(x, y, "clear", "Clear", 44)
-        drawText(x + 4, y + 3, tostring(#playlist) .. " track(s)", K.DGRAY, K.GRAY, math.max(20, cx + cw - x - 8))
+        local volX = math.max(x + 6, cx + cw - 116)
+        if volX + 112 <= cx + cw then
+            drawText(volX, y + 3, "VOL", K.DGRAY, K.LGRAY, 20)
+            drawMeter(volX + 22, y + 3, 52, volPct, K.CYAN)
+            buttonBounds[#buttonBounds + 1] = {id="vold", x1=volX + 78 - cx, x2=volX + 94 - cx, y1=y - cy, y2=y - cy + 14}
+            buttonBounds[#buttonBounds + 1] = {id="volu", x1=volX + 96 - cx, x2=volX + 112 - cx, y1=y - cy, y2=y - cy + 14}
+            button(volX + 78, y, 16, "-")
+            button(volX + 96, y, 16, "+")
+        end
 
-        local listY = cy + LIST_Y
+        local libraryY = controlsY + controlsH
+        R.fillRect(cx, libraryY, cw, math.max(0, ch - (libraryY - cy) - footerH), K.GRAY)
+        listYRel = libraryY - cy + 12
+        local listY = cy + listYRel
         local footerY = cy + ch - 10
         local rowH = 9
         local visible = math.max(1, math.floor((footerY - listY - 2) / rowH))
         if sel <= scroll then scroll = math.max(0, sel - 1) end
         if sel > scroll + visible then scroll = sel - visible end
 
-        drawText(cx + 4, listY - 10, "Playlist", K.BLACK, K.LGRAY, cw - 8)
+        drawText(cx + 4, listY - 10, "Playlist  " .. tostring(#playlist) .. " track(s)", K.BLACK, K.GRAY, cw - 56)
+        if cw >= 120 then
+            local clearX = cx + cw - 48
+            button(clearX, listY - 13, 42, "Clear")
+            buttonBounds[#buttonBounds + 1] = {id="clear", x1=clearX - cx, x2=clearX - cx + 42, y1=listY - 13 - cy, y2=listY - 13 - cy + 14}
+        end
         for i = 1, visible do
             local idx = scroll + i
             local path = playlist[idx]
@@ -628,7 +683,7 @@ local function appSpeakerPanel(initialPath)
     end
 
     local function rowAt(mx, my)
-        local listY = LIST_Y
+        local listY = listYRel
         local footerY = win.ch - 21 - 10
         local rowH = 9
         local visible = math.max(1, math.floor((footerY - listY - 2) / rowH))
@@ -662,7 +717,7 @@ local function appSpeakerPanel(initialPath)
     end
 
     win.onKey = function(_, k, ch)
-        local rows = math.max(1, math.floor((win.ch - LIST_Y - 33) / 9))
+        local rows = math.max(1, math.floor((win.ch - listYRel - 33) / 9))
         if k then
             if keys.up and k == keys.up and sel > 1 then
                 sel = sel - 1; if sel <= scroll then scroll = math.max(0, scroll - 1) end; mark()
@@ -684,7 +739,7 @@ local function appSpeakerPanel(initialPath)
     end
 
     win.onScroll = function(_, dir)
-        local rows = math.max(1, math.floor((win.ch - LIST_Y - 33) / 9))
+        local rows = math.max(1, math.floor((win.ch - listYRel - 33) / 9))
         local maxScroll = math.max(0, #playlist - rows)
         if dir < 0 then scroll = math.max(0, scroll - 3) else scroll = math.min(maxScroll, scroll + 3) end
         sel = math.max(1, math.min(#playlist, math.max(sel, scroll + 1)))
