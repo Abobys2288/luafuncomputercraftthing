@@ -5,9 +5,80 @@ local API = _G.ccos_api
 local R = API and API.getRenderer and API.getRenderer() or _G.ccos_render
 local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,DBLUE=19,RED=11,GREEN=9,CYAN=7}
 
-local OK_DFPWM, DFPWM = pcall(require, "cc.audio.dfpwm")
 local CHUNK_SIZE = 4 * 1024
 local SCAN_LIMIT = 256
+
+local function makeFallbackDfpwm()
+    return {
+        make_decoder = function()
+            local charge, strength, previousBit = 0, 2, false
+            return function(input)
+                local out, outN = {}, 0
+                for i = 1, #input do
+                    local byte = input:byte(i) or 0
+                    for bit = 0, 7 do
+                        local currentBit = math.floor(byte / (2 ^ bit)) % 2 == 1
+                        local target = currentBit and 127 or -128
+                        local nextCharge = charge + math.floor((strength * (target - charge) + 512) / 1024)
+                        if nextCharge == charge and nextCharge ~= target then
+                            nextCharge = nextCharge + (currentBit and 1 or -1)
+                        end
+
+                        local wantedStrength = currentBit == previousBit and 1023 or 0
+                        if strength ~= wantedStrength then
+                            strength = strength + (currentBit == previousBit and 1 or -1)
+                            if strength < 2 then strength = 2 end
+                            if strength > 1023 then strength = 1023 end
+                        end
+
+                        local sample = charge + nextCharge
+                        if sample > 127 then sample = 127 elseif sample < -128 then sample = -128 end
+                        outN = outN + 1
+                        out[outN] = sample
+                        charge = nextCharge
+                        previousBit = currentBit
+                    end
+                end
+                return out
+            end
+        end,
+    }
+end
+
+local function loadDfpwm()
+    local function valid(mod)
+        return type(mod) == "table" and type(mod.make_decoder) == "function"
+    end
+
+    local ok, mod
+    if type(require) == "function" then
+        ok, mod = pcall(require, "cc.audio.dfpwm")
+        if ok and valid(mod) then return true, mod, "require" end
+    end
+
+    local globalMod = _G.cc and _G.cc.audio and _G.cc.audio.dfpwm
+    if valid(globalMod) then return true, globalMod, "global" end
+
+    local paths = {
+        "/rom/modules/main/cc/audio/dfpwm.lua",
+        "/rom/modules/main/cc/audio/dfpwm/init.lua",
+        "/rom/modules/turtle/cc/audio/dfpwm.lua",
+        "/rom/modules/command/cc/audio/dfpwm.lua",
+    }
+    for _, path in ipairs(paths) do
+        if fs.exists(path) then
+            local fn = loadfile(path)
+            if fn then
+                ok, mod = pcall(fn)
+                if ok and valid(mod) then return true, mod, path end
+            end
+        end
+    end
+
+    return true, makeFallbackDfpwm(), "fallback"
+end
+
+local OK_DFPWM, DFPWM, DFPWM_SOURCE = loadDfpwm()
 
 local function clip(text, w)
     if API and API.clipText then return API.clipText(text, w) end
@@ -72,7 +143,7 @@ local function appSpeakerPanel(initialPath)
     local playlist, seen = {}, {}
     local sel, scroll = 1, 0
     local current = 0
-    local status = OK_DFPWM and "Ready" or "DFPWM decoder missing"
+    local status = OK_DFPWM and (DFPWM_SOURCE == "fallback" and "Ready (fallback decoder)" or "Ready") or "DFPWM decoder missing"
     local lastError = ""
     local state = "stopped"
     local volume = 1.0
@@ -102,13 +173,17 @@ local function appSpeakerPanel(initialPath)
         if peripheral and peripheral.getNames then
             for _, name in ipairs(peripheral.getNames()) do
                 if peripheral.getType(name) == "speaker" then
-                    speaker = peripheral.wrap(name)
-                    speakerName = name
-                    break
+                    local sp = peripheral.wrap(name)
+                    if sp and type(sp.playAudio) == "function" then
+                        speaker = sp
+                        speakerName = name
+                        break
+                    end
                 end
             end
         elseif peripheral and peripheral.find then
             speaker = peripheral.find("speaker")
+            if speaker and type(speaker.playAudio) ~= "function" then speaker = nil end
             speakerName = speaker and "speaker" or nil
         end
         return speaker ~= nil
