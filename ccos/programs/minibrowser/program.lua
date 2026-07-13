@@ -66,15 +66,38 @@ local function parseInt(s, default)
     return n or (default or 0)
 end
 
+-- CCOS palette RGB approximations (indices 0-17+)
+local PALETTE_RGB = {
+    [0]={0,0,0}, [1]={255,255,255}, [2]={128,128,128}, [3]={192,192,192},
+    [4]={64,64,64}, [5]={0,0,200}, [6]={0,0,100}, [7]={0,220,220},
+    [8]={100,150,255}, [9]={0,180,0}, [10]={0,100,0}, [11]={220,40,40},
+    [12]={100,0,0}, [13]={220,220,0}, [14]={220,120,0}, [15]={120,60,0},
+    [16]={140,0,140}, [17]={255,140,200}, [27]={0,0,80}, [30]={0,120,120},
+}
+
+local function colorToPalette(r, g, b)
+    r, g, b = math.floor(r or 0), math.floor(g or 0), math.floor(b or 0)
+    local best, bestDist = 0, math.huge
+    for idx, rgb in pairs(PALETTE_RGB) do
+        local dr, dg, db = r - rgb[1], g - rgb[2], b - rgb[3]
+        local dist = dr*dr + dg*dg + db*db
+        if dist < bestDist then bestDist = dist; best = idx end
+    end
+    return best
+end
+
 local function parseColor(s)
     s = trim(tostring(s or "")):lower()
-    if s == "" then return nil end
+    if s == "" or s == "transparent" or s == "inherit" or s == "initial" or s == "unset" or s == "none" then return nil end
     -- named colors
     local named = {
-        black=0, white=1, gray=2, silver=3, darkgray=4, grey=4,
+        black=0, white=1, gray=2, silver=3, darkgray=4, grey=4, lightgray=3,
         blue=5, darkblue=6, cyan=7, lightblue=8, green=9, darkgreen=10,
         red=11, darkred=12, yellow=13, orange=14, brown=15, purple=16,
-        pink=17, navy=27, maroon=12, teal=30, lime=9,
+        pink=17, navy=27, maroon=12, teal=30, lime=9, magenta=16,
+        olive=15, aqua=7, fuchsia=16, gold=13, crimson=11, indigo=16,
+        violet=17, turquoise=7, skyblue=8, steelblue=6, royalblue=6,
+        tomato=11, salmon=11, coral=14, orchid=17, plum=17,
     }
     if named[s] then return named[s] end
     -- hex #rgb / #rrggbb
@@ -92,20 +115,28 @@ local function parseColor(s)
             return colorToPalette(r, g, b)
         end
     end
-    -- rgb(r,g,b)
-    local r, g, b = s:match("rgb%s*%(%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*%)")
+    -- rgb(r,g,b) or rgba(r,g,b,a)
+    local r, g, b = s:match("rgba?%s*%(%s*(%d+)[^,]*,%s*(%d+)[^,]*,%s*(%d+)")
     if r then return colorToPalette(tonumber(r), tonumber(g), tonumber(b)) end
+    -- hsl(h,s%,l%)
+    local h, sat, light = s:match("hsla?%s*%(%s*(%d+)[^,]*,%s*(%d+)[^,]*%%,%s*(%d+)[^,]*%%")
+    if h then
+        local hue = tonumber(h) % 360
+        local s = tonumber(sat) / 100
+        local l = tonumber(light) / 100
+        local c = (1 - math.abs(2 * l - 1)) * s
+        local x = c * (1 - math.abs((hue / 60) % 2 - 1))
+        local m = l - c / 2
+        local r, g, b
+        if hue < 60 then r, g, b = c, x, 0
+        elseif hue < 120 then r, g, b = x, c, 0
+        elseif hue < 180 then r, g, b = 0, c, x
+        elseif hue < 240 then r, g, b = 0, x, c
+        elseif hue < 300 then r, g, b = x, 0, c
+        else r, g, b = c, 0, x end
+        return colorToPalette((r + m) * 255, (g + m) * 255, (b + m) * 255)
+    end
     return nil
-end
-
--- Map RGB to nearest CCOS 256-color palette index.
-function colorToPalette(r, g, b)
-    r, g, b = math.floor(r or 0), math.floor(g or 0), math.floor(b or 0)
-    -- W95 range 0-31 first (simplified: only exact named lookups are handled elsewhere)
-    -- 6x6x6 color cube 32-215
-    local function nearest(v) return math.min(5, math.max(0, math.floor(v / 51 + 0.5))) end
-    local ri, gi, bi = nearest(r), nearest(g), nearest(b)
-    return 32 + ri * 36 + gi * 6 + bi
 end
 
 local function hasValue(t, v)
@@ -125,6 +156,7 @@ end
 -- ============================================================
 local VOID_TAGS = {br=true, hr=true, img=true, input=true, meta=true, link=true, base=true, area=true, col=true, embed=true, param=true, source=true, track=true, wbr=true}
 local RAW_TEXT_TAGS = {script=true, style=true}
+local SKIP_TAGS = {svg=true, math=true, noscript=true, template=true, iframe=true, object=true, canvas=true}
 local AUTO_CLOSE_TAGS = {h1=true, h2=true, h3=true, h4=true, h5=true, h6=true, p=true, li=true, dt=true, dd=true, option=true, tr=true, td=true, th=true}
 local BLOCK_TAGS = {html=true, body=true, head=true, div=true, p=true, h1=true, h2=true, h3=true, h4=true, h5=true, h6=true, ul=true, ol=true, li=true, table=true, tr=true, td=true, th=true, pre=true, form=true, hr=true, center=true}
 
@@ -137,7 +169,86 @@ local function htmlTokenize(html)
             local e = html:find("-->", i+4, true)
             if not e then break end
             i = e + 3
+        elseif html:sub(i, i+4):lower() == "<svg>" or html:sub(i, i+4):lower() == "<svg " or html:sub(i, i+4):lower() == "<svg/" then
+            -- Skip entire SVG element (can't render vector graphics)
+            local e = html:find("</svg>", i, true)
+            if not e then break end
+            i = e + 6
         elseif html:sub(i, i) == "<" then
+            -- Check if this is a RAW_TEXT_TAG (script/style) opening tag
+            local nextName = (html:match("^([%w_:-]+)", i+1) or ""):lower()
+            if RAW_TEXT_TAGS[nextName] and html:sub(i+1, i+1) ~= "/" then
+                -- Parse opening tag
+                local e = html:find(">", i+1, true)
+                if not e then break end
+                local tagText = html:sub(i+1, e-1)
+                i = e + 1
+                local selfClose = tagText:sub(-1,-1) == "/"
+                if selfClose then tagText = tagText:sub(1, -2) end
+                tagText = trim(tagText)
+                local tagName = tagText:match("^[%w_:-]+") or ""
+                tagName = tagName:lower()
+                local attrs = {}
+                local rest = tagText:sub(#tagName + 1)
+                while rest ~= "" do
+                    rest = trim(rest)
+                    if rest == "" then break end
+                    local an, av
+                    local eqPos = rest:find("=", 1, true)
+                    local spPos = rest:find(" ", 1, true)
+                    if eqPos and (not spPos or eqPos < spPos) then
+                        an = trim(rest:sub(1, eqPos - 1)):lower()
+                        rest = rest:sub(eqPos + 1):gsub("^%s+", "")
+                        local q = rest:sub(1,1)
+                        if q == '"' or q == "'" then
+                            local endp = rest:find(q, 2, true)
+                            if endp then av = rest:sub(2, endp - 1); rest = rest:sub(endp + 1)
+                            else av = rest:sub(2); rest = "" end
+                        else
+                            local sp = rest:find(" ", 1, true)
+                            if sp then av = rest:sub(1, sp - 1); rest = rest:sub(sp + 1)
+                            else av = rest; rest = "" end
+                        end
+                    else
+                        if spPos then an = trim(rest:sub(1, spPos - 1)):lower(); rest = rest:sub(spPos + 1)
+                        else an = trim(rest):lower(); rest = "" end
+                        av = ""
+                    end
+                    if an and an ~= "" then attrs[an] = av end
+                end
+                table.insert(tokens, {type="tag", name=tagName, attrs=attrs, closing=false, selfClose=selfClose})
+                if not selfClose then
+                    -- Find closing </script> or </style>
+                    local closeTag = "</" .. nextName
+                    local closePos, endTag
+                    local searchFrom = i
+                    while searchFrom <= n do
+                        local pos = html:find(closeTag, searchFrom, true)
+                        if not pos then break end
+                        local afterChar = html:sub(pos + #closeTag, pos + #closeTag)
+                        if afterChar == ">" or afterChar == " " or afterChar == "\t" or afterChar == "\n" or afterChar == "/" then
+                            closePos = pos
+                            endTag = html:find(">", pos, true)
+                            break
+                        end
+                        searchFrom = pos + 1
+                    end
+                    if closePos and endTag then
+                        local rawText = html:sub(i, closePos - 1)
+                        if rawText ~= "" then
+                            table.insert(tokens, {type="text", text=rawText})
+                        end
+                        table.insert(tokens, {type="tag", name=nextName, attrs={}, closing=true, selfClose=false})
+                        i = endTag + 1
+                    else
+                        local rawText = html:sub(i)
+                        if rawText ~= "" then
+                            table.insert(tokens, {type="text", text=rawText})
+                        end
+                        i = n + 1
+                    end
+                end
+            else
             local e = html:find(">", i+1, true)
             if not e then break end
             local tagText = html:sub(i+1, e-1)
@@ -148,8 +259,8 @@ local function htmlTokenize(html)
             if closing then tagText = tagText:sub(2) end
             tagText = trim(tagText)
             -- Skip doctype and other <!...> declarations
-            if tagText:sub(1, 1) == "!" then
-                -- doctype or SGML declaration; ignore
+            if tagText:sub(1, 1) == "!" or tagText:sub(1, 1) == "?" then
+                -- doctype, SGML declaration, or PI; ignore
             else
             local tagName = tagText:match("^[%w_:-]+") or ""
             tagName = tagName:lower()
@@ -202,6 +313,7 @@ local function htmlTokenize(html)
             table.insert(tokens, {type="tag", name=tagName, attrs=attrs, closing=closing, selfClose=selfClose or VOID_TAGS[tagName]})
             end
             end
+            end -- close RAW_TEXT_TAGS else
         else
             local e = html:find("<", i, true) or (n + 1)
             local text = html:sub(i, e - 1)
@@ -274,17 +386,7 @@ function parseHTML(html)
                 for c in tostring(el.attrs.class or ""):gmatch("%S+") do table.insert(el.classes, c) end
                 table.insert(parent.children, el)
                 if not (tok.selfClose or VOID_TAGS[tok.name]) then
-                    if RAW_TEXT_TAGS[tok.name] and i < #tokens then
-                        i = i + 1
-                        local rawTok = tokens[i]
-                        if rawTok and rawTok.type == "text" then
-                            local rawNode = createTextNode(rawTok.text)
-                            rawNode.parent = el
-                            table.insert(el.children, rawNode)
-                        end
-                    else
-                        table.insert(stack, el)
-                    end
+                    table.insert(stack, el)
                 end
             end
         end
@@ -295,31 +397,35 @@ end
 
 -- If parser wrapped an explicit <html> inside the implicit root, lift it.
 local function normalizeRoot(root)
-    if root.tag == "html" and #root.children == 1 then
-        local child = root.children[1]
-        if child.type == "element" and child.tag == "html" then
-            return child
+    if root.tag == "html" then
+        -- Find first element child named "html" (skip text nodes like whitespace)
+        for _, child in ipairs(root.children or {}) do
+            if child.type == "element" and child.tag == "html" then
+                return child
+            end
         end
     end
     return root
 end
 
-local function getElementById(root, id)
+local function getElementById(root, id, depth)
     if root.id == id then return root end
+    if (depth or 0) > 300 then return nil end
     for _, child in ipairs(root.children or {}) do
         if child.type == "element" then
-            local found = getElementById(child, id)
+            local found = getElementById(child, id, (depth or 0) + 1)
             if found then return found end
         end
     end
     return nil
 end
 
-local function getElementsByTag(root, tag, out)
+local function getElementsByTag(root, tag, out, depth)
     out = out or {}
+    if (depth or 0) > 300 then return out end
     if root.tag == tag then table.insert(out, root) end
     for _, child in ipairs(root.children or {}) do
-        if child.type == "element" then getElementsByTag(child, tag, out) end
+        if child.type == "element" then getElementsByTag(child, tag, out, (depth or 0) + 1) end
     end
     return out
 end
@@ -376,25 +482,69 @@ local DEFAULT_STYLES = {
     label  = {display="inline"},
     form   = {display="block"},
     center = {display="block", text_align="center"},
+    -- HTML5 semantic elements
+    figure = {display="block", margin_top=8, margin_bottom=8},
+    figcaption = {display="block", font_size=7, color=4},
+    picture = {display="inline"},
+    video = {display="none"},
+    audio = {display="none"},
+    source = {display="none"},
+    details = {display="block"},
+    summary = {display="block", font_weight="bold"},
+    dialog = {display="none"},
+    slot = {display="inline"},
+    -- SVG and other non-renderable elements
+    svg = {display="none"}, path = {display="none"}, circle = {display="none"},
+    rect = {display="none"}, line = {display="none"}, polygon = {display="none"},
+    polyline = {display="none"}, ellipse = {display="none"}, g = {display="none"},
+    defs = {display="none"}, use = {display="none"}, symbol = {display="none"},
+    noscript = {display="none"}, template = {display="none"},
+    iframe = {display="none"}, object = {display="none"}, canvas = {display="none"},
+    math = {display="none"},
 }
 
 local function parseStyleValue(prop, value)
     value = trim(tostring(value or "")):lower()
     if value == "" then return nil end
+    -- Resolve var() references (for inline styles, vars won't be available but won't crash)
+    value = value:gsub("var%s*%(([%-%w]+)%)", function(name) return "" end)
+    value = value:gsub("var%s*%(([%-%w]+)%s*,%s*([^)]+)%)", function(name, fb) return trim(fb) end)
+    -- Strip !important
+    value = value:gsub("%s*!important%s*$", "")
     if prop == "display" then
         if value == "none" or value == "block" or value == "inline" or value == "inline-block" or value == "list-item" then return value end
+        -- Map flex/grid to block (can't do real flexbox/grid)
+        if value == "flex" or value == "grid" or value == "table" or value == "flow-root" then return "block" end
+        if value == "inline-flex" or value == "inline-grid" or value == "inline-table" then return "inline-block" end
         return "block"
-    elseif prop == "color" or prop == "background_color" or prop == "border_color" then
+    elseif prop == "color" or prop == "background_color" or prop == "border_color" or prop == "background" then
+        -- background shorthand: extract color part
+        if prop == "background" then
+            -- Try to extract a color from the background shorthand
+            local hex = value:match("#(%x+)")
+            if hex then return parseColor("#" .. hex) end
+            local rgb = value:match("rgba?%s*%([^)]+%)")
+            if rgb then return parseColor(rgb) end
+            local named = value:match("%a+")
+            if named and named ~= "linear" and named ~= "url" and named ~= "scroll" and named ~= "fixed" and named ~= "cover" and named ~= "contain" and named ~= "no-repeat" and named ~= "repeat" then
+                local c = parseColor(named)
+                if c then return c end
+            end
+            return nil
+        end
         return parseColor(value)
     elseif prop == "font_size" then
+        -- Handle rem/em/pt units
+        value = value:gsub("rem", ""):gsub("em", ""):gsub("pt", ""):gsub("px", "")
         return parseInt(value, 8)
     elseif prop == "font_weight" then
-        if value == "bold" or tonumber(value) >= 600 then return "bold" end
+        local n = tonumber(value)
+        if value == "bold" or (n and n >= 600) then return "bold" end
         return "normal"
     elseif prop == "font_style" then
         return value == "italic" and "italic" or "normal"
     elseif prop == "text_align" then
-        if value == "left" or value == "center" or value == "right" then return value end
+        if value == "left" or value == "center" or value == "right" or value == "justify" then return value end
         return "left"
     elseif prop == "text_decoration" then
         if value == "underline" or value == "line-through" or value == "none" then return value end
@@ -402,20 +552,23 @@ local function parseStyleValue(prop, value)
     elseif prop == "white_space" then
         return value == "pre" and "pre" or "normal"
     elseif prop == "width" or prop == "height" then
+        -- Strip units
+        value = value:gsub("rem", ""):gsub("em", ""):gsub("pt", "")
         if value:find("%%") then return {type="percent", value=parseInt(value, 0)}
-        else return {type="px", value=parseInt(value, 0)} end
+        else return {type="px", value=parseInt(value:gsub("px",""), 0)} end
     elseif prop == "margin" or prop == "padding" then
-        return parseInt(value, 0)
+        return parseInt(value:gsub("px",""):gsub("rem",""), 0)
     elseif prop == "margin_top" or prop == "margin_bottom" or prop == "margin_left" or prop == "margin_right" then
-        return parseInt(value, 0)
+        return parseInt(value:gsub("px",""):gsub("rem",""), 0)
     elseif prop == "padding_top" or prop == "padding_bottom" or prop == "padding_left" or prop == "padding_right" then
-        return parseInt(value, 0)
+        return parseInt(value:gsub("px",""):gsub("rem",""), 0)
     elseif prop == "border" then
-        -- accept "1px solid #color" or just "1"
         local w = tonumber(value:match("^(%d+)")) or 1
         return w
     elseif prop == "border_top" or prop == "border_bottom" or prop == "border_left" or prop == "border_right" then
-        return tonumber(value) or parseInt(value, 1)
+        return tonumber(value:match("(%d+)")) or parseInt(value, 1)
+    elseif prop == "background_image" then
+        return nil -- can't load CSS background images
     end
     return nil
 end
@@ -429,7 +582,10 @@ local function parseInlineStyle(styleStr)
         if eq then
             local prop = trim(decl:sub(1, eq - 1)):lower():gsub("%-", "_")
             local val = trim(decl:sub(eq + 1))
-            if prop == "margin" or prop == "padding" then
+            -- Skip CSS custom properties (--xxx)
+            if prop:sub(1, 2) == "__" then
+                -- CSS variable, skip (not a style property)
+            elseif prop == "margin" or prop == "padding" then
                 local parts = {}
                 for v in val:gmatch("(%d+)") do table.insert(parts, tonumber(v)) end
                 local top, right, bottom, left
@@ -451,7 +607,21 @@ local function parseInlineStyle(styleStr)
                 style["border_left"] = w
                 style["border_right"] = w
                 local color = val:match("#(%x+)")
-                if color then style["border_color"] = parseColor("#" .. color) end
+                if color then style["border_color"] = parseColor("#" .. color)
+                else
+                    local rgb = val:match("rgba?%([^)]+%)")
+                    if rgb then style["border_color"] = parseColor(rgb) end
+                end
+            elseif prop == "background" then
+                -- background shorthand: extract color, map to background_color
+                local c = parseStyleValue("background", val)
+                if c then style["background_color"] = c end
+            elseif prop == "font" then
+                -- font shorthand: extract size and weight
+                local size = val:match("(%d+)%s*px")
+                if size then style["font_size"] = tonumber(size) end
+                if val:find("bold") then style["font_weight"] = "bold" end
+                if val:find("italic") then style["font_style"] = "italic" end
             else
                 style[prop] = parseStyleValue(prop, val)
             end
@@ -460,47 +630,142 @@ local function parseInlineStyle(styleStr)
     return style
 end
 
+local function extractCSSVariables(cssText)
+    local vars = {}
+    -- Find :root { --var: value; ... }
+    for block in cssText:gmatch(":root%s*{([^}]+)}") do
+        for decl in block:gmatch("([^;]+)") do
+            decl = trim(decl)
+            local eq = decl:find(":", 1, true)
+            if eq then
+                local name = trim(decl:sub(1, eq - 1))
+                local val = trim(decl:sub(eq + 1))
+                if name:sub(1, 2) == "--" then
+                    vars[name] = val
+                end
+            end
+        end
+    end
+    -- Also check for individual --var declarations in any block
+    for decl in cssText:gmatch("%-%-([%w%-]+)%s*:%s*([^;]+)") do
+        -- Already captured in :root
+    end
+    return vars
+end
+
+local function resolveVar(value, vars, depth)
+    depth = (depth or 0) + 1
+    if depth > 5 then return value end
+    -- Replace var(--xxx) with actual value (pattern captures --xxx including -- prefix)
+    value = value:gsub("var%s*%(([%-%w]+)%)", function(name)
+        if vars and vars[name] then
+            return resolveVar(vars[name], vars, depth)
+        end
+        return ""
+    end)
+    -- Also replace var(--xxx, fallback)
+    value = value:gsub("var%s*%(([%-%w]+)%s*,%s*([^)]+)%)", function(name, fallback)
+        if vars and vars[name] and vars[name] ~= "" then
+            return resolveVar(vars[name], vars, depth)
+        end
+        return trim(fallback)
+    end)
+    return value
+end
+
 local function parseCSS(cssText)
     local rules = {}
+    local cssVars = extractCSSVariables(cssText)
     cssText = tostring(cssText or "")
     cssText = cssText:gsub("/%*.-%*/", "")
     local i = 1
     while i <= #cssText do
-        local open = cssText:find("{", i, true)
-        if not open then break end
-        local close = cssText:find("}", open, true)
-        if not close then break end
-        local selectorsStr = trim(cssText:sub(i, open - 1))
-        local body = trim(cssText:sub(open + 1, close - 1))
-        local decls = parseInlineStyle(body)
-        for selector in selectorsStr:gmatch("[^,]+") do
-            selector = trim(selector)
-            if selector ~= "" then
-                table.insert(rules, {selector=selector, style=decls})
+        -- Skip @import, @charset (no block)
+        if cssText:sub(i, i) == "@" then
+            local atRule = cssText:match("^@([%w%-]+)", i) or ""
+            if atRule == "import" or atRule == "charset" then
+                local semi = cssText:find(";", i, true)
+                if not semi then break end
+                i = semi + 1
+            elseif atRule == "media" or atRule == "supports" then
+                -- Find opening brace
+                local open = cssText:find("{", i, true)
+                if not open then break end
+                -- Find matching closing brace (count nesting)
+                local depth = 1
+                local j = open + 1
+                while j <= #cssText and depth > 0 do
+                    local c = cssText:sub(j, j)
+                    if c == "{" then depth = depth + 1
+                    elseif c == "}" then depth = depth - 1 end
+                    if depth == 0 then break end
+                    j = j + 1
+                end
+                -- Extract inner rules and parse recursively
+                local inner = cssText:sub(open + 1, j - 1)
+                local innerRules = parseCSS(inner)
+                for _, r in ipairs(innerRules) do table.insert(rules, r) end
+                i = j + 1
+            else
+                -- @keyframes, @font-face, @page, etc: skip the whole block
+                local open = cssText:find("{", i, true)
+                if not open then break end
+                local depth = 1
+                local j = open + 1
+                while j <= #cssText and depth > 0 do
+                    local c = cssText:sub(j, j)
+                    if c == "{" then depth = depth + 1
+                    elseif c == "}" then depth = depth - 1 end
+                    if depth == 0 then break end
+                    j = j + 1
+                end
+                i = j + 1
+            end
+        else
+            local open = cssText:find("{", i, true)
+            if not open then break end
+            -- Make sure there's no @ before this {
+            local chunk = cssText:sub(i, open - 1)
+            if chunk:find("@") then
+                i = i + 1
+            else
+                local close = cssText:find("}", open, true)
+                if not close then break end
+                local selectorsStr = trim(cssText:sub(i, open - 1))
+                local body = trim(cssText:sub(open + 1, close - 1))
+                -- Resolve var() references using extracted CSS variables
+                body = resolveVar(body, cssVars)
+                local decls = parseInlineStyle(body)
+                for selector in selectorsStr:gmatch("[^,]+") do
+                    selector = trim(selector)
+                    if selector ~= "" then
+                        table.insert(rules, {selector=selector, style=decls})
+                    end
+                end
+                i = close + 1
             end
         end
-        i = close + 1
     end
     return rules
 end
 
 local function parseSelector(sel)
     local parts = {}
-    for part in sel:gmatch("[^,]+") do
-        part = trim(part)
-        if part ~= "" then
-            local p = {tag=nil, id=nil, classes={}, universal=false, child=false}
-            if part == "*" then p.universal = true
-            else
-                local remaining = part
-                local tag = remaining:match("^([%w_%-]+)")
-                if tag then p.tag = tag:lower(); remaining = remaining:sub(#tag + 1) end
-                for cls in remaining:gmatch("%.([%w_%-]+)") do table.insert(p.classes, cls) end
-                local id = remaining:match("#([%w_%-]+)")
-                if id then p.id = id end
-            end
-            table.insert(parts, p)
+    -- Split by whitespace to get descendant parts
+    for part in sel:gmatch("%S+") do
+        local p = {tag=nil, id=nil, classes={}, universal=false}
+        if part == "*" then
+            p.universal = true
+        else
+            local remaining = part
+            local tag = remaining:match("^([%w_%-]+)")
+            if tag then p.tag = tag:lower(); remaining = remaining:sub(#tag + 1) end
+            -- Parse classes and ids from remaining
+            for cls in remaining:gmatch("%.([%w_%-]+)") do table.insert(p.classes, cls) end
+            local id = remaining:match("#([%w_%-]+)")
+            if id then p.id = id end
         end
+        table.insert(parts, p)
     end
     return parts
 end
@@ -550,9 +815,18 @@ local function computeStyles(root, cssRules)
         end
     end
     table.sort(parsedRules, function(a, b) return a.spec < b.spec end)
+    -- Limit number of rules for performance
+    if #parsedRules > 500 then
+        local trimmed = {}
+        for i = #parsedRules - 499, #parsedRules do
+            if i >= 1 then table.insert(trimmed, parsedRules[i]) end
+        end
+        parsedRules = trimmed
+    end
 
-    local function walk(el)
+    local function walk(el, depth)
         if el.type ~= "element" then return end
+        if (depth or 0) > 300 then return end
         local style = {}
         local def = DEFAULT_STYLES[el.tag] or {display="inline"}
         for k, v in pairs(def) do style[k] = v end
@@ -568,7 +842,7 @@ local function computeStyles(root, cssRules)
             if v ~= nil then style[k] = v end
         end
         el.style = style
-        for _, child in ipairs(el.children) do walk(child) end
+        for _, child in ipairs(el.children) do walk(child, (depth or 0) + 1) end
     end
     walk(root)
 end
@@ -602,11 +876,12 @@ local function measureText(text)
 end
 
 -- Flatten an element's visible text into a single string (for buttons etc).
-local function flattenText(el)
+local function flattenText(el, depth)
     if el.type == "text" then return el.text end
+    if (depth or 0) > 50 then return "" end
     local t = ""
     for _, c in ipairs(el.children or {}) do
-        local s = flattenText(c)
+        local s = flattenText(c, (depth or 0) + 1)
         t = t .. s
     end
     return t
@@ -641,9 +916,9 @@ local function collectInlineItems(el, availW)
             else
                 -- inline / inline-block: ensure layout exists
                 if not node.layout then
-                    layoutElement(node, {availW=availW})
+                    layoutElement(node, {availW=availW or 0}, depth)
                 end
-                table.insert(items, {type="element", node=node, w=node.layout.w, h=node.layout.h})
+                table.insert(items, {type="element", node=node, w=(node.layout and node.layout.w) or 0, h=(node.layout and node.layout.h) or 0})
                 if node.tag == "br" then
                     items[#items].forceBreak = true
                 end
@@ -655,17 +930,25 @@ local function collectInlineItems(el, availW)
 end
 
 -- Apply offset to convert relative child coordinates to absolute.
-local function applyGlobalOffset(el, dx, dy)
+local function applyGlobalOffset(el, dx, dy, depth)
     if not el or not el.layout then return end
+    if (depth or 0) > 300 then return end
     el.layout.x = (el.layout.x or 0) + dx
     el.layout.y = (el.layout.y or 0) + dy
     if el.type == "element" then
-        for _, child in ipairs(el.children) do applyGlobalOffset(child, dx, dy) end
+        for _, child in ipairs(el.children) do applyGlobalOffset(child, dx, dy, (depth or 0) + 1) end
     end
 end
 
 -- Main layout function.
-function layoutElement(el, ctx)
+local MAX_LAYOUT_DEPTH = 200
+
+function layoutElement(el, ctx, depth)
+    depth = (depth or 0) + 1
+    if depth > MAX_LAYOUT_DEPTH then
+        el.layout = {x=0, y=0, w=0, h=0, display="none"}
+        return
+    end
     if el.type == "text" then
         el.layout = {x=0, y=0, w=0, h=LINE_HEIGHT, display="inline"}
         return
@@ -680,7 +963,7 @@ function layoutElement(el, ctx)
 
     local layout = {
         x = 0, y = 0,
-        w = ctx.availW,
+        w = ctx.availW or 0,
         h = 0,
         display = display,
         marginTop = getNum(style, "margin_top", 0) + getNum(style, "margin", 0),
@@ -699,8 +982,8 @@ function layoutElement(el, ctx)
         clickable = el.tag == "a" or el.tag == "button" or el.tag == "input" or el.attrs.onclick,
     }
 
-    if style.width then layout.w = resolveDim(style.width, ctx.availW) end
-    local contentW = layout.w - layout.paddingLeft - layout.paddingRight - layout.border * 2
+    if style.width then layout.w = resolveDim(style.width, ctx.availW) or 0 end
+    local contentW = (layout.w or 0) - (layout.paddingLeft or 0) - (layout.paddingRight or 0) - (layout.border or 0) * 2
     if contentW < 1 then contentW = 1 end
     layout.contentW = contentW
 
@@ -716,7 +999,7 @@ function layoutElement(el, ctx)
         local function flushLine()
             if #lineItems == 0 then return end
             local totalW = 0
-            for _, it in ipairs(lineItems) do totalW = totalW + it.w end
+            for _, it in ipairs(lineItems) do totalW = totalW + (it.w or 0) end
             local lineX = layout.paddingLeft + layout.border
             if layout.textAlign == "center" then lineX = lineX + math.max(0, math.floor((contentW - totalW) / 2))
             elseif layout.textAlign == "right" then lineX = lineX + math.max(0, contentW - totalW) end
@@ -728,7 +1011,7 @@ function layoutElement(el, ctx)
                     it.lineX = lineX
                     it.lineY = childY
                 end
-                lineX = lineX + it.w
+                lineX = lineX + (it.w or 0)
             end
             if totalW > maxContentW then maxContentW = totalW end
             childY = childY + lineH
@@ -741,31 +1024,32 @@ function layoutElement(el, ctx)
             if it.type == "block" then
                 flushLine()
                 local child = it.node
-                layoutElement(child, {availW=contentW})
-                child.layout.x = layout.paddingLeft + layout.border
-                child.layout.y = childY + child.layout.marginTop
+                layoutElement(child, {availW=contentW}, depth)
+                child.layout.x = (layout.paddingLeft or 0) + (layout.border or 0)
+                child.layout.y = childY + (child.layout.marginTop or 0)
                 applyGlobalOffset(child, 0, 0) -- already absolute after this
-                childY = childY + child.layout.marginTop + child.layout.h + child.layout.marginBottom
-                if child.layout.w > maxContentW then maxContentW = child.layout.w end
+                childY = childY + (child.layout.marginTop or 0) + (child.layout.h or 0) + (child.layout.marginBottom or 0)
+                if (child.layout.w or 0) > maxContentW then maxContentW = child.layout.w end
             else
-                if it.w > contentW then it.w = contentW end
-                if lineW + it.w > contentW and lineW > 0 then
+                local itw = it.w or 0
+                if itw > contentW then it.w = contentW; itw = contentW end
+                if lineW + itw > contentW and lineW > 0 then
                     flushLine()
                 end
                 table.insert(lineItems, it)
-                lineW = lineW + it.w
-                if it.h > lineH then lineH = it.h end
+                lineW = lineW + itw
+                if (it.h or 0) > lineH then lineH = it.h end
                 if it.forceBreak then flushLine() end
             end
         end
         flushLine()
         el._inlineItems = items
 
-        layout.contentH = math.max(0, childY - (layout.paddingTop + layout.border))
+        layout.contentH = math.max(0, childY - ((layout.paddingTop or 0) + (layout.border or 0)))
         if style.height then
-            layout.h = resolveDim(style.height, ctx.availH or contentW)
+            layout.h = resolveDim(style.height, ctx.availH or contentW) or 0
         else
-            layout.h = layout.contentH + layout.paddingTop + layout.paddingBottom + layout.border * 2
+            layout.h = (layout.contentH or 0) + (layout.paddingTop or 0) + (layout.paddingBottom or 0) + (layout.border or 0) * 2
         end
     else
         -- Inline / inline-block layout
@@ -773,40 +1057,39 @@ function layoutElement(el, ctx)
             local txt = el.attrs.value or el.attrs.placeholder or flattenText(el)
             if txt == "" then txt = " " end
             local tw = measureText(txt)
-            layout.w = tw + layout.paddingLeft + layout.paddingRight + layout.border * 2
-            layout.h = LINE_HEIGHT + layout.paddingTop + layout.paddingBottom + layout.border * 2
+            layout.w = tw + (layout.paddingLeft or 0) + (layout.paddingRight or 0) + (layout.border or 0) * 2
+            layout.h = LINE_HEIGHT + (layout.paddingTop or 0) + (layout.paddingBottom or 0) + (layout.border or 0) * 2
             if layout.h < 14 then layout.h = 14 end
             if el.tag == "input" and el.attrs.type == "text" then
                 layout.w = math.max(layout.w, 80)
             end
-            layout.contentW = layout.w - layout.paddingLeft - layout.paddingRight - layout.border * 2
+            layout.contentW = layout.w - (layout.paddingLeft or 0) - (layout.paddingRight or 0) - (layout.border or 0) * 2
         elseif el.tag == "img" then
-            layout.w = resolveDim(style.width, ctx.availW)
-            layout.h = resolveDim(style.height, 9999)
+            layout.w = resolveDim(style.width, ctx.availW) or 0
+            layout.h = resolveDim(style.height, 9999) or 0
             if layout.w == 0 then layout.w = 32 end
             if layout.h == 0 then layout.h = 32 end
             layout.contentW = layout.w
-            layout.w = layout.w + layout.paddingLeft + layout.paddingRight + layout.border * 2
-            layout.h = layout.h + layout.paddingTop + layout.paddingBottom + layout.border * 2
+            layout.w = layout.w + (layout.paddingLeft or 0) + (layout.paddingRight or 0) + (layout.border or 0) * 2
+            layout.h = layout.h + (layout.paddingTop or 0) + (layout.paddingBottom or 0) + (layout.border or 0) * 2
         elseif el.tag == "br" then
             layout.w = 0
             layout.h = LINE_HEIGHT
         elseif el.tag == "hr" then
-            layout.w = ctx.availW
+            layout.w = ctx.availW or 0
             layout.h = getNum(style, "border_top", 1) + getNum(style, "margin_top", 0) + getNum(style, "margin_bottom", 0)
         else
             -- inline container: span, a, b, i, etc.
-            local childX = layout.paddingLeft + layout.border
-            local childY = layout.paddingTop + layout.border
+            local childX = (layout.paddingLeft or 0) + (layout.border or 0)
+            local childY = (layout.paddingTop or 0) + (layout.border or 0)
             local maxH = 0
             local inlineItems = {}
             local items = collectInlineItems(el, contentW)
             for _, it in ipairs(items) do
                 if it.type == "block" then
-                    -- block inside inline is treated as inline-block for simplicity
-                    if not it.node.layout then layoutElement(it.node, {availW=contentW}) end
-                    it.w = it.node.layout.w
-                    it.h = it.node.layout.h
+                    if not it.node.layout then layoutElement(it.node, {availW=contentW or 0}, depth) end
+                    it.w = (it.node.layout and it.node.layout.w) or 0
+                    it.h = (it.node.layout and it.node.layout.h) or 0
                 end
                 if it.type == "element" or it.type == "block" then
                     applyGlobalOffset(it.node, childX, childY)
@@ -819,9 +1102,9 @@ function layoutElement(el, ctx)
                 table.insert(inlineItems, it)
             end
             el._inlineItems = inlineItems
-            layout.w = math.max(1, childX - (layout.paddingLeft + layout.border) + layout.paddingRight + layout.border)
-            layout.h = math.max(LINE_HEIGHT, maxH) + layout.paddingTop + layout.paddingBottom + layout.border * 2
-            layout.contentW = layout.w - layout.paddingLeft - layout.paddingRight - layout.border * 2
+            layout.w = math.max(1, childX - ((layout.paddingLeft or 0) + (layout.border or 0)) + (layout.paddingRight or 0) + (layout.border or 0))
+            layout.h = math.max(LINE_HEIGHT, maxH or 0) + (layout.paddingTop or 0) + (layout.paddingBottom or 0) + (layout.border or 0) * 2
+            layout.contentW = layout.w - (layout.paddingLeft or 0) - (layout.paddingRight or 0) - (layout.border or 0) * 2
         end
     end
 
@@ -868,27 +1151,31 @@ local function drawTextLine(x, y, text, fg, bg, style)
     drawText(x, y, text, fg, bg)
 end
 
-local function renderElement(el, scrollX, scrollY, clipRect)
+local function renderElement(el, scrollX, scrollY, clipRect, depth)
+    depth = (depth or 0) + 1
+    if depth > 300 then return end
     if el.type == "text" then return end
     if not el.layout then return end
     local l = el.layout
     if l.display == "none" then return end
 
-    local x = l.x - scrollX
-    local y = l.y - scrollY
-    -- simple clip: skip if outside content area
+    local x = (l.x or 0) - (scrollX or 0)
+    local y = (l.y or 0) - (scrollY or 0)
+    local lw, lh = l.w or 0, l.h or 0
+    -- simple clip: skip if completely outside content area
     if clipRect then
-        if x + l.w < clipRect.x or x > clipRect.x + clipRect.w or y + l.h < clipRect.y or y > clipRect.y + clipRect.h then return end
+        if x + lw < (clipRect.x or 0) - 10 or x > (clipRect.x or 0) + (clipRect.w or 0) + 10 or
+           y + lh < (clipRect.y or 0) - 10 or y > (clipRect.y or 0) + (clipRect.h or 0) + 10 then return end
     end
 
     -- draw block background and border
     if isBlockDisplay(l.display) then
-        drawBackground(x, y, l.w, l.h, l.bg)
-        drawBorder(x, y, l.w, l.h, l.border, (el.style or {}).border_color or K.DGRAY)
+        drawBackground(x, y, lw, lh, l.bg)
+        drawBorder(x, y, lw, lh, l.border, (el.style or {}).border_color or K.DGRAY)
         -- render inline children using pre-computed layout items
         for _, it in ipairs(el._inlineItems or {}) do
             if it.type == "element" then
-                renderElement(it.node, scrollX, scrollY, clipRect)
+                renderElement(it.node, scrollX, scrollY, clipRect, depth)
             elseif it.type == "text" then
                 local tx = x + it.lineX
                 local ty = y + it.lineY
@@ -898,7 +1185,7 @@ local function renderElement(el, scrollX, scrollY, clipRect)
                     drawTextLine(tx, ty, it.text, fg, bg, el.style)
                 end
             elseif it.type == "block" then
-                renderElement(it.node, scrollX, scrollY, clipRect)
+                renderElement(it.node, scrollX, scrollY, clipRect, depth)
             end
         end
     else
@@ -919,8 +1206,10 @@ local function renderElement(el, scrollX, scrollY, clipRect)
         elseif el.tag == "img" then
             local img = el._loadedImage
             if img then
-                local drawW = math.min(img.w, l.w - l.paddingLeft - l.paddingRight - l.border * 2)
-                local drawH = math.min(img.h, l.h - l.paddingTop - l.paddingBottom - l.border * 2)
+                local imgW = type(img.w) == "number" and img.w or 0
+                local imgH = type(img.h) == "number" and img.h or 0
+                local drawW = math.min(imgW, (l.w or 0) - (l.paddingLeft or 0) - (l.paddingRight or 0) - (l.border or 0) * 2)
+                local drawH = math.min(imgH, (l.h or 0) - (l.paddingTop or 0) - (l.paddingBottom or 0) - (l.border or 0) * 2)
                 local ix = x + l.paddingLeft + l.border
                 local iy = y + l.paddingTop + l.border
                 for py = 1, drawH do
@@ -943,7 +1232,7 @@ local function renderElement(el, scrollX, scrollY, clipRect)
             -- span, a, b, i, etc.
             for _, it in ipairs(el._inlineItems or {}) do
                 if it.type == "element" then
-                    renderElement(it.node, scrollX, scrollY, clipRect)
+                    renderElement(it.node, scrollX, scrollY, clipRect, depth)
                 elseif it.type == "text" then
                     local tx = x + it.lineX
                     local ty = y + it.lineY
@@ -951,7 +1240,7 @@ local function renderElement(el, scrollX, scrollY, clipRect)
                         drawTextLine(tx, ty, it.text, l.fg or K.BLACK, l.bg, el.style)
                     end
                 elseif it.type == "block" then
-                    renderElement(it.node, scrollX, scrollY, clipRect)
+                    renderElement(it.node, scrollX, scrollY, clipRect, depth)
                 end
             end
         end
@@ -964,9 +1253,10 @@ local function hitTest(el, mx, my, scrollX, scrollY)
     if not el.layout then return nil end
     local l = el.layout
     if l.display == "none" then return nil end
-    local x = l.x - scrollX
-    local y = l.y - scrollY
-    if mx >= x and mx < x + l.w and my >= y and my < y + l.h then
+    local x = (l.x or 0) - (scrollX or 0)
+    local y = (l.y or 0) - (scrollY or 0)
+    local lw, lh = l.w or 0, l.h or 0
+    if mx >= x and mx < x + lw and my >= y and my < y + lh then
         -- check children first (for inline elements)
         if not isBlockDisplay(l.display) then
             for _, child in ipairs(el.children) do
@@ -974,9 +1264,8 @@ local function hitTest(el, mx, my, scrollX, scrollY)
                 if hit then return hit end
             end
         else
-            local items = collectInlineItems(el, l.contentW)
-            for _, it in ipairs(items) do
-                if it.type == "element" then
+            for _, it in ipairs(el._inlineItems or {}) do
+                if it.type == "element" or it.type == "block" then
                     local hit = hitTest(it.node, mx, my, scrollX, scrollY)
                     if hit then return hit end
                 end
@@ -1182,9 +1471,15 @@ end
 local function fetchHTTP(url, timeout)
     timeout = timeout or 5
     if not http then return nil, "HTTP not available" end
-    local ok, resp = pcall(http.get, url)
+    local ok, resp = pcall(http.get, url, nil, true)  -- binary=true, no headers
     if not ok then return nil, "HTTP error: " .. tostring(resp) end
     if not resp then return nil, "HTTP request failed" end
+    -- Check response code (CC:T http response has getResponseCode())
+    local codeOk, code = pcall(resp.getResponseCode)
+    if codeOk and code and code >= 400 then
+        pcall(resp.close)
+        return nil, "HTTP " .. code
+    end
     local readOk, content = pcall(resp.readAll)
     if not readOk or not content then content = "" end
     pcall(resp.close)
@@ -1253,6 +1548,8 @@ local function extractCSS(root)
     local styles = getElementsByTag(root, "style")
     for _, el in ipairs(styles) do
         local text = flattenText(el)
+        -- Limit CSS size to prevent memory issues
+        if #text > 16384 then text = text:sub(1, 16384) end
         local r = parseCSS(text)
         for _, rule in ipairs(r) do table.insert(rules, rule) end
     end
@@ -1263,7 +1560,46 @@ local function extractScripts(root)
     local scripts = {}
     local elems = getElementsByTag(root, "script")
     for _, el in ipairs(elems) do
-        table.insert(scripts, flattenText(el))
+        -- Skip external scripts (src attribute) — can't fetch cross-origin
+        if not el.attrs.src then
+            local text = flattenText(el)
+            -- Skip empty scripts
+            if text and trim(text) ~= "" then
+                -- Skip overly large scripts (>4KB) — likely minified libraries
+                if #text <= 4096 then
+                    -- Skip scripts with patterns we can't transpile or don't support
+                    local complex = text:find("=>") or text:find("class%s+%w+") or
+                        text:find("try%s*{") or text:find("async%s+function") or
+                        text:find("import%s+") or text:find("export%s+") or
+                        text:find("yield%s+") or text:find("await%s+") or
+                        text:find("document%.fonts") or text:find("document%.body") or
+                        text:find("document%.head") or text:find("document%.createElement") or
+                        text:find("document%.querySelector") or
+                        text:find("document%.addEventListener") or
+                        text:find("document%.defaultView") or
+                        text:find("window%.") or text:find("navigator%.") or
+                        text:find("void%s") or text:find("%.catch%s*%(") or
+                        text:find("%.then%s*%(") or text:find("Promise") or
+                        text:find("requestAnimationFrame") or
+                        text:find("MutationObserver") or
+                        text:find("IntersectionObserver") or
+                        text:find("addEventListener") or
+                        text:find("removeEventListener") or
+                        text:find("sendBeacon") or text:find("XMLHttpRequest") or
+                        text:find("fetch%s*%(") or
+                        text:find("new%s+%w+%s*%(") or
+                        text:find("Worker%s*%(") or text:find("SharedWorker") or
+                        text:find("WebSocket") or
+                        text:find("localStorage") or text:find("sessionStorage") or
+                        text:find("indexedDB") or
+                        text:find("customElements") or text:find("shadowRoot") or
+                        text:find("getComputedStyle")
+                    if not complex then
+                        table.insert(scripts, text)
+                    end
+                end
+            end
+        end
     end
     return scripts
 end
@@ -1291,17 +1627,18 @@ local function loadImageForElement(el, baseURL, app)
     if scheme == "http" or scheme == "https" then
         local content = fetchHTTP(url, 3)
         if content then
-            -- Save temp and load via image API
             local tmp = "/tmp/minibrowser_img_" .. tostring(os.clock()):gsub("%.", "_")
             API.writeFile(tmp, content)
-            local img = API.loadImage(tmp)
-            if img then
-                el._loadedImage = {pixels=img[1], w=img[2], h=img[3]}
+            local px, w, h = API.loadImage(tmp)
+            if px and w and h then
+                el._loadedImage = {pixels=px, w=w, h=h}
             end
         end
     elseif scheme == "file" then
-        local img = API.loadImage(url:gsub("^file://", ""))
-        if img then el._loadedImage = {pixels=img[1], w=img[2], h=img[3]} end
+        local px, w, h = API.loadImage(url:gsub("^file://", ""))
+        if px and w and h then
+            el._loadedImage = {pixels=px, w=w, h=h}
+        end
     end
 end
 
@@ -1388,22 +1725,34 @@ local function appMiniBrowser()
             app.url = url
             app.setStatus("Error: " .. tostring(err))
         else
-            -- Limit size
-            if #content > 64000 then content = content:sub(1, 64000) .. "\n<!-- truncated -->" end
-            app.domRoot = normalizeRoot(parseHTML(content))
-            app.url = url
-            app.title = "Mini Browser - " .. url
-            -- extract css
-            app.cssRules = extractCSS(app.domRoot)
-            computeStyles(app.domRoot, app.cssRules)
-            -- load images
-            local imgs = getElementsByTag(app.domRoot, "img")
-            for _, img in ipairs(imgs) do loadImageForElement(img, url, app) end
-            -- layout
-            app.needsLayout = true
-            -- run scripts
+            -- Limit size to prevent memory exhaustion
+            if #content > 32768 then content = content:sub(1, 32768) .. "\n<!-- truncated -->" end
+            -- Wrap parsing in pcall to prevent crashes on malformed HTML
+            local ok, parseErr = pcall(function()
+                app.domRoot = normalizeRoot(parseHTML(content))
+                app.url = url
+                app.title = "Mini Browser - " .. url
+                -- extract css
+                app.cssRules = extractCSS(app.domRoot)
+                computeStyles(app.domRoot, app.cssRules)
+                -- load images (limited to first 10)
+                local imgs = getElementsByTag(app.domRoot, "img")
+                for i, img in ipairs(imgs) do
+                    if i > 10 then break end
+                    loadImageForElement(img, url, app)
+                end
+                -- layout
+                app.needsLayout = true
+            end)
+            if not ok then
+                app.domRoot = normalizeRoot(parseHTML("<h1>Parse Error</h1><p>" .. tostring(parseErr) .. "</p>"))
+                app.setStatus("Parse error")
+            end
+            -- run scripts (already filtered by extractScripts)
             app.scripts = extractScripts(app.domRoot)
-            for _, script in ipairs(app.scripts) do runScript(script, app) end
+            for _, script in ipairs(app.scripts) do
+                pcall(runScript, script, app)
+            end
             app.setStatus("Loaded " .. url)
         end
 
@@ -1633,4 +1982,14 @@ local function appMiniBrowser()
     end
 end
 
-return {name = "Mini Browser", icon = "minibrowser", run = appMiniBrowser}
+return {name = "Mini Browser", icon = "minibrowser", run = appMiniBrowser,
+-- Debug exports (for testing)
+_test = {
+    parseHTML=parseHTML, parseCSS=parseCSS, parseColor=parseColor,
+    colorToPalette=colorToPalette, computeStyles=computeStyles,
+    layoutElement=layoutElement, applyGlobalOffset=applyGlobalOffset,
+    normalizeRoot=normalizeRoot, extractCSS=extractCSS,
+    extractScripts=extractScripts, extractCSSVariables=extractCSSVariables,
+    resolveVar=resolveVar, parseInlineStyle=parseInlineStyle,
+    parseSelector=parseSelector, parseStyleValue=parseStyleValue,
+}}
