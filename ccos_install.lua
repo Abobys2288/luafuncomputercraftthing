@@ -37,6 +37,7 @@ local FILES = {
     "icons/fastfetch.nfp256",
     "icons/sites.nfp256",
     "icons/sitebuild.nfp256",
+    "icons/minibrowser.nfp256",
     -- Programs
     "programs/fm/program.lua",
     "programs/edit/program.lua",
@@ -52,6 +53,7 @@ local FILES = {
     "programs/fastfetch/program.lua",
     "programs/sites/program.lua",
     "programs/sitebuilder/program.lua",
+    "programs/minibrowser/program.lua",
     -- Drivers
     "drivers/net.lua",
 }

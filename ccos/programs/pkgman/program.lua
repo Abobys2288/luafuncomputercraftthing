@@ -61,6 +61,7 @@ local function loadLocalManifest()
         {name="fastfetch", title="Fastfetch", desc="System overview", icon="fastfetch"},
         {name="sites", title="Sites Browser", desc="Browse pages", icon="sites"},
         {name="sitebuilder", title="Site Builder", desc="Create and host pages", icon="sitebuild"},
+        {name="minibrowser", title="Mini Browser", desc="Lightweight HTML/CSS/JS browser", icon="minibrowser"},
     }
 end
 

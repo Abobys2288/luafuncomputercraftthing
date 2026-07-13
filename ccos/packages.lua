@@ -14,4 +14,5 @@ return {
     {name="fastfetch", title="Fastfetch", desc="System overview", icon="fastfetch"},
     {name="sites", title="Sites Browser", desc="Browse CCOS pages", icon="sites"},
     {name="sitebuilder", title="Site Builder", desc="Create and host CCOS pages", icon="sitebuild"},
+    {name="minibrowser", title="Mini Browser", desc="Lightweight HTML/CSS/JS browser for CCOS", icon="minibrowser"},
 }
