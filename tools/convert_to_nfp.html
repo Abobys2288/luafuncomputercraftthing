@@ -889,6 +889,7 @@
             <label><input id="codecC4" type="radio" name="codec" value="c4"><span>C4</span></label>
             <label><input id="codecC5" type="radio" name="codec" value="c5"><span>C5</span></label>
             <label><input id="codecC6" type="radio" name="codec" value="c6"><span>C6</span></label>
+            <label><input id="codecC8" type="radio" name="codec" value="c8"><span>C8 (composite — best)</span></label>
             <label><input id="codecC7" type="radio" name="codec" value="c7"><span>C7 (max)</span></label>
           </div>
         </div>
@@ -1850,6 +1851,7 @@ const els = {
   codecC5: document.getElementById("codecC5"),
   codecC6: document.getElementById("codecC6"),
   codecC7: document.getElementById("codecC7"),
+  codecC8: document.getElementById("codecC8"),
   quality: document.getElementById("qualityInput"),
   qualityValue: document.getElementById("qualityValue"),
   qualityField: document.getElementById("qualityField"),
@@ -2095,6 +2097,8 @@ function selectedCodec() {
 function detectCodec(text) {
   if (!text) return "";
   const first = text.split("\n")[0] || "";
+  if (first.endsWith(" C8")) return "C8";
+  if (first.endsWith(" C7")) return "C7";
   if (first.endsWith(" C6")) return "C6";
   if (first.endsWith(" C5")) return "C5";
   if (first.endsWith(" C4")) return "C4";
@@ -2901,7 +2905,7 @@ function encodeC7FrameBytes(indices, width, height, mode, previousFrame, lossy) 
 }
 
 function buildC7Payload(frameIndices, width, height, mode, lossy) {
-  const stream = [lossy ? 1 : 0];
+  const stream = [];
   let previousFrame = null;
   for (const indices of frameIndices) {
     const frameBytes = encodeC7FrameBytes(indices, width, height, mode, previousFrame, lossy);
@@ -2923,6 +2927,107 @@ function buildC7NfpaOutput(frameIndices, width, height, format, delayMs, loop) {
   const payload = buildC7Payload(frameIndices, width, height, format.mode, lossy);
   return [
     "!NFPA " + width + " " + height + " " + format.mode + " " + delayMs + " " + loop + " " + frameIndices.length + " C7",
+    ...splitBase64Lines(payload)
+  ].join("\n");
+}
+
+// ============================================================
+// C8 composite codec — per-frame method selection
+// ============================================================
+
+function c8FindTransIdx(frameIndices, mode) {
+  const maxColor = mode === 256 ? 256 : 32;
+  const used = new Array(maxColor).fill(false);
+  for (const indices of frameIndices) {
+    for (let i = 0; i < indices.length; i++) used[indices[i] & (maxColor - 1)] = true;
+  }
+  for (let i = 0; i < maxColor; i++) { if (!used[i]) return i; }
+  return null;
+}
+
+function c8EncodeInner(indices, width, height, mode, lossy) {
+  const candidates = [];
+  candidates.push({ method: 1, payload: rawIndexBytes(indices) });
+  candidates.push({ method: 2, payload: encodeC3Bytes(indices, width, height, null) });
+  candidates.push({ method: 3, payload: encodeC4Bytes(indices, width, height, null) });
+  candidates.push({ method: 4, payload: lzssCompress(rawIndexBytes(indices)) });
+  candidates.push({ method: 5, payload: lzwCompressIndices(indices, mode) });
+  candidates.push({ method: 6, payload: lzssCompress(lzwCompressIndices(indices, mode)) });
+  candidates.push({ method: 7, payload: encodeC7LosslessBytes(indices, width, height, mode, null) });
+  if (lossy) candidates.push({ method: 8, payload: encodeC7LossyBytes(indices, width, height, mode) });
+  let best = candidates[0];
+  for (const c of candidates) { if (c.payload.length < best.payload.length) best = c; }
+  return best;
+}
+
+function c8EncodeFrame(indices, width, height, mode, prevFrame, lossy, transIdx) {
+  const total = width * height;
+  if (prevFrame) {
+    let identical = true;
+    for (let i = 0; i < total; i++) { if (indices[i] !== prevFrame[i]) { identical = false; break; } }
+    if (identical) return { method: 0, payload: new Uint8Array(0) };
+  }
+  const candidates = [];
+  candidates.push(c8EncodeInner(indices, width, height, mode, lossy));
+  if (prevFrame) {
+    const rect = frameDiffRect(indices, prevFrame, width, height);
+    if (rect && !rect.full && (rect.w * rect.h) < total * 0.75) {
+      const region = extractRectIndices(indices, width, rect);
+      const inner = c8EncodeInner(region, rect.w, rect.h, mode, lossy);
+      const payload = [];
+      writeVarUint(payload, rect.x);
+      writeVarUint(payload, rect.y);
+      writeVarUint(payload, rect.w);
+      writeVarUint(payload, rect.h);
+      payload.push(inner.method);
+      writeVarUint(payload, inner.payload.length);
+      for (let i = 0; i < inner.payload.length; i++) payload.push(inner.payload[i]);
+      candidates.push({ method: 9, payload: new Uint8Array(payload) });
+    }
+  }
+  if (prevFrame && transIdx != null) {
+    const masked = new Uint8Array(total);
+    for (let i = 0; i < total; i++) masked[i] = indices[i] === prevFrame[i] ? transIdx : indices[i];
+    const inner = c8EncodeInner(masked, width, height, mode, lossy);
+    const payload = [];
+    payload.push(inner.method);
+    writeVarUint(payload, inner.payload.length);
+    for (let i = 0; i < inner.payload.length; i++) payload.push(inner.payload[i]);
+    candidates.push({ method: 10, payload: new Uint8Array(payload) });
+  }
+  let best = candidates[0];
+  for (const c of candidates) { if (c.payload.length < best.payload.length) best = c; }
+  return best;
+}
+
+function buildC8Payload(frameIndices, width, height, mode, lossy) {
+  const transIdx = frameIndices.length > 1 ? c8FindTransIdx(frameIndices, mode) : null;
+  const stream = [];
+  stream.push(1);
+  stream.push(transIdx != null ? 1 : 0);
+  if (transIdx != null) stream.push(transIdx);
+  let prev = null;
+  for (const indices of frameIndices) {
+    const best = c8EncodeFrame(indices, width, height, mode, prev, lossy, transIdx);
+    stream.push(best.method);
+    writeVarUint(stream, best.payload.length);
+    for (let i = 0; i < best.payload.length; i++) stream.push(best.payload[i]);
+    prev = indices;
+  }
+  return bytesToBase64(lzssCompress(new Uint8Array(stream)));
+}
+
+function buildC8NfpcOutput(indices, width, height, format) {
+  const lossy = selectedCompressionMode() === "lossy";
+  const payload = buildC8Payload([indices], width, height, format.mode, lossy);
+  return ["!NFPC " + width + " " + height + " " + format.mode + " C8", ...splitBase64Lines(payload)].join("\n");
+}
+
+function buildC8NfpaOutput(frameIndices, width, height, format, delayMs, loop) {
+  const lossy = selectedCompressionMode() === "lossy";
+  const payload = buildC8Payload(frameIndices, width, height, format.mode, lossy);
+  return [
+    "!NFPA " + width + " " + height + " " + format.mode + " " + delayMs + " " + loop + " " + frameIndices.length + " C8",
     ...splitBase64Lines(payload)
   ].join("\n");
 }
@@ -2984,6 +3089,7 @@ function buildOutput(indices, width, height, format) {
   if (codec === "c4") return buildC4NfpcOutput(indices, width, height, format);
   if (codec === "c5") return buildC5NfpcOutput(indices, width, height, format);
   if (codec === "c7") return buildC7NfpcOutput(indices, width, height, format);
+  if (codec === "c8") return buildC8NfpcOutput(indices, width, height, format);
 
   const c2Output = [
     "!NFPC " + width + " " + height + " " + mode + " C2",
@@ -2993,8 +3099,9 @@ function buildOutput(indices, width, height, format) {
   const c4Output = buildC4NfpcOutput(indices, width, height, format);
   const c5Output = buildC5NfpcOutput(indices, width, height, format);
   const c7Output = buildC7NfpcOutput(indices, width, height, format);
+  const c8Output = buildC8NfpcOutput(indices, width, height, format);
 
-  return shortestOutput([legacyOutput, c2Output, c3Output, c4Output, c5Output, c7Output]);
+  return shortestOutput([legacyOutput, c2Output, c3Output, c4Output, c5Output, c7Output, c8Output]);
 }
 
 function buildNfpaOutput(frameIndices, width, height, format, delayMs, loop) {
@@ -3020,6 +3127,7 @@ function buildNfpaOutput(frameIndices, width, height, format, delayMs, loop) {
   if (codec === "c5") return buildC5NfpaOutput(frameIndices, width, height, format, delayMs, loop);
   if (codec === "c6") return buildC6NfpaOutput(frameIndices, width, height, format, delayMs, loop);
   if (codec === "c7") return buildC7NfpaOutput(frameIndices, width, height, format, delayMs, loop);
+  if (codec === "c8") return buildC8NfpaOutput(frameIndices, width, height, format, delayMs, loop);
 
   const c2Lines = ["!NFPA " + width + " " + height + " " + format.mode + " " + delayMs + " " + loop + " " + frameIndices.length + " C2"];
   let previousFrame = null;
@@ -3033,8 +3141,9 @@ function buildNfpaOutput(frameIndices, width, height, format, delayMs, loop) {
   const c5Output = buildC5NfpaOutput(frameIndices, width, height, format, delayMs, loop);
   const c6Output = buildC6NfpaOutput(frameIndices, width, height, format, delayMs, loop);
   const c7Output = buildC7NfpaOutput(frameIndices, width, height, format, delayMs, loop);
+  const c8Output = buildC8NfpaOutput(frameIndices, width, height, format, delayMs, loop);
 
-  return shortestOutput([legacyOutput, c2Output, c3Output, c4Output, c5Output, c6Output, c7Output]);
+  return shortestOutput([legacyOutput, c2Output, c3Output, c4Output, c5Output, c6Output, c7Output, c8Output]);
 }
 
 function drawSourcePreview(img, width, height) {

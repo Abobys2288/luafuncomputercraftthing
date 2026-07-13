@@ -37,7 +37,7 @@ local function readTail(path, maxLines)
 end
 
 local function appSettings()
-    local wx, wy, ww, wh = API.fitWindow(330, 210)
+    local wx, wy, ww, wh = API.fitWindow(340, 230)
     local win = API.window("Settings", wx, wy, ww, wh)
     if not win then return end
 
@@ -48,6 +48,10 @@ local function appSettings()
         {id="appearance", label="Look", w=44},
         {id="logs", label="Logs", w=42},
     }
+
+    -- Track the actual Y where the action grid starts, and its layout.
+    -- This is updated every onDraw so onClick hit-testing always matches.
+    local gridState = { startY = 0, cols = 3, bw = 80, gap = 6, rows = 0 }
 
     local function freeSpace()
         local free = "?"
@@ -136,27 +140,34 @@ local function appSettings()
         return nil
     end
 
-    local function drawActionGrid(cx, cy, cw, y, actions)
-        local cols = cw >= 220 and 3 or 2
+    -- Draw the action grid and remember its geometry for hit-testing.
+    local function drawActionGrid(cx, cy, cw, startY, actions)
+        local cols = cw >= 200 and 3 or 2
         local gap = 6
         local bw = math.floor((cw - 8 - (cols - 1) * gap) / cols)
+        local rowH = 18
         for i, a in ipairs(actions) do
             local col = (i - 1) % cols
             local row = math.floor((i - 1) / cols)
-            button(cx + 4 + col * (bw + gap), cy + y + row * 20, bw, a.label)
+            button(cx + 4 + col * (bw + gap), cy + startY + row * rowH, bw, a.label)
         end
-        return cols, bw, gap
+        gridState.startY = startY
+        gridState.cols = cols
+        gridState.bw = bw
+        gridState.gap = gap
+        gridState.rowH = rowH
+        gridState.rows = math.ceil(#actions / cols)
     end
 
-    local function actionAt(mx, my, startY, actions, cw)
-        local cols = cw >= 220 and 3 or 2
-        local gap = 6
-        local bw = math.floor((cw - 8 - (cols - 1) * gap) / cols)
+    -- Hit-test using the geometry saved by drawActionGrid.
+    local function actionAt(mx, my, actions)
+        local cols, bw, gap = gridState.cols, gridState.bw, gridState.gap
+        local rowH = gridState.rowH or 18
         for i, a in ipairs(actions) do
             local col = (i - 1) % cols
             local row = math.floor((i - 1) / cols)
             local x = 4 + col * (bw + gap)
-            local y = startY + row * 20
+            local y = gridState.startY + row * rowH
             if mx >= x and mx < x + bw and my >= y and my < y + 14 then return a.id end
         end
         return nil
@@ -200,7 +211,9 @@ local function appSettings()
         elseif tab == "appearance" then
             text(cx + 4, cy + y, "Theme: " .. themeLabel(), K.BLACK, K.GRAY, cw - 8); y = y + 12
             local wp = D.wallpaperPath or (D.wallpaperConfigPath or "none")
-            text(cx + 4, cy + y, "Wallpaper: " .. (D.wallpaper and wp or "none"), K.BLACK, K.GRAY, cw - 8); y = y + 12
+            local wpLabel = (D.wallpaper and wp or "none")
+            if #wpLabel > 40 then wpLabel = wpLabel:sub(1, 38) .. ".." end
+            text(cx + 4, cy + y, "Wallpaper: " .. wpLabel, K.BLACK, K.GRAY, cw - 8); y = y + 12
             text(cx + 4, cy + y, "Layout: " .. tostring(D.inputLayout or "EN"), K.BLACK, K.GRAY, cw - 8); y = y + 12
             text(cx + 4, cy + y, "Sound: " .. (D.soundEnabled == false and "off" or "on"), K.BLACK, K.GRAY, cw - 8); y = y + 12
             text(cx + 4, cy + y, "Notifications: " .. (D.notificationsEnabled == false and "off" or "on"), K.BLACK, K.GRAY, cw - 8); y = y + 18
@@ -209,7 +222,8 @@ local function appSettings()
             local logPath = D.crashLogPath or "/ccos/logs/crashes.log"
             text(cx + 4, cy + y, "Crash log: " .. fileSize(logPath) .. " bytes", K.BLACK, K.GRAY, cw - 8); y = y + 12
             text(cx + 4, cy + y, "Crashes this session: " .. tostring(D.crashCount or 0), K.BLACK, K.GRAY, cw - 8); y = y + 12
-            for _, line in ipairs(readTail(logPath, math.max(3, math.floor((ch - 96) / 9)))) do
+            local logRows = math.max(3, math.floor((ch - y - 42) / 9))
+            for _, line in ipairs(readTail(logPath, logRows)) do
                 text(cx + 4, cy + y, line, K.DGRAY, K.GRAY, cw - 8)
                 y = y + 9
             end
@@ -222,15 +236,14 @@ local function appSettings()
     win.onClick = function(_, mx, my)
         local hit = hitTab(mx, my)
         if hit then tab = hit; D.markContentDirty(win); return end
-        local cw = win.cw - 6
         if tab == "system" then
-            local id = actionAt(mx, my, 76, systemActions, cw)
+            local id = actionAt(mx, my, systemActions)
             if id then action(id) end
         elseif tab == "appearance" then
-            local id = actionAt(mx, my, 76, lookActions, cw)
+            local id = actionAt(mx, my, lookActions)
             if id then action(id) end
         else
-            local id = actionAt(mx, my, (win.ch - 21) - 42, logActions, cw)
+            local id = actionAt(mx, my, logActions)
             if id then action(id) end
         end
     end

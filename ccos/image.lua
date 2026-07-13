@@ -3,7 +3,8 @@
     ====================================
     Decodes .nfp (32-color), .nfp256 (256-color), .nfpc (compressed),
     .nfpa (animation) image formats.
-    Codecs: legacy RLE, C2, C3, C4, C5 (LZSS+C3), C6 (region+LZW).
+    Codecs: legacy RLE, C2, C3, C4, C5 (LZSS+C3), C6 (region+LZW),
+            C7 (PRED+LZW+LZSS / 4x4 block), C8 (composite per-frame).
 
     Single source of truth — used by init.lua (boot logo), desktop.lua
     (icons) and programs/imgview (viewer). No dependency on globals.
@@ -466,13 +467,10 @@ end
 
 local function decodeC7Frame(bytes, mode, w, h, prevFlat, stats)
     local total = w * h
-    -- First byte after base64 is the submethod
+    -- First byte is the submethod
     local submethod = bytes[1] or 0
-    local body = {}
-    for i = 2, #bytes do body[#body + 1] = bytes[i] end
-
-    -- LZSS decompress the body
-    local stream = lzssDecompress(body)
+    local stream = {}
+    for i = 2, #bytes do stream[#stream + 1] = bytes[i] end
 
     local flat = {}
 
@@ -555,24 +553,143 @@ end
 
 local function decodeC7Frames(payload, mode, w, h, frameCount, stats)
     local stream = lzssDecompress(image.base64Bytes(payload))
-    -- First 2 bytes: submethod + frame table marker
-    local submethod = stream[1] or 0
-    -- Each frame is prefixed by varUint length
-    local frames, idx, prevFlat = {}, 2, nil
+    -- Each frame is prefixed by varUint length; frameBytes includes submethod as first byte
+    local frames, idx, prevFlat = {}, 1, nil
     for f = 1, frameCount do
         local len
         len, idx = readVarUint(stream, idx)
         local frameBytes = {}
         for i = 1, len do frameBytes[i] = stream[idx] or 0; idx = idx + 1 end
-        -- Prepend submethod byte for decodeC7Frame
-        local fullBytes = {submethod}
-        for i = 1, #frameBytes do fullBytes[#full + 1] = frameBytes[i] end
-        local rows, flat = decodeC7Frame(fullBytes, mode, w, h, prevFlat, stats)
+        local rows, flat = decodeC7Frame(frameBytes, mode, w, h, prevFlat, stats)
         frames[f] = rows
         prevFlat = flat
     end
     return frames
 end
+
+-- ============================================================
+-- C8 codec — composite (per-frame method selection)
+--   Envelope: !NFPC w h mode C8 | !NFPA w h mode delay loop frames C8
+--   Binary payload (LZSS-wrapped base64):
+--     [version:1][flags:1][transIdx:1 if flags&1]
+--     per frame: [method:1][varUint len][payload len bytes]
+--   Methods:
+--     0 SKIP 1 RAW 2 RLE 3 RLE-EXT 4 LZSS 5 LZW 6 LZW+LZSS
+--     7 PRED+LZW+LZSS(lossless) 8 4x4-BLOCK(lossy)
+--     9 REGION(x,y,rw,rh,innerMethod,varUint innerLen,innerPayload)
+--    10 TRANSPARENCY(innerMethod,varUint innerLen,innerPayload; replace transIdx with prev)
+-- ============================================================
+local function decodeC8Frame(method, payload, mode, w, h, prevFlat, transIdx, stats)
+    local total = w * h
+    local flat, rows
+
+    if method == 0 then
+        flat = copyFlat(prevFlat, total)
+        rows = flatToRows(flat, w, h)
+    elseif method == 1 then
+        flat = {}
+        for i = 1, total do
+            flat[i] = payload[i] or 0
+            if mode ~= 256 then flat[i] = flat[i] % 32 end
+        end
+        rows = flatToRows(flat, w, h)
+    elseif method == 2 then
+        rows, flat = decodeRleFrame(payload, mode, w, h, prevFlat, stats, false)
+    elseif method == 3 then
+        rows, flat = decodeRleFrame(payload, mode, w, h, prevFlat, stats, true)
+    elseif method == 4 then
+        local stream = lzssDecompress(payload)
+        flat = {}
+        for i = 1, total do
+            flat[i] = stream[i] or 0
+            if mode ~= 256 then flat[i] = flat[i] % 32 end
+        end
+        rows = flatToRows(flat, w, h)
+    elseif method == 5 then
+        flat = lzwDecompressIndices(payload, mode, total, stats)
+        for i = 1, total do
+            if mode ~= 256 then flat[i] = flat[i] % 32 end
+        end
+        rows = flatToRows(flat, w, h)
+    elseif method == 6 then
+        local stream = lzssDecompress(payload)
+        flat = lzwDecompressIndices(stream, mode, total, stats)
+        for i = 1, total do
+            if mode ~= 256 then flat[i] = flat[i] % 32 end
+        end
+        rows = flatToRows(flat, w, h)
+    elseif method == 7 then
+        rows, flat = decodeC7Frame(payload, mode, w, h, nil, stats)
+    elseif method == 8 then
+        rows, flat = decodeC7Frame(payload, mode, w, h, nil, stats)
+    elseif method == 9 then
+        local idx = 1
+        local rx, ry, rw, rh
+        rx, idx = readVarUint(payload, idx)
+        ry, idx = readVarUint(payload, idx)
+        rw, idx = readVarUint(payload, idx)
+        rh, idx = readVarUint(payload, idx)
+        local innerMethod = payload[idx] or 1; idx = idx + 1
+        local innerLen; innerLen, idx = readVarUint(payload, idx)
+        local innerPayload = {}
+        for i = 1, innerLen do innerPayload[i] = payload[idx] or 0; idx = idx + 1 end
+        local _, regionFlat = decodeC8Frame(innerMethod, innerPayload, mode, rw, rh, nil, transIdx, stats)
+        flat = copyFlat(prevFlat, total)
+        for yy = 0, rh - 1 do
+            local base = (ry + yy) * w + rx + 1
+            for xx = 0, rw - 1 do
+                local at = base + xx
+                if at >= 1 and at <= total then
+                    flat[at] = regionFlat[yy * rw + xx + 1] or 0
+                end
+            end
+        end
+        rows = flatToRows(flat, w, h)
+    elseif method == 10 then
+        local idx = 1
+        local innerMethod = payload[idx] or 1; idx = idx + 1
+        local innerLen; innerLen, idx = readVarUint(payload, idx)
+        local innerPayload = {}
+        for i = 1, innerLen do innerPayload[i] = payload[idx] or 0; idx = idx + 1 end
+        local _, innerFlat = decodeC8Frame(innerMethod, innerPayload, mode, w, h, nil, transIdx, stats)
+        flat = innerFlat
+        if prevFlat and transIdx then
+            for i = 1, total do
+                if flat[i] == transIdx then flat[i] = prevFlat[i] or 0 end
+            end
+        end
+        rows = flatToRows(flat, w, h)
+    else
+        flat = {}
+        for i = 1, total do flat[i] = 0 end
+        rows = flatToRows(flat, w, h)
+    end
+    return rows, flat
+end
+
+local function decodeC8Frames(payload, mode, w, h, frameCount, stats)
+    local stream = lzssDecompress(image.base64Bytes(payload))
+    local idx = 1
+    local version = stream[idx] or 1; idx = idx + 1
+    local flags = stream[idx] or 0; idx = idx + 1
+    local transIdx = nil
+    if (flags % 2) == 1 then
+        transIdx = stream[idx] or 255; idx = idx + 1
+    end
+    local frames = {}
+    local prevFlat = nil
+    for f = 1, frameCount do
+        local method = stream[idx] or 0; idx = idx + 1
+        local payloadLen; payloadLen, idx = readVarUint(stream, idx)
+        local framePayload = {}
+        for i = 1, payloadLen do framePayload[i] = stream[idx] or 0; idx = idx + 1 end
+        local rows, flat = decodeC8Frame(method, framePayload, mode, w, h, prevFlat, transIdx, stats)
+        frames[f] = rows
+        prevFlat = flat
+    end
+    return frames
+end
+
 function image.parseHeader(line)
     line = tostring(line or "")
     if line:match("^!NFPA") then
@@ -635,6 +752,8 @@ local function parseNfpc(lines, stats)
     if codec == "C7" then
         local payload = readBlobFromLines(lines, 2)
         pixels = decodeC7Frames(payload, mode, w, h, 1, stats)[1] or {}
+    elseif codec == "C8" then
+        pixels = decodeC8Frames(readBlobFromLines(lines, 2), mode, w, h, 1, stats)[1] or {}
     elseif codec == "C6" then
         local payload = readBlobFromLines(lines, 2)
         pixels = decodeC6Frames(payload, mode, w, h, 1, stats)[1] or {}
@@ -679,6 +798,9 @@ local function parseNfpa(lines, stats)
     if codec == "C7" then
         local payload; payload, idx = readBlobFromLines(lines, idx)
         frames = decodeC7Frames(payload, mode, w, h, frameCount, stats)
+    elseif codec == "C8" then
+        local payload; payload, idx = readBlobFromLines(lines, idx)
+        frames = decodeC8Frames(payload, mode, w, h, frameCount, stats)
     elseif codec == "C6" then
         local payload; payload, idx = readBlobFromLines(lines, idx)
         frames = decodeC6Frames(payload, mode, w, h, frameCount, stats)

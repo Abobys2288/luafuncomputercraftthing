@@ -482,7 +482,20 @@
   .mobile-menu button:hover { background: rgba(255,255,255,.06); }
   .mobile-menu button.primary { color: var(--vscode-accent2); font-weight: 600; }
 
-  /* Mobile / compact */
+  /* Image drop zone */
+  #pane-images.dragover .pane-body::after {
+    content: "Drop image to convert";
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,122,204,.85); color: #fff;
+    font-size: 18px; font-weight: 600;
+    pointer-events: none; z-index: 50;
+  }
+  #pane-images { position: relative; }
+
+  /* Status bar clicks */
+  #statusSize { user-select: none; }
+  #statusPos { color: rgba(255,255,255,.7); }
   @media (max-width: 700px) {
     .titlebar { height: 28px; padding: 0 10px; }
     .titlebar-actions { display: none; }
@@ -556,8 +569,9 @@
       <span>CCOS IDE</span>
     </div>
     <div class="titlebar-actions">
-      <button id="btnValidate">Validate</button>
-      <button id="btnBuild" class="primary">Build</button>
+      <button id="btnOpen" title="Open .lua file (Ctrl+O)">Open</button>
+      <button id="btnValidate" title="Validate Lua (Ctrl+Enter)">Validate</button>
+      <button id="btnBuild" class="primary" title="Build .ccpkg (Ctrl+S)">Build</button>
       <button id="btnDownload">Download</button>
       <button id="btnCopy">Copy</button>
     </div>
@@ -701,13 +715,13 @@
               <label class="field">Height<input id="imgH" type="number" min="1" max="256" value="64"></label>
               <label class="field">Codec (for nfpc/nfpa)
                 <select id="imgCodec">
-                  <option value="auto">Auto (pick best)</option>
-                  <option value="c2">C2 (row delta)</option>
-                  <option value="c3">C3 (RLE flat)</option>
-                  <option value="c4">C4 (RLE ext)</option>
-                  <option value="c5">C5 (LZSS+C3)</option>
+                  <option value="auto">Auto (C8 composite — best)</option>
+                  <option value="c8">C8 (composite per-frame)</option>
+                  <option value="c7">C7 (PRED+LZW / block)</option>
                   <option value="c6">C6 (region+LZW)</option>
-                  <option value="c7">C7 (max compression)</option>
+                  <option value="c5">C5 (LZSS+C3)</option>
+                  <option value="c4">C4 (RLE ext)</option>
+                  <option value="c3">C3 (RLE flat)</option>
                 </select>
               </label>
               <label class="field">Quality
@@ -771,6 +785,13 @@
               <div class="item"><code>net.siteGetAsync(hostId, name, path, callback)</code></div>
               <div class="item"><code>net.discoverAsync(timeout, callback)</code></div>
               <div class="item"><code>net.request(targetId, msg, expectedType, timeout, callback)</code><span class="desc">Generic async request</span></div>
+
+              <h3>Image Codecs</h3>
+              <div class="item"><code>C8</code><span class="desc">Composite — tries all methods per frame, picks smallest. Always optimal.</span></div>
+              <div class="item"><code>C7</code><span class="desc">PRED+LZW+LZSS (lossless) or 4x4 block (lossy)</span></div>
+              <div class="item"><code>C6</code><span class="desc">Region + LZW + optional LZSS</span></div>
+              <div class="item"><code>C5</code><span class="desc">LZSS stream of C3 RLE frames</span></div>
+              <div class="item"><code>C3/C4</code><span class="desc">RLE flat (C4 = extended for long runs)</span></div>
 
               <h3>Window Event Handlers</h3>
               <div class="item"><code>win.onDraw = function(win, cx, cy, cw, ch)</code><span class="desc">Content area (cx,cy = top-left, cw,ch = size)</span></div>
@@ -887,22 +908,29 @@ end<span class="copy-hint">← click to insert</span></div>
       CCOS IDE
     </span>
     <span class="statusbar-item statusbar-branch">main*</span>
+    <span class="statusbar-item" id="statusPos">Ln 1, Col 1</span>
     <span class="statusbar-item right" id="statusMsg">Ready</span>
+    <span class="statusbar-item" id="statusSize" style="cursor:pointer" title="Font size — Ctrl+= / Ctrl+-">A</span>
   </div>
 
   <!-- Mobile dropdown menu -->
   <div class="mobile-menu" id="mobileMenu">
+    <button id="mnuOpen">Open file</button>
     <button id="mnuValidate">Validate</button>
     <button id="mnuBuild" class="primary">Build</button>
     <button id="mnuDownload">Download</button>
     <button id="mnuCopy">Copy</button>
   </div>
+  <input id="fileInput" type="file" accept=".lua,.txt,.ccpkg" style="display:none">
 </div>
 
 <script>
+"use strict";
 // ============================================================
 // Tab / activity switching
 // ============================================================
+const PANE_TITLES = { code: "program.lua", build: "Build", images: "Images", cheat: "Cheatsheet" };
+
 function activatePane(name) {
   document.querySelectorAll(".activity-item").forEach(t => t.classList.remove("active"));
   document.querySelectorAll(".pane").forEach(p => p.classList.remove("active"));
@@ -913,32 +941,27 @@ function activatePane(name) {
   if (act) act.classList.add("active");
   if (pane) pane.classList.add("active");
   if (tree) tree.classList.add("active");
-  const titles = { code: "program.lua", build: "Build", images: "Images", cheat: "Cheatsheet" };
-  document.querySelector(".editor-header").textContent = (titles[name] || name) + (name === "code" ? " — src" : "");
+  document.querySelector(".editor-header").textContent = (PANE_TITLES[name] || name) + (name === "code" ? " — src" : "");
+  if (name === "code") setTimeout(() => editor.focus(), 50);
+  localStorage.setItem("ccos-pane", name);
 }
 
-document.querySelectorAll(".activity-item").forEach(tab => {
-  tab.onclick = () => activatePane(tab.dataset.pane);
-});
-document.querySelectorAll(".tree-item[data-pane]").forEach(item => {
-  item.onclick = () => activatePane(item.dataset.pane);
-});
+document.querySelectorAll(".activity-item").forEach(tab => { tab.onclick = () => activatePane(tab.dataset.pane); });
+document.querySelectorAll(".tree-item[data-pane]").forEach(item => { item.onclick = () => activatePane(item.dataset.pane); });
 
 // Mobile menu
 const mobileMenu = document.getElementById("mobileMenu");
-document.getElementById("titlebarMenuBtn").onclick = () => {
-  mobileMenu.classList.toggle("open");
-};
+document.getElementById("titlebarMenuBtn").onclick = (e) => { e.stopPropagation(); mobileMenu.classList.toggle("open"); };
 document.addEventListener("click", e => {
-  if (!e.target.closest("#titlebarMenuBtn") && !e.target.closest("#mobileMenu")) {
-    mobileMenu.classList.remove("open");
-  }
+  if (!e.target.closest("#titlebarMenuBtn") && !e.target.closest("#mobileMenu")) mobileMenu.classList.remove("open");
 });
 
 // ============================================================
-// Ace Editor + CCOS autocomplete + themes
+// Ace Editor — auto-save, minimap, folding, font, line/col
 // ============================================================
 const out = document.getElementById("output");
+const STORAGE_KEY = "ccos-ide-code";
+const SETTINGS_KEY = "ccos-ide-settings";
 
 const defaultCode = `local API = _G.ccos_api
 local D = _G._desktop
@@ -962,9 +985,9 @@ const aceThemes = { dark: "ace/theme/vscode", light: "ace/theme/chrome", hc: "ac
 
 const editor = ace.edit("aceEditor");
 editor.session.setMode("ace/mode/lua");
-editor.setValue(defaultCode, -1);
+editor.setValue(localStorage.getItem(STORAGE_KEY) || defaultCode, -1);
 editor.setOptions({
-  fontSize: "13px",
+  fontSize: Number(localStorage.getItem("ccos-fontsize")) || 13,
   showPrintMargin: false,
   highlightActiveLine: true,
   showInvisibles: false,
@@ -972,13 +995,42 @@ editor.setOptions({
   useSoftTabs: true,
   enableBasicAutocompletion: true,
   enableLiveAutocompletion: true,
-  enableSnippets: false
+  enableSnippets: true,
+  showFoldWidgets: true,
+  wrap: localStorage.getItem("ccos-wrap") === "1",
+  scrollPastEnd: 0.3,
+  newLineMode: "unix",
 });
 
+// Auto-save code (debounced)
+let saveTimer = null;
+editor.session.on("change", () => {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    localStorage.setItem(STORAGE_KEY, editor.getValue());
+    updateDirtyIndicator();
+  }, 400);
+});
+
+function updateDirtyIndicator() {
+  const saved = localStorage.getItem(STORAGE_KEY);
+  const dirty = saved !== editor.getValue();
+  const branch = document.querySelector(".statusbar-branch");
+  if (branch) branch.textContent = "main" + (dirty ? "*" : "");
+}
+
+// Line / column tracker
+editor.selection.on("changeCursor", () => {
+  const pos = editor.getCursorPosition();
+  const el = document.getElementById("statusPos");
+  if (el) el.textContent = "Ln " + (pos.row + 1) + ", Col " + (pos.column + 1);
+});
+
+// CCOS autocomplete
 const apiWords = new Set("API ccos_api _G _desktop ccos_render ccos_kernel window close redraw redrawContent fitWindow getRenderer getScreenSize drawText drawButton clipText chooseFile readFile writeFile listFiles isDir joinPath getDir getFileName ensureDir loadImage loadAnimation detectImage imageModule try setTimeout interrupted forceQuit rescue notify showError crashCount net init lookup lookupAsync lookupSiteServerAsync send receive siteRegister siteList siteListAsync siteResolve siteResolveAsync siteGet siteGetAsync discover discoverAsync request requestPackageListAsync requestPackageAsync keys fs rednet colors term R D K win onDraw onKey onClick onScroll onDrag onDoubleClick onClose".split(" "));
 
 const ccosCompleter = {
-  getCompletions: function(_editor, _session, _pos, prefix, callback) {
+  getCompletions: function(_ed, _se, _pos, prefix, callback) {
     if (!prefix) { callback(null, []); return; }
     const list = [];
     apiWords.forEach(w => { if (w.startsWith(prefix)) list.push({ caption: w, value: w, meta: "CCOS", score: 100 }); });
@@ -987,41 +1039,83 @@ const ccosCompleter = {
 };
 editor.completers = [ccosCompleter];
 
+// Theme
 function setTheme(name) {
   document.body.className = "theme-" + name;
   editor.setTheme(aceThemes[name] || aceThemes.dark);
   localStorage.setItem("ccos-theme", name);
-  document.querySelectorAll(".theme-switcher button").forEach(b => {
-    b.classList.toggle("active", b.dataset.theme === name);
-  });
+  document.querySelectorAll(".theme-switcher button").forEach(b => b.classList.toggle("active", b.dataset.theme === name));
 }
-document.querySelectorAll(".theme-switcher button").forEach(btn => {
-  btn.onclick = () => setTheme(btn.dataset.theme);
-});
+document.querySelectorAll(".theme-switcher button").forEach(btn => { btn.onclick = () => setTheme(btn.dataset.theme); });
 setTheme(localStorage.getItem("ccos-theme") || "dark");
 
-editor.commands.addCommand({
-  name: "validateLua",
-  bindKey: { win: "Ctrl-Enter", mac: "Cmd-Enter" },
-  exec: validateLua
-});
-editor.commands.addCommand({
-  name: "buildPackage",
-  bindKey: { win: "Ctrl-S", mac: "Cmd-S" },
-  exec: buildPackage
-});
+// Keyboard shortcuts
+editor.commands.addCommand({ name: "validateLua", bindKey: { win: "Ctrl-Enter", mac: "Cmd-Enter" }, exec: validateLua });
+editor.commands.addCommand({ name: "buildPackage", bindKey: { win: "Ctrl-S", mac: "Cmd-S" }, exec: buildPackage });
+editor.commands.addCommand({ name: "switchCode",  bindKey: { win: "Ctrl-1", mac: "Cmd-1" }, exec: () => activatePane("code") });
+editor.commands.addCommand({ name: "switchBuild", bindKey: { win: "Ctrl-2", mac: "Cmd-2" }, exec: () => activatePane("build") });
+editor.commands.addCommand({ name: "switchImages",bindKey: { win: "Ctrl-3", mac: "Cmd-3" }, exec: () => activatePane("images") });
+editor.commands.addCommand({ name: "switchCheat", bindKey: { win: "Ctrl-4", mac: "Cmd-4" }, exec: () => activatePane("cheat") });
+editor.commands.addCommand({ name: "fontSizeUp",  bindKey: { win: "Ctrl-=", mac: "Cmd-=" }, exec: () => changeFontSize(1) });
+editor.commands.addCommand({ name: "fontSizeDown",bindKey: { win: "Ctrl+-", mac: "Cmd+-" }, exec: () => changeFontSize(-1) });
+editor.commands.addCommand({ name: "toggleWrap", bindKey: { win: "Alt-Z", mac: "Alt-Z" }, exec: () => {
+  const w = !editor.getOption("wrap");
+  editor.setOption("wrap", w);
+  localStorage.setItem("ccos-wrap", w ? "1" : "0");
+  updateStatusBar("Word wrap " + (w ? "on" : "off"), "ok");
+}});
+editor.commands.addCommand({ name: "openFile", bindKey: { win: "Ctrl-O", mac: "Cmd-O" }, exec: () => document.getElementById("fileInput").click() });
+
+function changeFontSize(delta) {
+  let size = Number(localStorage.getItem("ccos-fontsize")) || 13;
+  size = Math.max(8, Math.min(28, size + delta));
+  editor.setOption("fontSize", size);
+  localStorage.setItem("ccos-fontsize", size);
+  document.getElementById("statusSize").textContent = size >= 15 ? "A+" : size <= 11 ? "A-" : "A";
+  updateStatusBar("Font: " + size + "px", "ok");
+}
 
 function getCode() { return editor.getValue(); }
 function setCode(v) { editor.setValue(v, -1); editor.focus(); }
+function insertAtCursor(text) {
+  const sel = editor.getSelectionRange();
+  if (sel.start.row !== sel.end.row || sel.start.column !== sel.end.column) editor.replace(text);
+  else editor.insert(text);
+  editor.focus();
+}
 
-// Package assets — images that will be included into .ccpkg
+// ============================================================
+// File open / save
+// ============================================================
+const fileInput = document.getElementById("fileInput");
+function openFile() {
+  mobileMenu.classList.remove("open");
+  fileInput.click();
+}
+document.getElementById("btnOpen").onclick = openFile;
+document.getElementById("mnuOpen").onclick = openFile;
+fileInput.onchange = () => {
+  const file = fileInput.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    setCode(reader.result);
+    updateStatusBar("Loaded: " + file.name, "ok");
+  };
+  reader.readAsText(file);
+  fileInput.value = "";
+};
+
+// ============================================================
+// Package assets
+// ============================================================
 let packageAssets = [];
 const assetList = document.getElementById("assetList");
 const assetEmpty = document.getElementById("assetEmpty");
 
 function getImgExt() {
-  const format = document.getElementById("imgFormat").value;
-  return format === "nfp" ? "nfp" : format === "nfp256" ? "nfp256" : format === "nfpa" ? "nfpa" : "nfpc";
+  const f = document.getElementById("imgFormat").value;
+  return f === "nfp" ? "nfp" : f === "nfp256" ? "nfp256" : f === "nfpa" ? "nfpa" : "nfpc";
 }
 
 function uniqueAssetName(ext) {
@@ -1032,32 +1126,15 @@ function uniqueAssetName(ext) {
 
 function renderAssets() {
   assetList.innerHTML = "";
-  if (packageAssets.length === 0) {
-    assetList.style.display = "none";
-    assetEmpty.style.display = "block";
-    return;
-  }
-  assetList.style.display = "flex";
-  assetEmpty.style.display = "none";
+  if (packageAssets.length === 0) { assetList.style.display = "none"; assetEmpty.style.display = "block"; return; }
+  assetList.style.display = "flex"; assetEmpty.style.display = "none";
   packageAssets.forEach((asset, i) => {
     const item = document.createElement("div");
     item.className = "asset-item";
-    item.innerHTML =
-      `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">` +
-      `<rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>` +
-      `<circle cx="8.5" cy="8.5" r="1.5"></circle>` +
-      `<polyline points="21 15 16 10 5 21"></polyline></svg>` +
-      `<input value="${asset.name.replace(/"/g, '&quot;')}">` +
-      `<button title="Remove">×</button>`;
+    item.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg><input value="${asset.name.replace(/"/g, '&quot;')}"><button title="Remove">\u00d7</button>`;
     const input = item.querySelector("input");
-    input.onchange = () => {
-      asset.name = input.value.trim() || asset.name;
-      input.value = asset.name;
-    };
-    item.querySelector("button").onclick = () => {
-      packageAssets.splice(i, 1);
-      renderAssets();
-    };
+    input.onchange = () => { asset.name = input.value.trim() || asset.name; input.value = asset.name; };
+    item.querySelector("button").onclick = () => { packageAssets.splice(i, 1); renderAssets(); };
     assetList.appendChild(item);
   });
 }
@@ -1075,34 +1152,75 @@ function addToPackage() {
 }
 
 // ============================================================
-// Lua syntax validation (heuristic — checks balanced end/do/then)
+// Lua validation (handles block comments + strings)
 // ============================================================
 function validateLua() {
   const src = getCode();
   const statusEl = document.getElementById("buildStatus");
   const stack = [];
-  const lines = src.split("\n");
-  let lineNum = 0;
-  let ok = true;
-  let msg = "";
 
-  for (let i = 0; i < lines.length && ok; i++) {
-    lineNum = i + 1;
-    const line = lines[i].replace(/--.*$/, "").trim();
+  // Strip strings and comments so keywords inside them don't confuse us
+  let clean = "";
+  let i = 0;
+  while (i < src.length) {
+    // Long-bracket string or comment --[[ ... ]] or --[==[ ... ]==]
+    if (src[i] === "-" && src[i+1] === "-") {
+      // Check for long bracket
+      let j = i + 2, level = 0;
+      if (src[j] === "[") {
+        let lv = 0;
+        while (src[j + 1 + lv] === "=") lv++;
+        if (src[j + 1 + lv] === "[") {
+          const close = "]" + "=".repeat(lv) + "]";
+          const end = src.indexOf(close, j + 2 + lv);
+          if (end === -1) { clean += "\n".repeat(src.slice(i).split("\n").length - 1); break; }
+          clean += "\n".repeat(src.slice(i, end + close.length).split("\n").length - 1);
+          i = end + close.length;
+          continue;
+        }
+      }
+      // Line comment
+      const nl = src.indexOf("\n", i);
+      if (nl === -1) break;
+      i = nl;
+      continue;
+    }
+    // String with single/double quotes
+    if (src[i] === '"' || src[i] === "'") {
+      const q = src[i];
+      clean += " ";
+      i++;
+      while (i < src.length && src[i] !== q) {
+        if (src[i] === "\\") { clean += "  "; i += 2; continue; }
+        if (src[i] === "\n") clean += "\n"; else clean += " ";
+        i++;
+      }
+      if (i < src.length) { clean += " "; i++; }
+      continue;
+    }
+    clean += src[i];
+    i++;
+  }
+
+  const lines = clean.split("\n");
+  let ok = true, msg = "";
+  for (let li = 0; li < lines.length && ok; li++) {
+    const lineNum = li + 1;
+    const line = lines[li].trim();
     if (!line) continue;
     const tokens = line.match(/\b\w+\b/g) || [];
     for (const t of tokens) {
       if (t === "function" || t === "do" || t === "repeat" || t === "then") {
         stack.push({ kw: t, line: lineNum });
       } else if (t === "end") {
-        if (stack.length === 0) { ok = false; msg = `Line ${lineNum}: unexpected 'end'`; break; }
+        if (stack.length === 0) { ok = false; msg = "Line " + lineNum + ": unexpected 'end'"; break; }
         stack.pop();
       }
     }
   }
   if (ok && stack.length > 0) {
     ok = false;
-    msg = `Unclosed '${stack[stack.length-1].kw}' from line ${stack[stack.length-1].line}`;
+    msg = "Unclosed '" + stack[stack.length-1].kw + "' from line " + stack[stack.length-1].line;
   }
   if (ok) {
     if (!src.match(/return\s*\{/)) {
@@ -1138,13 +1256,34 @@ function updateStatusBar(msg, type) {
 }
 
 // ============================================================
-// Package building
+// Package building (with 1 MB limit warning)
 // ============================================================
+const CC_DISK_LIMIT = 1000000;
+
 function luaString(s) {
   let level = 0;
   while (s.includes("]" + "=".repeat(level) + "]")) level++;
   const eq = "=".repeat(level);
-  return `[${eq}[${s}]${eq}]`;
+  return "[" + eq + "[" + s + "]" + eq + "]";
+}
+
+function saveSettings() {
+  const s = {};
+  ["pkgName", "pkgTitle", "pkgDesc", "pkgIcon"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) s[id] = el.value;
+  });
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+}
+
+function restoreSettings() {
+  try {
+    const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+    ["pkgName", "pkgTitle", "pkgDesc", "pkgIcon"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el && s[id] != null) el.value = s[id];
+    });
+  } catch (e) {}
 }
 
 function buildPackage() {
@@ -1153,27 +1292,23 @@ function buildPackage() {
   const title = document.getElementById("pkgTitle").value.trim() || name;
   const desc = document.getElementById("pkgDesc").value.trim() || "";
   const icon = document.getElementById("pkgIcon").value.trim() || "app";
+  saveSettings();
 
-  let filesLua = `    ["program.lua"] = ${luaString(getCode())}`;
+  let filesLua = "    [\"program.lua\"] = " + luaString(getCode());
   packageAssets.forEach(asset => {
-    filesLua += `,\n    ["${asset.name.replace(/"/g, '\\"')}"] = ${luaString(asset.content)}`;
+    filesLua += ",\n    [\"" + asset.name.replace(/"/g, '\\"') + "\"] = " + luaString(asset.content);
   });
 
-  const pkg =
-`return {
-  name = ${luaString(name)},
-  title = ${luaString(title)},
-  desc = ${luaString(desc)},
-  icon = ${luaString(icon)},
-  files = {
-${filesLua}
-  }
-}
-`;
+  const pkg = "return {\n  name = " + luaString(name) + ",\n  title = " + luaString(title) + ",\n  desc = " + luaString(desc) + ",\n  icon = " + luaString(icon) + ",\n  files = {\n" + filesLua + "\n  }\n}\n";
   out.value = pkg;
+  const size = new Blob([pkg]).size;
+  const sizeStr = size >= 1024 ? (size / 1024).toFixed(1) + " KB" : size + " bytes";
   const assetInfo = packageAssets.length ? " + " + packageAssets.length + " asset(s)" : "";
-  showStatus(document.getElementById("buildStatus"), "Package built: " + (name + ".ccpkg") + " (" + new Blob([pkg]).size + " bytes)" + assetInfo, "ok");
-  updateStatusBar("Package built: " + name + ".ccpkg" + assetInfo, "ok");
+  let type = "ok", msg = "Package built: " + name + ".ccpkg (" + sizeStr + ")" + assetInfo;
+  if (size > CC_DISK_LIMIT) { type = "err"; msg += " — EXCEEDS 1 MB CC:T disk limit!"; }
+  else if (size > CC_DISK_LIMIT * 0.8) { type = "warn"; msg += " — near disk limit"; }
+  showStatus(document.getElementById("buildStatus"), msg, type);
+  updateStatusBar(msg, type);
   return pkg;
 }
 
@@ -1185,9 +1320,13 @@ document.getElementById("mnuValidate").onclick = () => { mobileMenu.classList.re
 
 document.getElementById("btnFormat").onclick = () => {
   setCode(getCode().split("\n").map(l => l.replace(/\s+$/, "")).join("\n") + "\n");
+  updateStatusBar("Code formatted (trailing whitespace removed)", "ok");
 };
 
 document.getElementById("btnInsertTemplate").onclick = () => {
+  if (editor.getValue().trim() && editor.getValue().trim() !== defaultCode.trim()) {
+    if (!confirm("Replace current code with template?")) return;
+  }
   setCode(defaultCode);
 };
 
@@ -1202,9 +1341,7 @@ function downloadText(name, text) {
   setTimeout(() => URL.revokeObjectURL(a.href), 500);
 }
 
-function copyText(text) {
-  return navigator.clipboard.writeText(text);
-}
+function copyText(text) { return navigator.clipboard.writeText(text); }
 
 function doDownload() {
   const text = out.value || buildPackage();
@@ -1222,26 +1359,25 @@ function doCopy() {
 document.getElementById("btnDownload").onclick = doDownload;
 document.getElementById("mnuDownload").onclick = () => { mobileMenu.classList.remove("open"); doDownload(); };
 document.getElementById("btnDownload2").onclick = doDownload;
-document.getElementById("btnDownloadLua").onclick = () => {
-  downloadText("program.lua", getCode());
-};
+document.getElementById("btnDownloadLua").onclick = () => downloadText("program.lua", getCode());
 document.getElementById("btnCopy").onclick = doCopy;
 document.getElementById("mnuCopy").onclick = () => { mobileMenu.classList.remove("open"); doCopy(); };
 document.getElementById("btnCopy2").onclick = doCopy;
 
 // ============================================================
-// Snippet insertion
+// Snippet insertion (at cursor — never replaces all code)
 // ============================================================
 document.querySelectorAll(".cheat .snippet").forEach(sn => {
   sn.onclick = () => {
-    const text = sn.dataset.snippet ? sn.textContent.replace(/← click to insert/, "").trim() : sn.textContent;
-    setCode(text);
+    const text = sn.dataset.snippet ? sn.textContent.replace(/\u2190 click to insert/, "").trim() : sn.textContent.trim();
     activatePane("code");
+    insertAtCursor(text);
+    updateStatusBar("Snippet inserted at cursor", "ok");
   };
 });
 
 // ============================================================
-// Image converter (with C7 support)
+// Image converter (C2-C7 support)
 // ============================================================
 const w95 = [
   [8,10,14],[248,249,252],[202,206,214],[232,235,240],[108,116,128],[42,82,146],[28,56,110],[0,154,162],
@@ -1257,10 +1393,7 @@ let pidx = 32;
 for (let r = 0; r < 6; r++) for (let g = 0; g < 6; g++) for (let b = 0; b < 6; b++) pal256[pidx++] = [r*51, g*51, b*51];
 for (let i = 0; i < 40; i++) { const v = Math.floor(i * 255 / 39); pal256[216 + i] = [v, v, v]; }
 
-function dist(a, b) {
-  const dr = a[0]-b[0], dg = a[1]-b[1], db = a[2]-b[2];
-  return dr*dr + dg*dg + db*db;
-}
+function dist(a, b) { const dr=a[0]-b[0], dg=a[1]-b[1], db=a[2]-b[2]; return dr*dr + dg*dg + db*db; }
 
 function closestColor(rgb, mode) {
   if (mode === 32) {
@@ -1282,24 +1415,14 @@ function imageToIndices(img, width, height, mode) {
   ctx.drawImage(img, 0, 0, width, height);
   const data = ctx.getImageData(0, 0, width, height).data;
   const indices = new Uint8Array(width * height);
-  for (let i = 0; i < width * height; i++) {
-    const p = i * 4;
-    indices[i] = closestColor([data[p], data[p+1], data[p+2]], mode);
-  }
+  for (let i = 0; i < width * height; i++) { const p = i * 4; indices[i] = closestColor([data[p], data[p+1], data[p+2]], mode); }
   return indices;
 }
 
-// Base64 encode
-function bytesToBase64(bytes) {
-  let bin = "";
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-  return btoa(bin);
-}
+function bytesToBase64(bytes) { let bin = ""; for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]); return btoa(bin); }
 
-// LZSS compress
 function lzssCompress(input) {
-  const out = [];
-  const map = new Map();
+  const out = [], map = new Map();
   const maxDistance = 4096, maxLength = 18;
   let pos = 0;
   function appendHash(p) {
@@ -1332,9 +1455,7 @@ function lzssCompress(input) {
         for (let i = 0; i < bestLen; i++) appendHash(pos + i);
         pos += bestLen;
       } else {
-        out.push(input[pos]);
-        appendHash(pos);
-        pos++;
+        out.push(input[pos]); appendHash(pos); pos++;
       }
     }
     out[flagIndex] = flags;
@@ -1342,20 +1463,13 @@ function lzssCompress(input) {
   return new Uint8Array(out);
 }
 
-// LZW compress
 function lzwCompress(values, mode) {
   const minCodeSize = mode === 256 ? 8 : 5;
-  const clearCode = 1 << minCodeSize;
-  const eoiCode = clearCode + 1;
+  const clearCode = 1 << minCodeSize, eoiCode = clearCode + 1;
   const out = [];
   let bitBuffer = 0, bitCount = 0;
-  function emit(code) {
-    bitBuffer |= code << bitCount;
-    bitCount += 12;
-    while (bitCount >= 8) { out.push(bitBuffer & 255); bitBuffer >>= 8; bitCount -= 8; }
-  }
-  let dict = new Map();
-  let nextCode = eoiCode + 1;
+  function emit(code) { bitBuffer |= code << bitCount; bitCount += 12; while (bitCount >= 8) { out.push(bitBuffer & 255); bitBuffer >>= 8; bitCount -= 8; } }
+  let dict = new Map(), nextCode = eoiCode + 1;
   emit(clearCode);
   if (!values || values.length === 0) { emit(eoiCode); if (bitCount > 0) out.push(bitBuffer & 255); return new Uint8Array(out); }
   const mask = mode === 256 ? 255 : 31;
@@ -1374,12 +1488,92 @@ function lzwCompress(values, mode) {
   return new Uint8Array(out);
 }
 
-function writeVarUint(out, value) {
-  while (value >= 128) { out.push((value & 127) | 128); value >>= 7; }
-  out.push(value & 127);
+function writeVarUint(out, value) { while (value >= 128) { out.push((value & 127) | 128); value >>= 7; } out.push(value & 127); }
+
+function splitBase64Lines(b64) { const lines = []; for (let i = 0; i < b64.length; i += 76) lines.push(b64.slice(i, i + 76)); return lines; }
+
+// ---- C3: RLE flat (base64) ----
+function encodeC3Frame(indices, width, height, mode) {
+  const total = width * height;
+  const out = [];
+  let pos = 0;
+  while (pos < total) {
+    const color = indices[pos];
+    let run = 1;
+    while (pos + run < total && run < 64 && indices[pos + run] === color) run++;
+    if (run >= 2) {
+      out.push((2 << 6) | (run - 1), color & 255);
+      pos += run;
+    } else {
+      const start = pos;
+      let rawLen = 0;
+      while (pos < total && rawLen < 64) {
+        const c = indices[pos];
+        let r = 1;
+        while (pos + r < total && r < 3 && indices[pos + r] === c) r++;
+        if (r >= 2) break;
+        pos++; rawLen++;
+      }
+      out.push((3 << 6) | (rawLen - 1));
+      for (let i = start; i < start + rawLen; i++) out.push(indices[i] & 255);
+    }
+  }
+  return new Uint8Array(out);
 }
 
-// C7 encoder
+// ---- C4: RLE flat extended (base64, long runs) ----
+function encodeC4Frame(indices, width, height, mode) {
+  const total = width * height;
+  const out = [];
+  let pos = 0;
+  while (pos < total) {
+    const color = indices[pos];
+    let run = 1;
+    while (pos + run < total && run < 16384 && indices[pos + run] === color) run++;
+    if (run >= 2) {
+      if (run <= 64) { out.push((2 << 6) | (run - 1), color & 255); }
+      else { out.push(0xFF, (2 << 6) | (Math.floor((run - 1) / 256)), (run - 1) % 256, color & 255); }
+      pos += run;
+    } else {
+      const start = pos;
+      let rawLen = 0;
+      while (pos < total && rawLen < 16384) {
+        const c = indices[pos];
+        let r = 1;
+        while (pos + r < total && r < 3 && indices[pos + r] === c) r++;
+        if (r >= 2) break;
+        pos++; rawLen++;
+      }
+      if (rawLen <= 64) { out.push((3 << 6) | (rawLen - 1)); }
+      else { out.push(0xFF, (3 << 6) | (Math.floor((rawLen - 1) / 256)), (rawLen - 1) % 256); }
+      for (let i = start; i < start + rawLen; i++) out.push(indices[i] & 255);
+    }
+  }
+  return new Uint8Array(out);
+}
+
+// ---- C5: LZSS stream of C3 frames (base64) ----
+function encodeC5(indices, width, height, mode) {
+  const c3 = encodeC3Frame(indices, width, height, mode);
+  const stream = [];
+  writeVarUint(stream, c3.length);
+  for (let i = 0; i < c3.length; i++) stream.push(c3[i]);
+  return bytesToBase64(lzssCompress(new Uint8Array(stream)));
+}
+
+// ---- C6: region + LZW, LZSS wrapping (base64) ----
+function encodeC6(indices, width, height, mode) {
+  const lzw = lzwCompress(indices, mode);
+  const stream = [1]; // kind = 1 (full LZW)
+  writeVarUint(stream, lzw.length);
+  for (let i = 0; i < lzw.length; i++) stream.push(lzw[i]);
+  const compressed = lzssCompress(new Uint8Array(stream));
+  const packed = [1]; // method = 1 (LZSS)
+  for (let i = 0; i < compressed.length; i++) packed.push(compressed[i]);
+  return bytesToBase64(new Uint8Array(packed));
+}
+
+// ---- C7 encoder ----
 function encodeC7Lossless(indices, width, height, mode, prevFrame) {
   const total = width * height;
   const mod = mode === 256 ? 256 : 32;
@@ -1439,31 +1633,122 @@ function encodeC7Lossy(indices, width, height, mode) {
   return new Uint8Array(out);
 }
 
-function encodeRLE(indices, width, height, mode, prevFrame) {
-  const total = width * height;
-  const out = [];
-  let pos = 0;
-  while (pos < total) {
-    const color = indices[pos] || 0;
-    let len = 1;
-    while (pos + len < total && len < 64 && indices[pos + len] === color) len++;
-    if (len <= 1) {
-      out.push(0);
-      out.push(color);
-    } else {
-      out.push(1);
-      out.push(color);
-      out.push(len - 1);
+// ============================================================
+// C8 composite encoder — tries all methods per frame, picks smallest
+// ============================================================
+
+function findBoundingBox(curr, prev, w, h) {
+  let minX = w, minY = h, maxX = -1, maxY = -1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (curr[i] !== prev[i]) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
     }
-    pos += len;
   }
-  return new Uint8Array(out);
+  if (maxX < 0) return null;
+  return { x: minX, y: minY, rw: maxX - minX + 1, rh: maxY - minY + 1 };
 }
 
-function splitBase64Lines(b64) {
-  const lines = [];
-  for (let i = 0; i < b64.length; i += 76) lines.push(b64.slice(i, i + 76));
-  return lines;
+function extractRegion(indices, w, bbox) {
+  const region = new Uint8Array(bbox.rw * bbox.rh);
+  for (let y = 0; y < bbox.rh; y++) {
+    for (let x = 0; x < bbox.rw; x++) {
+      region[y * bbox.rw + x] = indices[(bbox.y + y) * w + (bbox.x + x)];
+    }
+  }
+  return region;
+}
+
+function findTransIdx(frames, mode) {
+  const maxColor = mode === 256 ? 256 : 32;
+  const used = new Array(maxColor).fill(false);
+  for (const frame of frames) {
+    for (let i = 0; i < frame.length; i++) used[frame[i] & (maxColor - 1)] = true;
+  }
+  for (let i = 0; i < maxColor; i++) { if (!used[i]) return i; }
+  return null;
+}
+
+function encodeC8Inner(indices, w, h, mode, allowLossy) {
+  const candidates = [];
+  candidates.push({ method: 1, payload: new Uint8Array(indices) });
+  candidates.push({ method: 2, payload: encodeC3Frame(indices, w, h, mode) });
+  candidates.push({ method: 3, payload: encodeC4Frame(indices, w, h, mode) });
+  candidates.push({ method: 4, payload: lzssCompress(new Uint8Array(indices)) });
+  candidates.push({ method: 5, payload: lzwCompress(indices, mode) });
+  candidates.push({ method: 6, payload: lzssCompress(lzwCompress(indices, mode)) });
+  candidates.push({ method: 7, payload: encodeC7Lossless(indices, w, h, mode, null) });
+  if (allowLossy) candidates.push({ method: 8, payload: encodeC7Lossy(indices, w, h, mode) });
+  let best = candidates[0];
+  for (const c of candidates) { if (c.payload.length < best.payload.length) best = c; }
+  return best;
+}
+
+function encodeC8Frame(indices, w, h, mode, prevFrame, allowLossy, transIdx) {
+  const total = w * h;
+
+  if (prevFrame) {
+    let identical = true;
+    for (let i = 0; i < total; i++) { if (indices[i] !== prevFrame[i]) { identical = false; break; } }
+    if (identical) return { method: 0, payload: new Uint8Array(0) };
+  }
+
+  const candidates = [];
+  candidates.push(encodeC8Inner(indices, w, h, mode, allowLossy));
+
+  if (prevFrame) {
+    const bbox = findBoundingBox(indices, prevFrame, w, h);
+    if (bbox && (bbox.rw * bbox.rh) < total * 0.75) {
+      const region = extractRegion(indices, w, bbox);
+      const inner = encodeC8Inner(region, bbox.rw, bbox.rh, mode, allowLossy);
+      const payload = [];
+      writeVarUint(payload, bbox.x);
+      writeVarUint(payload, bbox.y);
+      writeVarUint(payload, bbox.rw);
+      writeVarUint(payload, bbox.rh);
+      payload.push(inner.method);
+      writeVarUint(payload, inner.payload.length);
+      for (let i = 0; i < inner.payload.length; i++) payload.push(inner.payload[i]);
+      candidates.push({ method: 9, payload: new Uint8Array(payload) });
+    }
+  }
+
+  if (prevFrame && transIdx != null) {
+    const masked = new Uint8Array(total);
+    for (let i = 0; i < total; i++) masked[i] = indices[i] === prevFrame[i] ? transIdx : indices[i];
+    const inner = encodeC8Inner(masked, w, h, mode, allowLossy);
+    const payload = [];
+    payload.push(inner.method);
+    writeVarUint(payload, inner.payload.length);
+    for (let i = 0; i < inner.payload.length; i++) payload.push(inner.payload[i]);
+    candidates.push({ method: 10, payload: new Uint8Array(payload) });
+  }
+
+  let best = candidates[0];
+  for (const c of candidates) { if (c.payload.length < best.payload.length) best = c; }
+  return best;
+}
+
+function encodeC8(frames, w, h, mode, allowLossy) {
+  const transIdx = frames.length > 1 ? findTransIdx(frames, mode) : null;
+  const stream = [];
+  stream.push(1);
+  stream.push(transIdx != null ? 1 : 0);
+  if (transIdx != null) stream.push(transIdx);
+  let prev = null;
+  for (const frame of frames) {
+    const best = encodeC8Frame(frame, w, h, mode, prev, allowLossy, transIdx);
+    stream.push(best.method);
+    writeVarUint(stream, best.payload.length);
+    for (let i = 0; i < best.payload.length; i++) stream.push(best.payload[i]);
+    prev = frame;
+  }
+  return bytesToBase64(lzssCompress(new Uint8Array(stream)));
 }
 
 async function convertImage() {
@@ -1474,7 +1759,6 @@ async function convertImage() {
   const quality = document.getElementById("imgQuality").value;
   const width = Math.max(1, Math.min(256, Number(document.getElementById("imgW").value) || 64));
   const height = Math.max(1, Math.min(256, Number(document.getElementById("imgH").value) || 64));
-  const statusEl = document.getElementById("imgStatus");
   const outEl = document.getElementById("imgOutput");
   const preview = document.getElementById("imgPreview");
 
@@ -1485,32 +1769,39 @@ async function convertImage() {
   await img.decode();
 
   const isAnim = format === "nfpa";
-  const mode = (format === "nfp" || format === "nfpa" && codec !== "auto") ? 32 : 256;
   const useMode = (format === "nfp") ? 32 : 256;
 
   if (isAnim && file.type === "image/gif") {
     const frames = await extractGifFrames(file, width, height, useMode);
     if (!frames || frames.length === 0) { showImgStatus("Failed to read GIF.", "err"); updateStatusBar("GIF decode failed", "err"); return; }
     const lossy = quality === "lossy";
-    const stream = [lossy ? 1 : 0];
-    let prev = null;
-    for (const indices of frames) {
-      const frameBytes = lossy ? encodeC7Lossy(indices, width, height, useMode) : encodeC7Lossless(indices, width, height, useMode, prev);
-      writeVarUint(stream, frameBytes.length);
-      for (let i = 0; i < frameBytes.length; i++) stream.push(frameBytes[i]);
-      prev = indices;
+    let payload, codecTag, codecLabel;
+    if (codec === "c8" || codec === "auto") {
+      payload = encodeC8(frames, width, height, useMode, lossy);
+      codecTag = "C8"; codecLabel = "C8 " + (lossy ? "auto-lossy" : "lossless");
+    } else {
+      const stream = [];
+      let prev = null;
+      for (const indices of frames) {
+        const frameBytes = lossy ? encodeC7Lossy(indices, width, height, useMode) : encodeC7Lossless(indices, width, height, useMode, prev);
+        writeVarUint(stream, frameBytes.length);
+        for (let i = 0; i < frameBytes.length; i++) stream.push(frameBytes[i]);
+        prev = indices;
+      }
+      payload = bytesToBase64(lzssCompress(new Uint8Array(stream)));
+      codecTag = "C7"; codecLabel = "C7";
     }
-    const payload = bytesToBase64(lzssCompress(new Uint8Array(stream)));
-    const out = "!NFPA " + width + " " + height + " " + useMode + " 100 0 " + frames.length + " C7\n" + splitBase64Lines(payload).join("\n");
-    outEl.value = out;
-    showImgStatus("Animation: " + frames.length + " frames, " + new Blob([out]).size + " bytes (C7)", "ok");
-    updateStatusBar("Animation converted", "ok");
+    const result = "!NFPA " + width + " " + height + " " + useMode + " 100 0 " + frames.length + " " + codecTag + "\n" + splitBase64Lines(payload).join("\n");
+    outEl.value = result;
+    showImgStatus("Animation: " + frames.length + " frame(s), " + new Blob([result]).size + " bytes (" + codecLabel + ")", "ok");
+    updateStatusBar("Animation converted (" + codecLabel + ")", "ok");
     drawPreview(frames[0], width, height, useMode, preview);
     return;
   }
 
   const indices = imageToIndices(img, width, height, useMode);
 
+  // Raw NFP / NFP256
   if (format === "nfp256" || format === "nfp") {
     const lines = [];
     for (let y = 0; y < height; y++) {
@@ -1522,24 +1813,48 @@ async function convertImage() {
       }
       lines.push(line);
     }
-    const out = lines.join("\n");
-    outEl.value = out;
-    showImgStatus("Converted " + width + "x" + height + " " + format + ", " + new Blob([out]).size + " bytes", "ok");
+    const result = lines.join("\n");
+    outEl.value = result;
+    showImgStatus("Converted " + width + "x" + height + " " + format + ", " + new Blob([result]).size + " bytes", "ok");
     updateStatusBar("Image converted", "ok");
     drawPreview(indices, width, height, useMode, preview);
     return;
   }
 
-  let out;
+  // NFPC — pick codec
   const lossy = quality === "lossy";
-  if (codec === "c7" || codec === "auto") {
+  let result, codecLabel;
+
+  if (codec === "auto" || codec === "c8") {
+    const payload = encodeC8([indices], width, height, useMode, lossy);
+    result = "!NFPC " + width + " " + height + " " + useMode + " C8\n" + splitBase64Lines(payload).join("\n");
+    codecLabel = "C8 " + (lossy ? "auto-lossy" : "lossless");
+  } else if (codec === "c7") {
     const frameBytes = lossy ? encodeC7Lossy(indices, width, height, useMode) : encodeC7Lossless(indices, width, height, useMode, null);
-    const stream = [lossy ? 1 : 0];
+    const stream = [];
     writeVarUint(stream, frameBytes.length);
     for (let i = 0; i < frameBytes.length; i++) stream.push(frameBytes[i]);
     const payload = bytesToBase64(lzssCompress(new Uint8Array(stream)));
-    out = "!NFPC " + width + " " + height + " " + useMode + " C7\n" + splitBase64Lines(payload).join("\n");
+    result = "!NFPC " + width + " " + height + " " + useMode + " C7\n" + splitBase64Lines(payload).join("\n");
+    codecLabel = "C7 " + (lossy ? "lossy" : "lossless");
+  } else if (codec === "c3") {
+    const payload = bytesToBase64(encodeC3Frame(indices, width, height, useMode));
+    result = "!NFPC " + width + " " + height + " " + useMode + " C3\n" + splitBase64Lines(payload).join("\n");
+    codecLabel = "C3";
+  } else if (codec === "c4") {
+    const payload = bytesToBase64(encodeC4Frame(indices, width, height, useMode));
+    result = "!NFPC " + width + " " + height + " " + useMode + " C4\n" + splitBase64Lines(payload).join("\n");
+    codecLabel = "C4";
+  } else if (codec === "c5") {
+    const payload = encodeC5(indices, width, height, useMode);
+    result = "!NFPC " + width + " " + height + " " + useMode + " C5\n" + splitBase64Lines(payload).join("\n");
+    codecLabel = "C5";
+  } else if (codec === "c6") {
+    const payload = encodeC6(indices, width, height, useMode);
+    result = "!NFPC " + width + " " + height + " " + useMode + " C6\n" + splitBase64Lines(payload).join("\n");
+    codecLabel = "C6";
   } else {
+    // Legacy raw
     const lines = ["!NFPC " + width + " " + height + " " + useMode];
     for (let y = 0; y < height; y++) {
       let line = "";
@@ -1550,11 +1865,14 @@ async function convertImage() {
       }
       lines.push(line);
     }
-    out = lines.join("\n");
+    result = lines.join("\n");
+    codecLabel = "legacy";
   }
-  outEl.value = out;
-  showImgStatus("Converted " + width + "x" + height + " " + format + " " + (codec === "c7" ? "C7" : "legacy") + ", " + new Blob([out]).size + " bytes", "ok");
-  updateStatusBar("Image converted", "ok");
+
+  outEl.value = result;
+  const size = new Blob([result]).size;
+  showImgStatus("Converted " + width + "x" + height + " " + format + " " + codecLabel + ", " + size + " bytes", "ok");
+  updateStatusBar("Image converted (" + codecLabel + ")", "ok");
   drawPreview(indices, width, height, useMode, preview);
 }
 
@@ -1575,22 +1893,15 @@ function drawPreview(indices, width, height, mode, canvas) {
     const v = indices[i] || 0;
     const pal = mode === 256 ? pal256 : w95;
     const rgb = pal[v] || [0,0,0];
-    imgData.data[i*4] = rgb[0];
-    imgData.data[i*4+1] = rgb[1];
-    imgData.data[i*4+2] = rgb[2];
-    imgData.data[i*4+3] = 255;
+    imgData.data[i*4] = rgb[0]; imgData.data[i*4+1] = rgb[1]; imgData.data[i*4+2] = rgb[2]; imgData.data[i*4+3] = 255;
   }
   ctx.putImageData(imgData, 0, 0);
   canvas.style.width = Math.min(300, width * 4) + "px";
   canvas.style.height = "auto";
 }
 
-// GIF frame extraction (using browser's GIF decoder via canvas)
+// GIF extraction (single-frame fallback; multi-frame needs omggif/gifuct)
 async function extractGifFrames(file, width, height, mode) {
-  // Browser doesn't natively decode GIF frames. Use a simple approach:
-  // Draw the first frame only if not animated; for animated GIFs,
-  // we'd need a library. For now, return single frame.
-  // TODO: integrate gif.js or omggif for multi-frame
   const img = new Image();
   img.src = URL.createObjectURL(file);
   await img.decode();
@@ -1608,6 +1919,34 @@ document.getElementById("downloadImg").onclick = () => {
   downloadText("image." + ext, text);
 };
 
+// ============================================================
+// Image drag-drop
+// ============================================================
+const imagesPane = document.getElementById("pane-images");
+["dragenter", "dragover"].forEach(ev => {
+  imagesPane.addEventListener(ev, e => { e.preventDefault(); imagesPane.classList.add("dragover"); });
+});
+["dragleave", "drop"].forEach(ev => {
+  imagesPane.addEventListener(ev, e => { e.preventDefault(); imagesPane.classList.remove("dragover"); });
+});
+imagesPane.addEventListener("drop", e => {
+  const file = e.dataTransfer.files[0];
+  if (!file || !file.type.startsWith("image/")) return;
+  document.getElementById("imgFile").files = e.dataTransfer.files;
+  convertImage();
+});
+
+// ============================================================
+// Font size status bar click
+// ============================================================
+document.getElementById("statusSize").onclick = () => changeFontSize(1);
+
+// ============================================================
+// Init
+// ============================================================
+restoreSettings();
+activatePane(localStorage.getItem("ccos-pane") || "code");
+updateDirtyIndicator();
 renderAssets();
 </script>
 </body>
