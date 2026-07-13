@@ -2,294 +2,1144 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CCOS Packager</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>CCOS IDE — Package Builder</title>
 <style>
   :root {
     color-scheme: dark;
-    --bg: #111318;
-    --panel: #1b1f27;
-    --panel2: #232936;
-    --line: #384150;
-    --text: #e8edf5;
-    --muted: #9aa7b8;
-    --accent: #4db6ac;
-    --accent2: #7aa2f7;
+    --vscode-bg: #1e1e1e;
+    --vscode-panel: #252526;
+    --vscode-panel2: #2d2d30;
+    --vscode-line: #3e3e42;
+    --vscode-titlebar: #3c3c3c;
+    --vscode-text: #cccccc;
+    --vscode-muted: #858585;
+    --vscode-accent: #007acc;
+    --vscode-accent-hover: #1177bb;
+    --vscode-accent2: #569cd6;
     --warn: #ffcb6b;
-    --bad: #ff6b7a;
-    --good: #9ece6a;
+    --bad: #f48771;
+    --good: #89d185;
+    --statusbar-bg: #007acc;
+    --statusbar-text: #ffffff;
+  }
+  body.theme-light {
+    color-scheme: light;
+    --vscode-bg: #ffffff;
+    --vscode-panel: #f3f3f3;
+    --vscode-panel2: #e8e8e8;
+    --vscode-line: #e5e5e5;
+    --vscode-titlebar: #dddddd;
+    --vscode-text: #1f1f1f;
+    --vscode-muted: #616161;
+    --vscode-accent: #0078d4;
+    --vscode-accent-hover: #106ebe;
+    --vscode-accent2: #005a9e;
+    --warn: #b28600;
+    --bad: #c75450;
+    --good: #107c10;
+    --statusbar-bg: #0078d4;
+    --statusbar-text: #ffffff;
+  }
+  body.theme-hc {
+    color-scheme: dark;
+    --vscode-bg: #000000;
+    --vscode-panel: #000000;
+    --vscode-panel2: #000000;
+    --vscode-line: #ffffff;
+    --vscode-titlebar: #000000;
+    --vscode-text: #ffffff;
+    --vscode-muted: #ffffff;
+    --vscode-accent: #ffff00;
+    --vscode-accent-hover: #ffff00;
+    --vscode-accent2: #00ffff;
+    --warn: #ffff00;
+    --bad: #ff0000;
+    --good: #00ff00;
+    --statusbar-bg: #000000;
+    --statusbar-text: #ffffff;
   }
   * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
   body {
-    margin: 0;
-    min-height: 100vh;
-    background: var(--bg);
-    color: var(--text);
-    font: 14px/1.35 system-ui, Segoe UI, sans-serif;
+    background: var(--vscode-bg);
+    color: var(--vscode-text);
+    font: 13px/1.4 "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   }
-  header {
+
+  /* IDE layout */
+  .ide {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  /* Title bar */
+  .titlebar {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--line);
-    background: #181c24;
+    gap: 10px;
+    height: 32px;
+    padding: 0 12px;
+    background: var(--vscode-titlebar);
+    border-bottom: 1px solid #1e1e1e;
+    flex-shrink: 0;
+    user-select: none;
   }
-  h1 { margin: 0; font-size: 18px; font-weight: 650; }
-  main {
-    display: grid;
-    grid-template-columns: minmax(280px, 1fr) minmax(280px, 420px);
-    gap: 12px;
-    padding: 12px;
-    min-height: calc(100vh - 53px);
-  }
-  section {
-    min-width: 0;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    overflow: hidden;
-  }
-  .bar {
+  .titlebar-brand {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 10px;
-    background: var(--panel2);
-    border-bottom: 1px solid var(--line);
-    flex-wrap: wrap;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--vscode-text);
   }
-  .bar strong { margin-right: auto; }
-  .form {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
-    padding: 10px;
-    border-bottom: 1px solid var(--line);
+  .titlebar-brand .logo {
+    width: 18px;
+    height: 18px;
+    color: var(--vscode-accent2);
   }
-  label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
-  input, select, button, textarea {
-    font: inherit;
-    color: var(--text);
+  .titlebar-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
   }
-  input, select {
-    width: 100%;
-    padding: 7px 8px;
-    background: #11151d;
-    border: 1px solid var(--line);
-    border-radius: 6px;
+  .titlebar-actions button {
+    padding: 4px 12px;
+    background: var(--vscode-panel2);
+    border: 1px solid var(--vscode-line);
+    border-radius: 4px;
+    color: var(--vscode-text);
+    cursor: pointer;
+    font-size: 12px;
   }
-  button {
-    padding: 7px 10px;
-    background: #273043;
-    border: 1px solid #46536a;
-    border-radius: 6px;
+  .titlebar-actions button:hover { border-color: var(--vscode-accent); }
+  .titlebar-actions button.primary {
+    background: var(--vscode-accent);
+    border-color: var(--vscode-accent);
+    color: #fff;
+  }
+  .titlebar-actions button.primary:hover { background: var(--vscode-accent-hover); }
+  .theme-switcher {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: 6px;
+  }
+  .theme-switcher button {
+    width: 22px;
+    height: 22px;
+    border: 1px solid var(--vscode-line);
+    border-radius: 4px;
+    cursor: pointer;
+    background: var(--vscode-panel2);
+    color: var(--vscode-text);
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .theme-switcher button.active {
+    border-color: var(--vscode-accent);
+    background: rgba(0,122,204,.2);
+  }
+  .theme-switcher button:hover { border-color: var(--vscode-accent); }
+  .titlebar-menu-btn {
+    display: none;
+    width: 28px;
+    height: 22px;
+    margin-left: auto;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--vscode-text);
+    font-size: 16px;
     cursor: pointer;
   }
-  button.primary { background: #1d5f61; border-color: #398b8d; }
-  button:hover { border-color: var(--accent); }
-  .editor {
-    position: relative;
-    height: min(62vh, 620px);
-    min-height: 360px;
-    background: #0d1117;
+  .titlebar-menu-btn:hover { background: rgba(255,255,255,.08); }
+
+  /* Workspace */
+  .workspace {
+    display: flex;
+    flex: 1;
     overflow: hidden;
   }
-  #highlight, #code {
+
+  /* Activity bar */
+  .activity-bar {
+    width: 48px;
+    flex-shrink: 0;
+    background: var(--vscode-panel);
+    border-right: 1px solid var(--vscode-line);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 6px 0;
+    gap: 4px;
+    z-index: 5;
+  }
+  .activity-item {
+    width: 38px;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    color: var(--vscode-muted);
+    border-radius: 6px;
+    cursor: pointer;
+    position: relative;
+    transition: .12s;
+  }
+  .activity-item svg {
+    width: 22px;
+    height: 22px;
+    stroke-width: 1.6;
+  }
+  .activity-item:hover { color: var(--vscode-text); background: rgba(255,255,255,.05); }
+  .activity-item.active {
+    color: var(--vscode-text);
+    background: rgba(255,255,255,.08);
+  }
+  .activity-item.active::before {
+    content: "";
+    position: absolute;
+    left: -6px;
+    top: 8px;
+    bottom: 8px;
+    width: 3px;
+    background: var(--vscode-accent);
+    border-radius: 0 3px 3px 0;
+  }
+  .activity-item .label {
+    position: absolute;
+    left: 46px;
+    background: #3c3c3c;
+    color: #fff;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: .15s;
+    box-shadow: 0 2px 8px rgba(0,0,0,.3);
+    z-index: 10;
+  }
+  .activity-item:hover .label { opacity: 1; }
+
+  /* Explorer sidebar */
+  .explorer {
+    width: 220px;
+    flex-shrink: 0;
+    background: var(--vscode-panel);
+    border-right: 1px solid var(--vscode-line);
+    display: flex;
+    flex-direction: column;
+    user-select: none;
+  }
+  .explorer-header {
+    padding: 10px 14px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .5px;
+    color: var(--vscode-text);
+  }
+  .explorer-tree {
+    flex: 1;
+    overflow: auto;
+    padding: 4px 0;
+  }
+  .tree-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 14px 5px 24px;
+    color: var(--vscode-text);
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .tree-item:hover { background: rgba(255,255,255,.04); }
+  .tree-item.active { background: rgba(0,122,204,.2); color: #fff; }
+  .tree-item svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    color: var(--vscode-accent2);
+  }
+
+  /* Main area */
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--vscode-bg);
+  }
+  .editor-header {
+    display: flex;
+    align-items: center;
+    height: 36px;
+    padding: 0 14px;
+    background: var(--vscode-bg);
+    border-bottom: 1px solid var(--vscode-line);
+    color: var(--vscode-text);
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+
+  /* Editor area */
+  .editor-area {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+  }
+  .pane {
     position: absolute;
     inset: 0;
+    overflow: hidden;
+    display: none;
+    flex-direction: column;
+  }
+  .pane.active { display: flex; }
+
+  /* Ace Editor */
+  #aceEditor {
+    flex: 1;
+    overflow: hidden;
+    font: 13px/1.55 "Cascadia Mono", Consolas, "Courier New", monospace;
+  }
+  .ace_editor {
+    background: var(--vscode-bg) !important;
+    color: var(--vscode-text) !important;
+    font-family: "Cascadia Mono", Consolas, "Courier New", monospace !important;
+  }
+  .ace_gutter {
+    background: var(--vscode-bg) !important;
+    color: var(--vscode-muted) !important;
+    border-right: 1px solid var(--vscode-line) !important;
+  }
+  .ace_gutter-active-line { background: rgba(128,128,128,.1) !important; }
+  .ace_scroller { background: var(--vscode-bg) !important; }
+  .ace_cursor { color: var(--vscode-text) !important; }
+  .ace_marker-layer .ace_selection { background: rgba(0,122,204,.3) !important; }
+  .ace_print-margin { display: none; }
+
+  /* Scrollbars */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #424242; border-radius: 5px; border: 2px solid transparent; background-clip: content-box; }
+  ::-webkit-scrollbar-thumb:hover { background: #4f4f4f; }
+  ::-webkit-scrollbar-corner { background: transparent; }
+
+  /* Pane body */
+  .pane-body {
+    padding: 14px;
+    overflow: auto;
+    flex: 1;
+  }
+  .pane-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    background: var(--vscode-bg);
+    border-bottom: 1px solid var(--vscode-line);
+    flex-shrink: 0;
+    min-height: 40px;
+    flex-wrap: wrap;
+  }
+  .pane-toolbar .breadcrumbs {
+    flex: 1;
+    color: var(--vscode-muted);
+    font-size: 12px;
+  }
+  .pane-toolbar .breadcrumbs .sep { margin: 0 6px; opacity: .5; }
+  .pane-toolbar .btn-row {
+    display: flex;
+    gap: 6px;
     margin: 0;
-    padding: 12px;
-    border: 0;
-    white-space: pre;
-    overflow: auto;
-    tab-size: 4;
-    font: 13px/1.45 Consolas, "Cascadia Mono", monospace;
   }
-  #highlight { pointer-events: none; color: var(--text); }
-  #code {
-    resize: none;
-    background: transparent;
-    color: transparent;
-    caret-color: var(--text);
-    outline: none;
+  .pane-toolbar button, .btn-row button {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 12px;
+    background: var(--vscode-panel2);
+    border: 1px solid var(--vscode-line);
+    border-radius: 4px;
+    color: var(--vscode-text);
+    cursor: pointer;
+    font-size: 12px;
+    white-space: nowrap;
   }
-  #code::selection { background: rgba(77, 182, 172, .35); color: transparent; }
-  .kw { color: #c792ea; }
-  .str { color: #c3e88d; }
-  .num { color: #f78c6c; }
-  .com { color: #697386; }
-  .api { color: #82aaff; }
-  .right {
-    display: grid;
-    grid-template-rows: auto auto 1fr;
+  .pane-toolbar button.primary, .btn-row button.primary {
+    background: var(--vscode-accent);
+    border-color: var(--vscode-accent);
+    color: white;
   }
-  .pane { padding: 10px; border-bottom: 1px solid var(--line); }
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  #output {
-    width: 100%;
-    height: 210px;
-    background: #0d1117;
-    border: 1px solid var(--line);
+  .pane-toolbar button.primary:hover, .btn-row button.primary:hover { background: var(--vscode-accent-hover); }
+  .pane-toolbar button:hover, .btn-row button:hover { border-color: var(--vscode-accent); }
+
+  /* Forms */
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; max-width: 960px; }
+  label.field { display: grid; gap: 5px; color: var(--vscode-muted); font-size: 12px; }
+  label.field input, label.field select, label.field textarea {
+    width: 100%; padding: 7px 10px; background: #3c3c3c;
+    border: 1px solid var(--vscode-line); border-radius: 4px;
+    color: var(--vscode-text); font: inherit;
+  }
+  label.field input:focus, label.field select:focus, label.field textarea:focus { border-color: var(--vscode-accent); outline: none; }
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0; }
+
+  #output, #imgOutput {
+    width: 100%; min-height: 180px; max-height: 45vh;
+    background: var(--vscode-bg); border: 1px solid var(--vscode-line); border-radius: 4px;
+    padding: 10px; resize: vertical; font: 12px/1.4 Consolas, monospace;
+    color: var(--vscode-text);
+  }
+
+  .status { padding: 8px 12px; border-radius: 4px; margin: 10px 0; font-size: 12px; }
+  .status.ok { background: rgba(137,209,133,.12); color: var(--good); border: 1px solid rgba(137,209,133,.3); }
+  .status.err { background: rgba(244,135,113,.12); color: var(--bad); border: 1px solid rgba(244,135,113,.3); }
+  .status.warn { background: rgba(255,203,107,.12); color: var(--warn); border: 1px solid rgba(255,203,107,.3); }
+
+  /* Package assets */
+  .asset-section h3 { margin: 18px 0 8px; color: var(--vscode-accent2); font-size: 14px; font-weight: 600; }
+  .asset-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; max-width: 600px; }
+  .asset-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--vscode-panel2); border: 1px solid var(--vscode-line); border-radius: 4px; }
+  .asset-item svg { width: 14px; height: 14px; color: var(--vscode-accent2); flex-shrink: 0; }
+  .asset-item input { flex: 1; background: transparent; border: none; color: var(--vscode-text); font: inherit; font-size: 12px; outline: none; min-width: 0; }
+  .asset-item button { background: transparent; border: none; color: var(--vscode-muted); cursor: pointer; font-size: 12px; padding: 2px 6px; border-radius: 3px; }
+  .asset-item button:hover { color: var(--bad); background: rgba(255,255,255,.05); }
+  .asset-empty { color: var(--vscode-muted); font-size: 12px; margin-bottom: 14px; }
+
+  /* Cheatsheet */
+  .cheat { max-width: 960px; }
+  .cheat h3 { color: var(--vscode-accent2); margin: 18px 0 8px; font-size: 14px; font-weight: 600; }
+  .cheat h3:first-child { margin-top: 0; }
+  .cheat .item { padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,.04); font-size: 13px; }
+  .cheat code { color: #9cdcfe; font-size: 12px; }
+  .cheat .desc { color: var(--vscode-muted); font-size: 12px; margin-left: 12px; }
+  .cheat .snippet {
+    background: var(--vscode-bg); border: 1px solid var(--vscode-line); border-radius: 4px;
+    padding: 10px; margin: 8px 0; font: 12px/1.4 Consolas, monospace;
+    white-space: pre; overflow-x: auto; cursor: pointer; position: relative;
+  }
+  .cheat .snippet:hover { border-color: var(--vscode-accent); }
+  .cheat .snippet .copy-hint { position: absolute; top: 4px; right: 8px; color: var(--vscode-muted); font-size: 11px; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  /* Status bar */
+  .statusbar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    height: 24px;
+    padding: 0 12px;
+    background: var(--statusbar-bg);
+    color: var(--statusbar-text);
+    font-size: 12px;
+    flex-shrink: 0;
+    user-select: none;
+  }
+  .statusbar-item { display: inline-flex; align-items: center; gap: 5px; }
+  .statusbar-item.right { margin-left: auto; }
+  .statusbar-branch { background: rgba(0,0,0,.2); padding: 2px 8px; border-radius: 3px; }
+
+  /* Mobile dropdown */
+  .mobile-menu {
+    position: fixed;
+    top: 32px;
+    right: 6px;
+    min-width: 160px;
+    background: var(--vscode-panel);
+    border: 1px solid var(--vscode-line);
     border-radius: 6px;
-    padding: 8px;
-    resize: vertical;
-    font: 12px/1.35 Consolas, monospace;
+    box-shadow: 0 4px 16px rgba(0,0,0,.4);
+    padding: 6px;
+    display: none;
+    flex-direction: column;
+    gap: 2px;
+    z-index: 200;
   }
-  .apiList {
-    overflow: auto;
-    padding: 10px;
+  .mobile-menu.open { display: flex; }
+  .mobile-menu button {
+    padding: 8px 12px;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: var(--vscode-text);
+    text-align: left;
+    font-size: 13px;
+    cursor: pointer;
   }
-  .apiList code {
-    display: block;
-    padding: 5px 0;
-    color: var(--accent2);
-    border-bottom: 1px solid rgba(255,255,255,.05);
-  }
-  .hint { color: var(--muted); font-size: 12px; }
-  .status { color: var(--good); min-height: 18px; }
-  @media (max-width: 880px) {
-    main { grid-template-columns: 1fr; }
-    .form { grid-template-columns: 1fr; }
-    .editor { height: 56vh; }
+  .mobile-menu button:hover { background: rgba(255,255,255,.06); }
+  .mobile-menu button.primary { color: var(--vscode-accent2); font-weight: 600; }
+
+  /* Mobile / compact */
+  @media (max-width: 700px) {
+    .titlebar { height: 28px; padding: 0 10px; }
+    .titlebar-actions { display: none; }
+    .titlebar-menu-btn { display: flex; align-items: center; justify-content: center; }
+    .workspace { flex-direction: column; }
+    .activity-bar {
+      position: fixed;
+      bottom: 24px;
+      left: 0; right: 0;
+      flex-direction: row;
+      justify-content: flex-start;
+      gap: 20px;
+      padding: 0 calc((100% - 204px) / 2);
+      width: 100%;
+      height: 48px;
+      border-right: none;
+      border-top: 1px solid var(--vscode-line);
+      z-index: 100;
+      background: var(--vscode-panel);
+    }
+    .activity-item {
+      flex: 0 0 36px;
+      width: 36px;
+      height: 36px;
+    }
+    .activity-item.active::before {
+      left: 8px; right: 8px; top: -6px; bottom: auto;
+      width: auto; height: 3px;
+      border-radius: 0 0 3px 3px;
+    }
+    .activity-item .label { display: none; }
+    .explorer { display: none; }
+    .main { padding-bottom: 70px; }
+    .editor-header { display: none; }
+    #aceEditor { font-size: 12px; }
+    .pane-toolbar {
+      padding: 6px 10px;
+      gap: 6px;
+      min-height: auto;
+    }
+    .pane-toolbar .breadcrumbs { display: none; }
+    .pane-toolbar button { padding: 6px 10px; font-size: 12px; }
+    .pane-body { padding: 10px; }
+    .form-grid { grid-template-columns: 1fr; gap: 10px; }
+    .two-col { grid-template-columns: 1fr; }
+    .statusbar {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      height: 24px;
+      font-size: 11px;
+      gap: 10px;
+      z-index: 100;
+    }
   }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.2/ace.min.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.2/mode-lua.min.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.2/ext-language_tools.min.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.2/theme-vscode.min.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.2/theme-chrome.min.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.2/theme-tomorrow_night.min.js" crossorigin="anonymous"></script>
 </head>
 <body>
-<header>
-  <h1>CCOS Packager</h1>
-  <span class="hint">Build .ccpkg files and convert images to NFP/NFP256</span>
-</header>
-<main>
-  <section>
-    <div class="bar">
-      <strong>Lua package</strong>
-      <input id="luaFile" type="file" accept=".lua,.txt">
-      <button id="build" class="primary">Build .ccpkg</button>
-      <button id="downloadPkg">Download</button>
-      <button id="copyPkg">Copy</button>
+<div class="ide">
+  <div class="titlebar">
+    <div class="titlebar-brand">
+      <svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+      </svg>
+      <span>CCOS IDE</span>
     </div>
-    <div class="form">
-      <label>Package name<input id="pkgName" value="myapp" spellcheck="false"></label>
-      <label>Title<input id="pkgTitle" value="My App" spellcheck="false"></label>
-      <label>Description<input id="pkgDesc" value="CCOS application" spellcheck="false"></label>
+    <div class="titlebar-actions">
+      <button id="btnValidate">Validate</button>
+      <button id="btnBuild" class="primary">Build</button>
+      <button id="btnDownload">Download</button>
+      <button id="btnCopy">Copy</button>
     </div>
-    <div class="editor">
-      <pre id="highlight" aria-hidden="true"></pre>
-      <textarea id="code" spellcheck="false">local API = _G.ccos_api
+    <div class="theme-switcher" title="Theme">
+      <button data-theme="dark" class="active">🌙</button>
+      <button data-theme="light">☀</button>
+      <button data-theme="hc">HC</button>
+    </div>
+    <button class="titlebar-menu-btn" id="titlebarMenuBtn" title="Menu">⋮</button>
+  </div>
+
+  <div class="workspace">
+    <aside class="activity-bar">
+      <button class="activity-item active" data-pane="code" title="Code">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="16" y1="13" x2="8" y2="13"></line>
+          <line x1="16" y1="17" x2="8" y2="17"></line>
+          <polyline points="10 9 9 9 8 9"></polyline>
+        </svg>
+        <span class="label">Code</span>
+      </button>
+      <button class="activity-item" data-pane="build" title="Build">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+          <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+          <line x1="12" y1="22.08" x2="12" y2="12"></line>
+        </svg>
+        <span class="label">Build</span>
+      </button>
+      <button class="activity-item" data-pane="images" title="Images">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          <circle cx="8.5" cy="8.5" r="1.5"></circle>
+          <polyline points="21 15 16 10 5 21"></polyline>
+        </svg>
+        <span class="label">Images</span>
+      </button>
+      <button class="activity-item" data-pane="cheat" title="Cheatsheet">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+        </svg>
+        <span class="label">Cheatsheet</span>
+      </button>
+    </aside>
+
+    <aside class="explorer" id="explorer">
+      <div class="explorer-header">EXPLORER</div>
+      <div class="explorer-tree">
+        <div class="tree-item active" data-pane="code">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+          </svg>
+          <span>OPEN EDITORS</span>
+        </div>
+        <div class="tree-item" style="padding-left:14px;color:var(--vscode-muted);">
+          <svg style="width:14px;height:14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+          </svg>
+          <span>src</span>
+        </div>
+        <div class="tree-item active" data-pane="code" style="padding-left:34px;">
+          <svg style="width:14px;height:14px;color:var(--vscode-accent2);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+            <polyline points="10 9 9 9 8 9"></polyline>
+          </svg>
+          <span>program.lua</span>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="editor-header">program.lua — src</div>
+      <div class="editor-area">
+        <!-- CODE PANE -->
+        <div class="pane active" id="pane-code">
+          <div id="aceEditor"></div>
+        </div>
+
+        <!-- BUILD PANE -->
+        <div class="pane" id="pane-build">
+          <div class="pane-toolbar">
+            <div class="breadcrumbs">BUILD <span class="sep">›</span> Package Settings</div>
+            <div class="btn-row">
+              <button id="btnBuild2" class="primary">Build .ccpkg</button>
+              <button id="btnInsertTemplate">Insert template</button>
+              <button id="btnFormat">Format code</button>
+            </div>
+          </div>
+          <div class="pane-body">
+            <div class="form-grid">
+              <label class="field">Package name<input id="pkgName" value="myapp" spellcheck="false"></label>
+              <label class="field">Title<input id="pkgTitle" value="My App" spellcheck="false"></label>
+              <label class="field">Description<input id="pkgDesc" value="CCOS application" spellcheck="false"></label>
+              <label class="field">Icon name<input id="pkgIcon" value="app" spellcheck="false"></label>
+            </div>
+            <div class="asset-section">
+              <h3>Package assets</h3>
+              <div id="assetList" class="asset-list"></div>
+              <div id="assetEmpty" class="asset-empty">No assets added yet. Convert an image and click “Add to package”.</div>
+            </div>
+            <div id="buildStatus"></div>
+            <label class="field"><strong>Generated output</strong>
+              <textarea id="output" spellcheck="false" wrap="off"></textarea>
+            </label>
+            <div class="btn-row">
+              <button id="btnDownload2">Download .ccpkg</button>
+              <button id="btnCopy2">Copy to clipboard</button>
+              <button id="btnDownloadLua">Download program.lua</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- IMAGES PANE -->
+        <div class="pane" id="pane-images">
+          <div class="pane-toolbar">
+            <div class="breadcrumbs">IMAGES <span class="sep">›</span> Converter</div>
+            <div class="btn-row">
+              <button id="convertImg" class="primary">Convert</button>
+              <button id="downloadImg">Download image</button>
+              <button id="addToPackage">Add to package</button>
+            </div>
+          </div>
+          <div class="pane-body">
+            <div class="form-grid">
+              <label class="field">Image file<input id="imgFile" type="file" accept="image/*,image/gif"></label>
+              <label class="field">Format
+                <select id="imgFormat">
+                  <option value="nfp256">.nfp256 (256-color raw)</option>
+                  <option value="nfp">.nfp (32-color raw)</option>
+                  <option value="nfpc">.nfpc (compressed)</option>
+                  <option value="nfpa">.nfpa (animation, GIF)</option>
+                </select>
+              </label>
+              <label class="field">Width<input id="imgW" type="number" min="1" max="256" value="64"></label>
+              <label class="field">Height<input id="imgH" type="number" min="1" max="256" value="64"></label>
+              <label class="field">Codec (for nfpc/nfpa)
+                <select id="imgCodec">
+                  <option value="auto">Auto (pick best)</option>
+                  <option value="c2">C2 (row delta)</option>
+                  <option value="c3">C3 (RLE flat)</option>
+                  <option value="c4">C4 (RLE ext)</option>
+                  <option value="c5">C5 (LZSS+C3)</option>
+                  <option value="c6">C6 (region+LZW)</option>
+                  <option value="c7">C7 (max compression)</option>
+                </select>
+              </label>
+              <label class="field">Quality
+                <select id="imgQuality">
+                  <option value="lossless">Lossless</option>
+                  <option value="lossy">Lossy (smaller)</option>
+                </select>
+              </label>
+            </div>
+            <div id="imgStatus" class="status ok" style="display:none"></div>
+            <canvas id="imgPreview" style="max-width:300px;border:1px solid var(--vscode-line);border-radius:4px;display:none"></canvas>
+            <label class="field" style="margin-top:14px"><strong>Output</strong>
+              <textarea id="imgOutput" spellcheck="false" wrap="off" style="min-height:160px"></textarea>
+            </label>
+          </div>
+        </div>
+
+        <!-- CHEATSHEET PANE -->
+        <div class="pane" id="pane-cheat">
+          <div class="pane-toolbar">
+            <div class="breadcrumbs">HELP <span class="sep">›</span> CCOS API Cheatsheet</div>
+          </div>
+          <div class="pane-body">
+            <div class="cheat">
+              <h3>Window API</h3>
+              <div class="item"><code>API.window(title, x, y, w, h)</code><span class="desc">Create a window → returns win table</span></div>
+              <div class="item"><code>API.close(win)</code><span class="desc">Destroy window</span></div>
+              <div class="item"><code>API.fitWindow(w, h)</code><span class="desc">Get centered x, y, w, h for given size</span></div>
+              <div class="item"><code>API.redrawContent(win)</code><span class="desc">Mark window content dirty (partial redraw)</span></div>
+              <div class="item"><code>API.getRenderer()</code><span class="desc">Returns R (render module)</span></div>
+              <div class="item"><code>API.getScreenSize()</code><span class="desc">Returns sw, sh</span></div>
+
+              <h3>Drawing</h3>
+              <div class="item"><code>API.drawText(x, y, text, fg, bg, maxW)</code><span class="desc">Draw clipped text (maxW optional)</span></div>
+              <div class="item"><code>API.drawButton(x, y, w, h, text, pressed)</code><span class="desc">W95-style button</span></div>
+              <div class="item"><code>API.clipText(text, maxW)</code><span class="desc">Truncate text with ".."</span></div>
+              <div class="item"><code>R.fillRect(x, y, w, h, color)</code></div>
+              <div class="item"><code>R.drawLine(x1, y1, x2, y2, color)</code></div>
+              <div class="item"><code>R.drawW95Raised(x, y, w, h)</code> / <code>R.drawW95Sunken(x, y, w, h)</code></div>
+              <div class="item"><code>R.PAL</code><span class="desc">Color table: BLACK=0, WHITE=1, GRAY=2, ...</span></div>
+
+              <h3>File System</h3>
+              <div class="item"><code>API.readFile(path)</code> / <code>API.writeFile(path, content)</code></div>
+              <div class="item"><code>API.listFiles(path)</code> / <code>API.isDir(path)</code></div>
+              <div class="item"><code>API.joinPath(base, name)</code> / <code>API.getDir(path)</code> / <code>API.getFileName(path)</code></div>
+              <div class="item"><code>API.chooseFile(options, callback)</code><span class="desc">File picker dialog</span></div>
+              <div class="item"><code>API.ensureDir(path)</code></div>
+
+              <h3>Images (via shared library)</h3>
+              <div class="item"><code>API.loadImage(path)</code><span class="desc">→ pixels, w, h</span></div>
+              <div class="item"><code>API.loadAnimation(path)</code><span class="desc">→ frames, w, h, delay, loop</span></div>
+              <div class="item"><code>API.detectImage(path)</code><span class="desc">→ header table (no decode)</span></div>
+
+              <h3>Network (async — never blocks UI)</h3>
+              <div class="item"><code>net.init()</code><span class="desc">Open modem → true/false</span></div>
+              <div class="item"><code>net.lookupAsync(name, timeout, callback)</code><span class="desc">Find server without blocking</span></div>
+              <div class="item"><code>net.lookupSiteServerAsync(timeout, callback)</code></div>
+              <div class="item"><code>net.send(targetId, msg)</code><span class="desc">Non-blocking send</span></div>
+              <div class="item"><code>net.siteListAsync(serverId, callback)</code></div>
+              <div class="item"><code>net.siteResolveAsync(serverId, name, callback)</code></div>
+              <div class="item"><code>net.siteGetAsync(hostId, name, path, callback)</code></div>
+              <div class="item"><code>net.discoverAsync(timeout, callback)</code></div>
+              <div class="item"><code>net.request(targetId, msg, expectedType, timeout, callback)</code><span class="desc">Generic async request</span></div>
+
+              <h3>Window Event Handlers</h3>
+              <div class="item"><code>win.onDraw = function(win, cx, cy, cw, ch)</code><span class="desc">Content area (cx,cy = top-left, cw,ch = size)</span></div>
+              <div class="item"><code>win.onKey = function(win, key, char)</code><span class="desc">key = keys.xxx, char = typed char or nil</span></div>
+              <div class="item"><code>win.onClick = function(win, mx, my)</code><span class="desc">Relative to content area (0,0 = top-left)</span></div>
+              <div class="item"><code>win.onScroll = function(win, dir, mx, my)</code><span class="desc">dir = -1 up, +1 down</span></div>
+              <div class="item"><code>win.onDrag = function(win, dx, dy)</code><span class="desc">Pan/drag delta</span></div>
+              <div class="item"><code>win.onDoubleClick = function(win, mx, my)</code></div>
+              <div class="item"><code>win.onClose = function(win)</code></div>
+
+              <h3>Kernel / Crash Protection</h3>
+              <div class="item"><code>API.try(label, fn, ...)</code><span class="desc">pcall wrapper → routes to crash supervisor</span></div>
+              <div class="item"><code>API.setTimeout(seconds, fn)</code><span class="desc">Cooperative timer (callback in main loop)</span></div>
+              <div class="item"><code>API.interrupted()</code><span class="desc">Check interrupt flag</span></div>
+              <div class="item"><code>API.forceQuit()</code><span class="desc">Force-quit active window</span></div>
+              <div class="item"><code>API.rescue(reason)</code><span class="desc">Close all windows, reload programs</span></div>
+              <div class="item"><code>API.notify(title, message, tone, duration)</code></div>
+              <div class="item"><code>API.showError(title, message)</code></div>
+
+              <h3>Keyboard Shortcuts (CCOS Desktop)</h3>
+              <div class="item"><code>Ctrl + Space</code><span class="desc">Toggle RU/EN keyboard layout</span></div>
+              <div class="item"><code>Ctrl + Q</code><span class="desc">Force-quit active window</span></div>
+              <div class="item"><code>Ctrl + R</code><span class="desc">Rescue (close all, reload)</span></div>
+
+              <h3>Color Palette (K table)</h3>
+              <div class="item"><code>BLACK=0 WHITE=1 GRAY=2 LGRAY=3 DGRAY=4 BLUE=5 DARK_BLUE=6 CYAN=7</code></div>
+              <div class="item"><code>GREEN=9 DARK_GREEN=10 RED=11 DARK_RED=12 YELLOW=13 ORANGE=14</code></div>
+              <div class="item"><code>DBLUE=19 W95_TITLE_BLUE=19 W95_DESKTOP=30</code></div>
+
+              <h3>Code Snippets (click to insert)</h3>
+              <div class="snippet" data-snippet="basic">local API = _G.ccos_api
 local R = API.getRenderer()
+local K = {BLACK=0,WHITE=1,GRAY=2,DBLUE=19}
 
 local function run()
-    local x, y, w, h = API.fitWindow(220, 120)
-    local win = API.window("My App", x, y, w, h)
+    local x,y,w,h = API.fitWindow(200, 120)
+    local win = API.window("App", x, y, w, h)
     win.onDraw = function(_, cx, cy, cw, ch)
-        API.drawText(cx + 4, cy + 4, "Hello from CCOS", 0, 2, cw - 8)
+        API.drawText(cx+4, cy+4, "Hello", K.BLACK, K.GRAY, cw-8)
     end
     win.onKey = function(_, key)
         if key == keys.escape then API.close(win) end
     end
 end
 
-return {name = "My App", icon = "app", run = run}</textarea>
-    </div>
-  </section>
+return {name="App", icon="app", run=run}<span class="copy-hint">← click to insert</span></div>
 
-  <section class="right">
-    <div class="pane">
-      <div class="bar" style="padding:0 0 8px 0;background:transparent;border:0">
-        <strong>Image converter</strong>
-        <button id="convertImg" class="primary">Convert</button>
-        <button id="downloadImg">Download</button>
+              <div class="snippet" data-snippet="list">-- Scrollable list with selection
+local sel, scroll = 1, 0
+local items = {"Item 1", "Item 2", "Item 3", "Item 4"}
+
+win.onDraw = function(_, cx, cy, cw, ch)
+    local rows = math.floor((ch - 20) / 8)
+    for i = 1, rows do
+        local idx = scroll + i
+        if not items[idx] then break end
+        local iy = cy + 16 + (i-1)*8
+        local active = idx == sel
+        if active then R.fillRect(cx, iy, cw, 8, K.DBLUE) end
+        API.drawText(cx+4, iy, items[idx], active and K.WHITE or K.BLACK, active and K.DBLUE or K.GRAY, cw-8)
+    end
+end
+win.onScroll = function(_, dir)
+    scroll = math.max(0, math.min(#items - 5, scroll + dir * 3))
+    API.redrawContent(win)
+end<span class="copy-hint">← click to insert</span></div>
+
+              <div class="snippet" data-snippet="net">-- Async network request (never blocks UI)
+local net = require("ccos.drivers.net")
+local busy = false
+
+local function fetchData()
+    if busy then return end
+    busy = true
+    status = "Loading..."
+    API.redrawContent(win)
+    net.siteListAsync(serverId, function(sites)
+        busy = false
+        -- process sites
+        status = #sites .. " items"
+        API.redrawContent(win)
+    end)
+end<span class="copy-hint">← click to insert</span></div>
+
+              <div class="snippet" data-snippet="bg">-- Background task (heartbeat, listener)
+local bgTask = function(e, a, b)
+    if e == "timer" then
+        -- periodic action
+    elseif e == "rednet_message" then
+        local id, raw = a, b
+        -- handle message
+    end
+end
+if not D.bgTasks then D.bgTasks = {} end
+table.insert(D.bgTasks, bgTask)
+win.onClose = function()
+    for i, t in ipairs(D.bgTasks or {}) do
+        if t == bgTask then table.remove(D.bgTasks, i); break end
+    end
+end<span class="copy-hint">← click to insert</span></div>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="grid2">
-        <label>Image<input id="imgFile" type="file" accept="image/*"></label>
-        <label>Format<select id="imgFormat"><option value="nfp256">nfp256</option><option value="nfp">nfp</option><option value="nfpc">nfpc</option></select></label>
-        <label>Width<input id="imgW" type="number" min="1" max="256" value="32"></label>
-        <label>Height<input id="imgH" type="number" min="1" max="256" value="32"></label>
-      </div>
-      <p class="hint">NFP256 writes two hex digits per pixel. Palette matches CCOS render.lua.</p>
-      <div id="status" class="status"></div>
-    </div>
+    </main>
+  </div>
 
-    <div class="pane">
-      <label>Generated output<textarea id="output" spellcheck="false"></textarea></label>
-    </div>
+  <div class="statusbar">
+    <span class="statusbar-item">
+      <svg style="width:14px;height:14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+      </svg>
+      CCOS IDE
+    </span>
+    <span class="statusbar-item statusbar-branch">main*</span>
+    <span class="statusbar-item right" id="statusMsg">Ready</span>
+  </div>
 
-    <div class="apiList">
-      <strong>CCOS API quick list</strong>
-      <code>API.window(title, x, y, w, h)</code>
-      <code>API.close(win)</code>
-      <code>API.redrawContent(win)</code>
-      <code>API.fitWindow(w, h)</code>
-      <code>API.getRenderer()</code>
-      <code>API.drawText(x, y, text, fg, bg, maxW)</code>
-      <code>API.drawButton(x, y, w, h, text, pressed)</code>
-      <code>API.chooseFile(options, callback)</code>
-      <code>API.readFile(path) / API.writeFile(path, text)</code>
-      <code>API.listFiles(path) / API.isDir(path)</code>
-      <code>API.joinPath(base, name) / API.getDir(path)</code>
-      <code>net.init(), net.lookup(name), net.send(id, msg)</code>
-      <code>net.siteRegister(serverId, name, title)</code>
-      <code>net.siteList(serverId), net.siteResolve(serverId, name)</code>
-      <code>win.onDraw(win, cx, cy, cw, ch)</code>
-      <code>win.onKey(win, key, char)</code>
-      <code>win.onClick(win, mx, my)</code>
-      <code>win.onScroll(win, dir, mx, my)</code>
-    </div>
-  </section>
-</main>
+  <!-- Mobile dropdown menu -->
+  <div class="mobile-menu" id="mobileMenu">
+    <button id="mnuValidate">Validate</button>
+    <button id="mnuBuild" class="primary">Build</button>
+    <button id="mnuDownload">Download</button>
+    <button id="mnuCopy">Copy</button>
+  </div>
+</div>
 
 <script>
-const code = document.getElementById("code");
-const hi = document.getElementById("highlight");
-const out = document.getElementById("output");
-const statusEl = document.getElementById("status");
-let lastImageText = "";
-
-const keywords = new Set("and break do else elseif end false for function if in local nil not or repeat return then true until while".split(" "));
-const apiWords = new Set("API ccos_api window close redraw redrawContent fitWindow getRenderer drawText drawButton chooseFile readFile writeFile listFiles isDir joinPath getDir getFileName net init lookup lookupSiteServer send receive siteRegister siteList siteResolve siteGet keys fs rednet colors term".split(" "));
-
-function esc(s) {
-  return s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+// ============================================================
+// Tab / activity switching
+// ============================================================
+function activatePane(name) {
+  document.querySelectorAll(".activity-item").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll(".pane").forEach(p => p.classList.remove("active"));
+  document.querySelectorAll(".tree-item[data-pane]").forEach(t => t.classList.remove("active"));
+  const act = document.querySelector('.activity-item[data-pane="' + name + '"]');
+  const pane = document.getElementById("pane-" + name);
+  const tree = document.querySelector('.tree-item[data-pane="' + name + '"]');
+  if (act) act.classList.add("active");
+  if (pane) pane.classList.add("active");
+  if (tree) tree.classList.add("active");
+  const titles = { code: "program.lua", build: "Build", images: "Images", cheat: "Cheatsheet" };
+  document.querySelector(".editor-header").textContent = (titles[name] || name) + (name === "code" ? " — src" : "");
 }
 
-function highlightLua(src) {
-  const tokenRe = /(--\[\[[\s\S]*?\]\]|--[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b\d+(?:\.\d+)?\b|\b[A-Za-z_][A-Za-z0-9_]*\b)/g;
-  let pos = 0;
-  let html = "";
-  src.replace(tokenRe, (m, _g, idx) => {
-    html += esc(src.slice(pos, idx));
-    let cls = "";
-    if (m.startsWith("--")) cls = "com";
-    else if (m[0] === '"' || m[0] === "'") cls = "str";
-    else if (/^\d/.test(m)) cls = "num";
-    else if (keywords.has(m)) cls = "kw";
-    else if (apiWords.has(m)) cls = "api";
-    html += cls ? `<span class="${cls}">${esc(m)}</span>` : esc(m);
-    pos = idx + m.length;
-    return m;
-  });
-  html += esc(src.slice(pos));
-  return html + "\n";
-}
-
-function syncHighlight() {
-  hi.innerHTML = highlightLua(code.value);
-  hi.scrollTop = code.scrollTop;
-  hi.scrollLeft = code.scrollLeft;
-}
-
-code.addEventListener("input", syncHighlight);
-code.addEventListener("scroll", syncHighlight);
-syncHighlight();
-
-document.getElementById("luaFile").addEventListener("change", async e => {
-  const file = e.target.files[0];
-  if (!file) return;
-  code.value = await file.text();
-  syncHighlight();
+document.querySelectorAll(".activity-item").forEach(tab => {
+  tab.onclick = () => activatePane(tab.dataset.pane);
+});
+document.querySelectorAll(".tree-item[data-pane]").forEach(item => {
+  item.onclick = () => activatePane(item.dataset.pane);
 });
 
+// Mobile menu
+const mobileMenu = document.getElementById("mobileMenu");
+document.getElementById("titlebarMenuBtn").onclick = () => {
+  mobileMenu.classList.toggle("open");
+};
+document.addEventListener("click", e => {
+  if (!e.target.closest("#titlebarMenuBtn") && !e.target.closest("#mobileMenu")) {
+    mobileMenu.classList.remove("open");
+  }
+});
+
+// ============================================================
+// Ace Editor + CCOS autocomplete + themes
+// ============================================================
+const out = document.getElementById("output");
+
+const defaultCode = `local API = _G.ccos_api
+local D = _G._desktop
+local R = API and API.getRenderer and API.getRenderer() or _G.ccos_render
+local K = {BLACK=0, WHITE=1, GRAY=2, LGRAY=3, DGRAY=4, DBLUE=19, RED=11}
+
+local function run()
+    local x, y, w, h = API.fitWindow(220, 120)
+    local win = API.window("My App", x, y, w, h)
+    win.onDraw = function(_, cx, cy, cw, ch)
+        API.drawText(cx + 4, cy + 4, "Hello from CCOS", K.BLACK, K.GRAY, cw - 8)
+    end
+    win.onKey = function(_, key)
+        if key == keys.escape then API.close(win) end
+    end
+end
+
+return {name = "My App", icon = "app", run = run}`;
+
+const aceThemes = { dark: "ace/theme/vscode", light: "ace/theme/chrome", hc: "ace/theme/tomorrow_night" };
+
+const editor = ace.edit("aceEditor");
+editor.session.setMode("ace/mode/lua");
+editor.setValue(defaultCode, -1);
+editor.setOptions({
+  fontSize: "13px",
+  showPrintMargin: false,
+  highlightActiveLine: true,
+  showInvisibles: false,
+  tabSize: 4,
+  useSoftTabs: true,
+  enableBasicAutocompletion: true,
+  enableLiveAutocompletion: true,
+  enableSnippets: false
+});
+
+const apiWords = new Set("API ccos_api _G _desktop ccos_render ccos_kernel window close redraw redrawContent fitWindow getRenderer getScreenSize drawText drawButton clipText chooseFile readFile writeFile listFiles isDir joinPath getDir getFileName ensureDir loadImage loadAnimation detectImage imageModule try setTimeout interrupted forceQuit rescue notify showError crashCount net init lookup lookupAsync lookupSiteServerAsync send receive siteRegister siteList siteListAsync siteResolve siteResolveAsync siteGet siteGetAsync discover discoverAsync request requestPackageListAsync requestPackageAsync keys fs rednet colors term R D K win onDraw onKey onClick onScroll onDrag onDoubleClick onClose".split(" "));
+
+const ccosCompleter = {
+  getCompletions: function(_editor, _session, _pos, prefix, callback) {
+    if (!prefix) { callback(null, []); return; }
+    const list = [];
+    apiWords.forEach(w => { if (w.startsWith(prefix)) list.push({ caption: w, value: w, meta: "CCOS", score: 100 }); });
+    callback(null, list);
+  }
+};
+editor.completers = [ccosCompleter];
+
+function setTheme(name) {
+  document.body.className = "theme-" + name;
+  editor.setTheme(aceThemes[name] || aceThemes.dark);
+  localStorage.setItem("ccos-theme", name);
+  document.querySelectorAll(".theme-switcher button").forEach(b => {
+    b.classList.toggle("active", b.dataset.theme === name);
+  });
+}
+document.querySelectorAll(".theme-switcher button").forEach(btn => {
+  btn.onclick = () => setTheme(btn.dataset.theme);
+});
+setTheme(localStorage.getItem("ccos-theme") || "dark");
+
+editor.commands.addCommand({
+  name: "validateLua",
+  bindKey: { win: "Ctrl-Enter", mac: "Cmd-Enter" },
+  exec: validateLua
+});
+editor.commands.addCommand({
+  name: "buildPackage",
+  bindKey: { win: "Ctrl-S", mac: "Cmd-S" },
+  exec: buildPackage
+});
+
+function getCode() { return editor.getValue(); }
+function setCode(v) { editor.setValue(v, -1); editor.focus(); }
+
+// Package assets — images that will be included into .ccpkg
+let packageAssets = [];
+const assetList = document.getElementById("assetList");
+const assetEmpty = document.getElementById("assetEmpty");
+
+function getImgExt() {
+  const format = document.getElementById("imgFormat").value;
+  return format === "nfp" ? "nfp" : format === "nfp256" ? "nfp256" : format === "nfpa" ? "nfpa" : "nfpc";
+}
+
+function uniqueAssetName(ext) {
+  let base = "image", idx = 0;
+  while (packageAssets.some(a => a.name === (idx === 0 ? base : base + "_" + idx) + "." + ext)) idx++;
+  return (idx === 0 ? base : base + "_" + idx) + "." + ext;
+}
+
+function renderAssets() {
+  assetList.innerHTML = "";
+  if (packageAssets.length === 0) {
+    assetList.style.display = "none";
+    assetEmpty.style.display = "block";
+    return;
+  }
+  assetList.style.display = "flex";
+  assetEmpty.style.display = "none";
+  packageAssets.forEach((asset, i) => {
+    const item = document.createElement("div");
+    item.className = "asset-item";
+    item.innerHTML =
+      `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">` +
+      `<rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>` +
+      `<circle cx="8.5" cy="8.5" r="1.5"></circle>` +
+      `<polyline points="21 15 16 10 5 21"></polyline></svg>` +
+      `<input value="${asset.name.replace(/"/g, '&quot;')}">` +
+      `<button title="Remove">×</button>`;
+    const input = item.querySelector("input");
+    input.onchange = () => {
+      asset.name = input.value.trim() || asset.name;
+      input.value = asset.name;
+    };
+    item.querySelector("button").onclick = () => {
+      packageAssets.splice(i, 1);
+      renderAssets();
+    };
+    assetList.appendChild(item);
+  });
+}
+
+function addToPackage() {
+  const content = document.getElementById("imgOutput").value;
+  if (!content) { showImgStatus("Convert an image first.", "err"); return; }
+  const ext = getImgExt();
+  const name = uniqueAssetName(ext);
+  packageAssets.push({ name, content });
+  renderAssets();
+  showImgStatus("Added " + name + " to package assets.", "ok");
+  updateStatusBar("Asset added: " + name, "ok");
+  activatePane("build");
+}
+
+// ============================================================
+// Lua syntax validation (heuristic — checks balanced end/do/then)
+// ============================================================
+function validateLua() {
+  const src = getCode();
+  const statusEl = document.getElementById("buildStatus");
+  const stack = [];
+  const lines = src.split("\n");
+  let lineNum = 0;
+  let ok = true;
+  let msg = "";
+
+  for (let i = 0; i < lines.length && ok; i++) {
+    lineNum = i + 1;
+    const line = lines[i].replace(/--.*$/, "").trim();
+    if (!line) continue;
+    const tokens = line.match(/\b\w+\b/g) || [];
+    for (const t of tokens) {
+      if (t === "function" || t === "do" || t === "repeat" || t === "then") {
+        stack.push({ kw: t, line: lineNum });
+      } else if (t === "end") {
+        if (stack.length === 0) { ok = false; msg = `Line ${lineNum}: unexpected 'end'`; break; }
+        stack.pop();
+      }
+    }
+  }
+  if (ok && stack.length > 0) {
+    ok = false;
+    msg = `Unclosed '${stack[stack.length-1].kw}' from line ${stack[stack.length-1].line}`;
+  }
+  if (ok) {
+    if (!src.match(/return\s*\{/)) {
+      msg = "Warning: missing 'return { name=..., run=... }' table";
+      showStatus(statusEl, msg, "warn");
+      updateStatusBar(msg, "warn");
+      return true;
+    }
+    showStatus(statusEl, "Syntax OK — package returns a table.", "ok");
+    updateStatusBar("Syntax OK", "ok");
+    return true;
+  }
+  showStatus(statusEl, "Syntax error: " + msg, "err");
+  updateStatusBar("Syntax error", "err");
+  return false;
+}
+
+function showStatus(el, msg, type) {
+  if (!el) return;
+  el.className = "status " + (type || "ok");
+  el.textContent = msg;
+  el.style.display = "block";
+}
+
+function updateStatusBar(msg, type) {
+  const el = document.getElementById("statusMsg");
+  if (!el) return;
+  el.textContent = msg;
+  const bar = document.querySelector(".statusbar");
+  if (type === "err") bar.style.background = "#c75450";
+  else if (type === "warn") bar.style.background = "#bf8803";
+  else bar.style.background = "var(--statusbar-bg)";
+}
+
+// ============================================================
+// Package building
+// ============================================================
 function luaString(s) {
   let level = 0;
   while (s.includes("]" + "=".repeat(level) + "]")) level++;
@@ -298,145 +1148,47 @@ function luaString(s) {
 }
 
 function buildPackage() {
+  if (!validateLua()) return;
   const name = document.getElementById("pkgName").value.trim() || "app";
   const title = document.getElementById("pkgTitle").value.trim() || name;
   const desc = document.getElementById("pkgDesc").value.trim() || "";
+  const icon = document.getElementById("pkgIcon").value.trim() || "app";
+
+  let filesLua = `    ["program.lua"] = ${luaString(getCode())}`;
+  packageAssets.forEach(asset => {
+    filesLua += `,\n    ["${asset.name.replace(/"/g, '\\"')}"] = ${luaString(asset.content)}`;
+  });
+
   const pkg =
 `return {
   name = ${luaString(name)},
   title = ${luaString(title)},
   desc = ${luaString(desc)},
+  icon = ${luaString(icon)},
   files = {
-    ["program.lua"] = ${luaString(code.value)}
+${filesLua}
   }
 }
 `;
   out.value = pkg;
-  statusEl.textContent = "Package generated.";
+  const assetInfo = packageAssets.length ? " + " + packageAssets.length + " asset(s)" : "";
+  showStatus(document.getElementById("buildStatus"), "Package built: " + (name + ".ccpkg") + " (" + new Blob([pkg]).size + " bytes)" + assetInfo, "ok");
+  updateStatusBar("Package built: " + name + ".ccpkg" + assetInfo, "ok");
   return pkg;
 }
 
-document.getElementById("build").onclick = buildPackage;
-document.getElementById("copyPkg").onclick = async () => {
-  if (!out.value) buildPackage();
-  await navigator.clipboard.writeText(out.value);
-  statusEl.textContent = "Copied.";
-};
-document.getElementById("downloadPkg").onclick = () => {
-  const text = out.value || buildPackage();
-  const name = (document.getElementById("pkgName").value.trim() || "app").replace(/[^a-z0-9_-]/gi, "_");
-  downloadText(name + ".ccpkg", text);
+document.getElementById("btnBuild").onclick = buildPackage;
+document.getElementById("btnBuild2").onclick = buildPackage;
+document.getElementById("mnuBuild").onclick = () => { mobileMenu.classList.remove("open"); buildPackage(); };
+document.getElementById("btnValidate").onclick = validateLua;
+document.getElementById("mnuValidate").onclick = () => { mobileMenu.classList.remove("open"); validateLua(); };
+
+document.getElementById("btnFormat").onclick = () => {
+  setCode(getCode().split("\n").map(l => l.replace(/\s+$/, "")).join("\n") + "\n");
 };
 
-const w95 = [
-  [8,10,14],[248,249,252],[202,206,214],[232,235,240],[108,116,128],[42,82,146],[28,56,110],[0,154,162],
-  [135,211,232],[36,160,90],[24,112,66],[218,64,64],[132,35,35],[236,215,76],[222,160,58],[128,82,42],
-  [118,72,156],[230,138,210],[70,76,86],[35,92,154],[126,153,194],[66,112,220],[241,243,246],[28,31,36],
-  [158,165,176],[216,220,226],[252,253,255],[20,36,74],[52,58,68],[30,122,72],[25,120,126],[198,203,212]
-];
-const nfp32Keys = "0123456789abcdefghijklmnopqrstuv";
-const pal32 = w95.map((rgb, i) => ({ key: nfp32Keys[i], rgb }));
-const pal256 = [];
-w95.forEach((rgb, i) => pal256[i] = rgb);
-let idx = 32;
-for (let r = 0; r < 6; r++) for (let g = 0; g < 6; g++) for (let b = 0; b < 6; b++) pal256[idx++] = [r*51, g*51, b*51];
-for (let i = 0; i < 40; i++) { const v = Math.floor(i * 255 / 39); pal256[216 + i] = [v, v, v]; }
-
-function dist(a, b) {
-  const dr = a[0] - b[0], dg = a[1] - b[1], db = a[2] - b[2];
-  return dr*dr + dg*dg + db*db;
-}
-
-function closest(rgb, format) {
-  if (format === "nfp") {
-    let best = pal32[0], bestD = Infinity;
-    for (const item of pal32) {
-      const d = dist(rgb, item.rgb);
-      if (d < bestD) { bestD = d; best = item; }
-    }
-    return best.key;
-  }
-  let best = 0, bestD = Infinity;
-  for (let i = 0; i < pal256.length; i++) {
-    const d = dist(rgb, pal256[i]);
-    if (d < bestD) { bestD = d; best = i; }
-  }
-  return best.toString(16).padStart(2, "0");
-}
-
-function encodeNfpcLine(line, pixelLen) {
-  if (!line) return "";
-  let result = "";
-  let i = 0;
-  while (i < line.length) {
-    const val = line.substr(i, pixelLen);
-    let j = i + pixelLen;
-    while (j < line.length && line.substr(j, pixelLen) === val) {
-      j += pixelLen;
-    }
-    let count = (j - i) / pixelLen;
-    if (count === 1) {
-      result += val;
-    } else {
-      while (count > 0) {
-        const chunk = Math.min(count, 255);
-        const countHex = chunk.toString(16).padStart(2, "0");
-        const rle = "~" + val + countHex;
-        const raw = val.repeat(chunk);
-        result += (rle.length < raw.length) ? rle : raw;
-        count -= chunk;
-      }
-    }
-    i = j;
-  }
-  return result;
-}
-
-async function convertImage() {
-  const file = document.getElementById("imgFile").files[0];
-  if (!file) { statusEl.textContent = "Choose an image first."; return; }
-  const format = document.getElementById("imgFormat").value;
-  const width = Math.max(1, Math.min(256, Number(document.getElementById("imgW").value) || 32));
-  const height = Math.max(1, Math.min(256, Number(document.getElementById("imgH").value) || 32));
-  const img = new Image();
-  img.src = URL.createObjectURL(file);
-  await img.decode();
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(img, 0, 0, width, height);
-  const data = ctx.getImageData(0, 0, width, height).data;
-  const lines = [];
-  const pixelFormat = format === "nfpc" ? "nfp256" : format;
-  const pixelLen = pixelFormat === "nfp256" ? 2 : 1;
-  for (let y = 0; y < height; y++) {
-    let line = "";
-    for (let x = 0; x < width; x++) {
-      const p = (y * width + x) * 4;
-      const rgb = [data[p], data[p+1], data[p+2]];
-      line += closest(rgb, pixelFormat);
-    }
-    if (format === "nfpc") {
-      line = encodeNfpcLine(line, pixelLen);
-    }
-    lines.push(line);
-  }
-  if (format === "nfpc") {
-    lastImageText = "!NFPC " + width + " " + height + " 256\n" + lines.join("\n");
-  } else {
-    lastImageText = lines.join("\n");
-  }
-  out.value = lastImageText;
-  statusEl.textContent = `Converted ${width}x${height} ${format}.`;
-}
-
-document.getElementById("convertImg").onclick = convertImage;
-document.getElementById("downloadImg").onclick = () => {
-  if (!lastImageText && out.value) lastImageText = out.value;
-  const format = document.getElementById("imgFormat").value;
-  downloadText("image." + format, lastImageText || "");
+document.getElementById("btnInsertTemplate").onclick = () => {
+  setCode(defaultCode);
 };
 
 function downloadText(name, text) {
@@ -449,6 +1201,414 @@ function downloadText(name, text) {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 500);
 }
+
+function copyText(text) {
+  return navigator.clipboard.writeText(text);
+}
+
+function doDownload() {
+  const text = out.value || buildPackage();
+  const name = (document.getElementById("pkgName").value.trim() || "app").replace(/[^a-z0-9_-]/gi, "_");
+  downloadText(name + ".ccpkg", text);
+}
+function doCopy() {
+  if (!out.value) buildPackage();
+  copyText(out.value).then(() => {
+    showStatus(document.getElementById("buildStatus"), "Copied to clipboard.", "ok");
+    updateStatusBar("Copied to clipboard", "ok");
+  });
+}
+
+document.getElementById("btnDownload").onclick = doDownload;
+document.getElementById("mnuDownload").onclick = () => { mobileMenu.classList.remove("open"); doDownload(); };
+document.getElementById("btnDownload2").onclick = doDownload;
+document.getElementById("btnDownloadLua").onclick = () => {
+  downloadText("program.lua", getCode());
+};
+document.getElementById("btnCopy").onclick = doCopy;
+document.getElementById("mnuCopy").onclick = () => { mobileMenu.classList.remove("open"); doCopy(); };
+document.getElementById("btnCopy2").onclick = doCopy;
+
+// ============================================================
+// Snippet insertion
+// ============================================================
+document.querySelectorAll(".cheat .snippet").forEach(sn => {
+  sn.onclick = () => {
+    const text = sn.dataset.snippet ? sn.textContent.replace(/← click to insert/, "").trim() : sn.textContent;
+    setCode(text);
+    activatePane("code");
+  };
+});
+
+// ============================================================
+// Image converter (with C7 support)
+// ============================================================
+const w95 = [
+  [8,10,14],[248,249,252],[202,206,214],[232,235,240],[108,116,128],[42,82,146],[28,56,110],[0,154,162],
+  [135,211,232],[36,160,90],[24,112,66],[218,64,64],[132,35,35],[236,215,76],[222,160,58],[128,82,42],
+  [118,72,156],[230,138,210],[70,76,86],[35,92,154],[126,153,194],[66,112,220],[241,243,246],[28,31,36],
+  [158,165,176],[216,220,226],[252,253,255],[20,36,74],[52,58,68],[30,122,72],[25,120,126],[198,203,212]
+];
+const nfp32Keys = "0123456789abcdefghijklmnopqrstuv";
+const pal32 = w95.map((rgb, i) => ({ key: nfp32Keys[i], rgb }));
+const pal256 = [];
+w95.forEach((rgb, i) => pal256[i] = rgb);
+let pidx = 32;
+for (let r = 0; r < 6; r++) for (let g = 0; g < 6; g++) for (let b = 0; b < 6; b++) pal256[pidx++] = [r*51, g*51, b*51];
+for (let i = 0; i < 40; i++) { const v = Math.floor(i * 255 / 39); pal256[216 + i] = [v, v, v]; }
+
+function dist(a, b) {
+  const dr = a[0]-b[0], dg = a[1]-b[1], db = a[2]-b[2];
+  return dr*dr + dg*dg + db*db;
+}
+
+function closestColor(rgb, mode) {
+  if (mode === 32) {
+    let best = pal32[0], bestD = Infinity;
+    for (const item of pal32) { const d = dist(rgb, item.rgb); if (d < bestD) { bestD = d; best = item; } }
+    return pal32.indexOf(best);
+  }
+  let best = 0, bestD = Infinity;
+  for (let i = 0; i < pal256.length; i++) { const d = dist(rgb, pal256[i]); if (d < bestD) { bestD = d; best = i; } }
+  return best;
+}
+
+function imageToIndices(img, width, height, mode) {
+  const canvas = document.createElement("canvas");
+  canvas.width = width; canvas.height = height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, 0, 0, width, height);
+  const data = ctx.getImageData(0, 0, width, height).data;
+  const indices = new Uint8Array(width * height);
+  for (let i = 0; i < width * height; i++) {
+    const p = i * 4;
+    indices[i] = closestColor([data[p], data[p+1], data[p+2]], mode);
+  }
+  return indices;
+}
+
+// Base64 encode
+function bytesToBase64(bytes) {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+
+// LZSS compress
+function lzssCompress(input) {
+  const out = [];
+  const map = new Map();
+  const maxDistance = 4096, maxLength = 18;
+  let pos = 0;
+  function appendHash(p) {
+    if (p + 2 >= input.length) return;
+    const key = (input[p] << 16) | (input[p+1] << 8) | input[p+2];
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(p);
+  }
+  while (pos < input.length) {
+    const flagIndex = out.length;
+    let flags = 0;
+    out.push(0);
+    for (let bit = 0; bit < 8 && pos < input.length; bit++) {
+      let bestLen = 0, bestDist = 0;
+      if (pos + 2 < input.length) {
+        const key = (input[pos] << 16) | (input[pos+1] << 8) | input[pos+2];
+        const list = map.get(key) || [];
+        const max = Math.min(maxLength, input.length - pos);
+        for (let i = list.length - 1; i >= 0 && list[i] > pos - maxDistance; i--) {
+          const ref = list[i];
+          if (ref >= pos) continue;
+          let len = 0;
+          while (len < max && input[ref + len] === input[pos + len]) len++;
+          if (len >= 3 && len > bestLen) { bestLen = len; bestDist = pos - ref; if (len === maxLength) break; }
+        }
+      }
+      if (bestLen >= 3) {
+        flags |= (1 << bit);
+        out.push(((bestLen - 3) << 4) | ((bestDist - 1) >> 8), (bestDist - 1) & 255);
+        for (let i = 0; i < bestLen; i++) appendHash(pos + i);
+        pos += bestLen;
+      } else {
+        out.push(input[pos]);
+        appendHash(pos);
+        pos++;
+      }
+    }
+    out[flagIndex] = flags;
+  }
+  return new Uint8Array(out);
+}
+
+// LZW compress
+function lzwCompress(values, mode) {
+  const minCodeSize = mode === 256 ? 8 : 5;
+  const clearCode = 1 << minCodeSize;
+  const eoiCode = clearCode + 1;
+  const out = [];
+  let bitBuffer = 0, bitCount = 0;
+  function emit(code) {
+    bitBuffer |= code << bitCount;
+    bitCount += 12;
+    while (bitCount >= 8) { out.push(bitBuffer & 255); bitBuffer >>= 8; bitCount -= 8; }
+  }
+  let dict = new Map();
+  let nextCode = eoiCode + 1;
+  emit(clearCode);
+  if (!values || values.length === 0) { emit(eoiCode); if (bitCount > 0) out.push(bitBuffer & 255); return new Uint8Array(out); }
+  const mask = mode === 256 ? 255 : 31;
+  let prefix = values[0] & mask;
+  for (let i = 1; i < values.length; i++) {
+    const value = values[i] & mask;
+    const key = prefix * 256 + value;
+    if (dict.has(key)) { prefix = dict.get(key); continue; }
+    emit(prefix);
+    if (nextCode < 4096) dict.set(key, nextCode++);
+    else { emit(clearCode); dict = new Map(); nextCode = eoiCode + 1; }
+    prefix = value;
+  }
+  emit(prefix); emit(eoiCode);
+  if (bitCount > 0) out.push(bitBuffer & 255);
+  return new Uint8Array(out);
+}
+
+function writeVarUint(out, value) {
+  while (value >= 128) { out.push((value & 127) | 128); value >>= 7; }
+  out.push(value & 127);
+}
+
+// C7 encoder
+function encodeC7Lossless(indices, width, height, mode, prevFrame) {
+  const total = width * height;
+  const mod = mode === 256 ? 256 : 32;
+  const deltas = new Uint8Array(total);
+  if (prevFrame) {
+    for (let i = 0; i < total; i++) {
+      let d = (indices[i] & (mod-1)) - (prevFrame[i] & (mod-1));
+      d = ((d % mod) + mod) % mod;
+      if (d > 127) d -= 256;
+      deltas[i] = (d + 256) % 256;
+    }
+  } else {
+    let prev = 0;
+    for (let i = 0; i < total; i++) {
+      const cur = indices[i] & (mod-1);
+      let d = cur - prev;
+      if (d > 127) d -= mod;
+      if (d < -128) d += mod;
+      deltas[i] = (d + 256) % 256;
+      prev = cur;
+    }
+  }
+  const lzw = lzwCompress(deltas, 256);
+  const result = [0];
+  for (let i = 0; i < lzw.length; i++) result.push(lzw[i]);
+  return new Uint8Array(result);
+}
+
+function encodeC7Lossy(indices, width, height, mode) {
+  const mod = mode === 256 ? 256 : 32;
+  const blockW = Math.ceil(width / 4), blockH = Math.ceil(height / 4);
+  const out = [1];
+  for (let by = 0; by < blockH; by++) {
+    for (let bx = 0; bx < blockW; bx++) {
+      let minC = 255, maxC = 0;
+      for (let py = 0; py < 4; py++) for (let px = 0; px < 4; px++) {
+        const fx = bx*4+px, fy = by*4+py;
+        if (fx >= width || fy >= height) continue;
+        const v = indices[fy*width+fx] & (mod-1);
+        if (v < minC) minC = v; if (v > maxC) maxC = v;
+      }
+      out.push(minC, maxC);
+      const idx = [0,0,0,0];
+      for (let py = 0; py < 4; py++) for (let px = 0; px < 4; px++) {
+        const fx = bx*4+px, fy = by*4+py;
+        let code = 3;
+        if (fx < width && fy < height) {
+          const v = indices[fy*width+fx] & (mod-1);
+          code = v === minC ? 0 : (v === maxC ? 1 : 2);
+        }
+        const bitIdx = py*4+px, byteIdx = Math.floor(bitIdx/4), bitOff = (3-(bitIdx%4))*2;
+        idx[byteIdx] |= code << bitOff;
+      }
+      for (let i = 0; i < 4; i++) out.push(idx[i]);
+    }
+  }
+  return new Uint8Array(out);
+}
+
+function encodeRLE(indices, width, height, mode, prevFrame) {
+  const total = width * height;
+  const out = [];
+  let pos = 0;
+  while (pos < total) {
+    const color = indices[pos] || 0;
+    let len = 1;
+    while (pos + len < total && len < 64 && indices[pos + len] === color) len++;
+    if (len <= 1) {
+      out.push(0);
+      out.push(color);
+    } else {
+      out.push(1);
+      out.push(color);
+      out.push(len - 1);
+    }
+    pos += len;
+  }
+  return new Uint8Array(out);
+}
+
+function splitBase64Lines(b64) {
+  const lines = [];
+  for (let i = 0; i < b64.length; i += 76) lines.push(b64.slice(i, i + 76));
+  return lines;
+}
+
+async function convertImage() {
+  const file = document.getElementById("imgFile").files[0];
+  if (!file) { showImgStatus("Choose an image first.", "err"); updateStatusBar("No image selected", "err"); return; }
+  const format = document.getElementById("imgFormat").value;
+  const codec = document.getElementById("imgCodec").value;
+  const quality = document.getElementById("imgQuality").value;
+  const width = Math.max(1, Math.min(256, Number(document.getElementById("imgW").value) || 64));
+  const height = Math.max(1, Math.min(256, Number(document.getElementById("imgH").value) || 64));
+  const statusEl = document.getElementById("imgStatus");
+  const outEl = document.getElementById("imgOutput");
+  const preview = document.getElementById("imgPreview");
+
+  showImgStatus("Converting...", "ok");
+  updateStatusBar("Converting image...", "ok");
+  const img = new Image();
+  img.src = URL.createObjectURL(file);
+  await img.decode();
+
+  const isAnim = format === "nfpa";
+  const mode = (format === "nfp" || format === "nfpa" && codec !== "auto") ? 32 : 256;
+  const useMode = (format === "nfp") ? 32 : 256;
+
+  if (isAnim && file.type === "image/gif") {
+    const frames = await extractGifFrames(file, width, height, useMode);
+    if (!frames || frames.length === 0) { showImgStatus("Failed to read GIF.", "err"); updateStatusBar("GIF decode failed", "err"); return; }
+    const lossy = quality === "lossy";
+    const stream = [lossy ? 1 : 0];
+    let prev = null;
+    for (const indices of frames) {
+      const frameBytes = lossy ? encodeC7Lossy(indices, width, height, useMode) : encodeC7Lossless(indices, width, height, useMode, prev);
+      writeVarUint(stream, frameBytes.length);
+      for (let i = 0; i < frameBytes.length; i++) stream.push(frameBytes[i]);
+      prev = indices;
+    }
+    const payload = bytesToBase64(lzssCompress(new Uint8Array(stream)));
+    const out = "!NFPA " + width + " " + height + " " + useMode + " 100 0 " + frames.length + " C7\n" + splitBase64Lines(payload).join("\n");
+    outEl.value = out;
+    showImgStatus("Animation: " + frames.length + " frames, " + new Blob([out]).size + " bytes (C7)", "ok");
+    updateStatusBar("Animation converted", "ok");
+    drawPreview(frames[0], width, height, useMode, preview);
+    return;
+  }
+
+  const indices = imageToIndices(img, width, height, useMode);
+
+  if (format === "nfp256" || format === "nfp") {
+    const lines = [];
+    for (let y = 0; y < height; y++) {
+      let line = "";
+      for (let x = 0; x < width; x++) {
+        const v = indices[y * width + x];
+        if (useMode === 256) line += v.toString(16).padStart(2, "0");
+        else line += nfp32Keys[v] || "0";
+      }
+      lines.push(line);
+    }
+    const out = lines.join("\n");
+    outEl.value = out;
+    showImgStatus("Converted " + width + "x" + height + " " + format + ", " + new Blob([out]).size + " bytes", "ok");
+    updateStatusBar("Image converted", "ok");
+    drawPreview(indices, width, height, useMode, preview);
+    return;
+  }
+
+  let out;
+  const lossy = quality === "lossy";
+  if (codec === "c7" || codec === "auto") {
+    const frameBytes = lossy ? encodeC7Lossy(indices, width, height, useMode) : encodeC7Lossless(indices, width, height, useMode, null);
+    const stream = [lossy ? 1 : 0];
+    writeVarUint(stream, frameBytes.length);
+    for (let i = 0; i < frameBytes.length; i++) stream.push(frameBytes[i]);
+    const payload = bytesToBase64(lzssCompress(new Uint8Array(stream)));
+    out = "!NFPC " + width + " " + height + " " + useMode + " C7\n" + splitBase64Lines(payload).join("\n");
+  } else {
+    const lines = ["!NFPC " + width + " " + height + " " + useMode];
+    for (let y = 0; y < height; y++) {
+      let line = "";
+      for (let x = 0; x < width; x++) {
+        const v = indices[y * width + x];
+        if (useMode === 256) line += v.toString(16).padStart(2, "0");
+        else line += nfp32Keys[v] || "0";
+      }
+      lines.push(line);
+    }
+    out = lines.join("\n");
+  }
+  outEl.value = out;
+  showImgStatus("Converted " + width + "x" + height + " " + format + " " + (codec === "c7" ? "C7" : "legacy") + ", " + new Blob([out]).size + " bytes", "ok");
+  updateStatusBar("Image converted", "ok");
+  drawPreview(indices, width, height, useMode, preview);
+}
+
+function showImgStatus(msg, type) {
+  const el = document.getElementById("imgStatus");
+  el.className = "status " + (type || "ok");
+  el.textContent = msg;
+  el.style.display = "block";
+}
+
+function drawPreview(indices, width, height, mode, canvas) {
+  canvas.style.display = "block";
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  const imgData = ctx.createImageData(width, height);
+  for (let i = 0; i < width * height; i++) {
+    const v = indices[i] || 0;
+    const pal = mode === 256 ? pal256 : w95;
+    const rgb = pal[v] || [0,0,0];
+    imgData.data[i*4] = rgb[0];
+    imgData.data[i*4+1] = rgb[1];
+    imgData.data[i*4+2] = rgb[2];
+    imgData.data[i*4+3] = 255;
+  }
+  ctx.putImageData(imgData, 0, 0);
+  canvas.style.width = Math.min(300, width * 4) + "px";
+  canvas.style.height = "auto";
+}
+
+// GIF frame extraction (using browser's GIF decoder via canvas)
+async function extractGifFrames(file, width, height, mode) {
+  // Browser doesn't natively decode GIF frames. Use a simple approach:
+  // Draw the first frame only if not animated; for animated GIFs,
+  // we'd need a library. For now, return single frame.
+  // TODO: integrate gif.js or omggif for multi-frame
+  const img = new Image();
+  img.src = URL.createObjectURL(file);
+  await img.decode();
+  const indices = imageToIndices(img, width, height, mode);
+  return [indices];
+}
+
+document.getElementById("convertImg").onclick = convertImage;
+document.getElementById("addToPackage").onclick = addToPackage;
+document.getElementById("downloadImg").onclick = () => {
+  const text = document.getElementById("imgOutput").value;
+  if (!text) return;
+  const format = document.getElementById("imgFormat").value;
+  const ext = format === "nfp" ? "nfp" : format === "nfp256" ? "nfp256" : format === "nfpa" ? "nfpa" : "nfpc";
+  downloadText("image." + ext, text);
+};
+
+renderAssets();
 </script>
 </body>
 </html>

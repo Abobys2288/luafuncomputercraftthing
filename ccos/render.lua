@@ -14,16 +14,16 @@ R.PAL = {}
 -- ============================================================
 local PALETTE = {}
 
--- 0-31: Original W95 palette
+-- 0-31: Original W95 palette (must match web converter / Python tools exactly)
 local W95 = {
-    {8,10,14}, {248,249,252}, {202,206,214}, {232,235,240},
-    {108,116,128}, {42,82,146}, {28,56,110}, {0,154,162},
-    {135,211,232}, {36,160,90}, {24,112,66}, {218,64,64},
-    {132,35,35}, {236,215,76}, {222,160,58}, {128,82,42},
-    {118,72,156}, {230,138,210}, {70,76,86}, {35,92,154},
-    {126,153,194}, {66,112,220}, {241,243,246}, {28,31,36},
-    {158,165,176}, {216,220,226}, {252,253,255}, {20,36,74},
-    {52,58,68}, {30,122,72}, {25,120,126}, {198,203,212},
+    {0,0,0}, {255,255,255}, {192,192,192}, {223,223,223},
+    {128,128,128}, {0,0,192}, {0,0,128}, {0,192,192},
+    {128,224,255}, {0,192,0}, {0,128,0}, {255,0,0},
+    {128,0,0}, {255,255,0}, {255,192,0}, {128,64,0},
+    {128,0,128}, {255,128,255}, {64,64,64}, {0,84,168},
+    {128,158,200}, {0,0,255}, {240,240,240}, {32,32,32},
+    {160,160,160}, {200,200,200}, {248,248,248}, {0,0,64},
+    {48,48,48}, {0,128,0}, {0,128,128}, {192,192,192},
 }
 for i, c in ipairs(W95) do
     PALETTE[i-1] = c
@@ -402,7 +402,11 @@ function R.fontKey(ch)
     return R.CYR_UPPER[ch] or ch
 end
 
--- Pixel font 5x7 drawing
+-- Pixel font 5x7 drawing (optimized: bit32 fast path, hoisted hot values)
+local _band = bit32 and bit32.band or nil
+local _rshift = bit32 and bit32.rshift or nil
+local _MASKS = {16, 8, 4, 2, 1}  -- 2^4 .. 2^0, indexed by (4-col)+1
+
 function R.drawText(x, y, text, fg, bg)
     if R.mode == 0 then
         R.display.setCursorPos(x, y)
@@ -414,18 +418,29 @@ function R.drawText(x, y, text, fg, bg)
         if R.isColor then R.display.setTextColor(colors.white); R.display.setBackgroundColor(colors.black) end
         return
     end
-    local cx = x
+    local cx, setPixel = x, R.setPixel
+    local hasBg = bg ~= nil
     for _, raw in ipairs(R.utf8Chars(text)) do
-        local ch = R.fontKey(raw)
-        local glyph = R.FONT[ch] or R.FONT["?"]
+        local glyph = R.FONT[R.fontKey(raw)] or R.FONT["?"]
         for row = 1, 7 do
             local bits = glyph[row]
-            for col = 4, 0, -1 do
-                local mask = 2^col
-                if math.floor(bits / mask) % 2 == 1 then
-                    R.setPixel(cx+(4-col), y+row-1, fg)
-                elseif bg then
-                    R.setPixel(cx+(4-col), y+row-1, bg)
+            local py = y + row - 1
+            if _band then
+                for col = 1, 5 do
+                    if _band(bits, _MASKS[col]) ~= 0 then
+                        setPixel(cx + col - 1, py, fg)
+                    elseif hasBg then
+                        setPixel(cx + col - 1, py, bg)
+                    end
+                end
+            else
+                for col = 1, 5 do
+                    local mask = _MASKS[col]
+                    if math.floor(bits / mask) % 2 == 1 then
+                        setPixel(cx + col - 1, py, fg)
+                    elseif hasBg then
+                        setPixel(cx + col - 1, py, bg)
+                    end
                 end
             end
         end

@@ -1,33 +1,41 @@
--- CCOS Program: Network Browser v2
--- Discovers peers + DNS lookup via CCOS server
+-- CCOS Program: Network Browser v3
+-- Discovers peers + DNS lookup via CCOS server (async, never blocks UI)
 local D = _G._desktop
-local R = _G.ccos_render
+local API = _G.ccos_api
+local R = API and API.getRenderer and API.getRenderer() or _G.ccos_render
 local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,BLUE=5,DBLUE=6,DESKTOP=30,RED=11}
+
+local function drawText(x, y, text, fg, bg, w)
+    if API and API.drawText then API.drawText(x, y, text, fg, bg, w)
+    else R.drawText(x, y, tostring(text or ""), fg, bg) end
+end
 
 local function appNetBrowse()
     local net = require("ccos.drivers.net")
     if not net.init() then
-        local w = D.createWindow("Network Error", 20, 20, 200, 60)
-        w.onDraw = function(_,cx,cy) R.drawText(cx+4,cy+4,"No modem found!",K.RED,K.GRAY) end
-        w.onKey = function(_,k) if k==keys.escape then D.destroyWindow(w) end end
+        if API and API.showError then API.showError("Network Error", "No modem found!")
+        else
+            local w = D.createWindow("Network Error", 20, 20, 200, 60)
+            w.onDraw = function(_,cx,cy) R.drawText(cx+4,cy+4,"No modem found!",K.RED,K.GRAY) end
+            w.onKey = function(_,k) if k==keys.escape then D.destroyWindow(w) end end
+        end
         return
     end
 
-    -- Find server
-    local serverId = net.lookup("server")
-    if not serverId then
-        D.inputDialog("Server", "Enter server ID:", "", function(id)
-            if id then
-                serverId = tonumber(id)
-                D.markDirty()
-            end
-        end)
-    end
-
+    local serverId = nil
     local peers = {}
     local sel = 1
     local scroll = 0
-    local status = "Press F5 to scan"
+    local status = "Starting..."
+    local busy = false
+
+    -- Async server lookup (never blocks UI)
+    net.lookupAsync("server", 3, function(id)
+        serverId = id
+        if id then status = "Ready" else status = "No server" end
+        D.markDirty()
+        if id then scan() end
+    end)
 
     local function buildList()
         local list = {}
@@ -37,31 +45,35 @@ local function appNetBrowse()
     end
 
     local function scan()
+        if busy then return end
+        busy = true
         status = "Scanning..."
         D.markDirty()
-        peers = net.discover(0.5)
-        sel = 1; scroll = 0
-        status = "Found " .. #buildList() .. " peers"
-        D.markDirty()
+        net.discoverAsync(0.6, function(found)
+            peers = found or {}
+            sel = 1; scroll = 0
+            status = "Found " .. #buildList() .. " peers"
+            busy = false
+            D.markDirty()
+        end)
     end
 
     local function dnsLookup(name)
-        if not serverId then
-            status = "No server"
-            D.markDirty()
-            return
-        end
+        if busy then return end
+        if not serverId then status = "No server"; D.markDirty(); return end
+        busy = true
         status = "Lookup..."
         D.markDirty()
-        local id = net.resolve(serverId, name)
-        if id then
-            peers[id] = name
-            status = "Found " .. name .. " -> " .. id
+        net.resolveAsync(serverId, name, function(id)
+            if id then
+                peers[id] = name
+                status = "Found " .. name .. " -> " .. id
+            else
+                status = "Not found: " .. name
+            end
+            busy = false
             D.markDirty()
-        else
-            status = "Not found: " .. name
-            D.markDirty()
-        end
+        end)
     end
 
     local wx, wy, ww, wh = D.fitWin(240, 160)
@@ -72,7 +84,8 @@ local function appNetBrowse()
         R.drawText(cx+4,cy+3,"Scan",K.BLACK,K.GRAY)
         R.drawButton(cx+44,cy,52,14,false)
         R.drawText(cx+48,cy+3,"Lookup",K.BLACK,K.GRAY)
-        R.drawText(cx+100,cy+3,status,K.BLACK,K.GRAY)
+        local stColor = busy and K.DBLUE or K.BLACK
+        drawText(cx+100,cy+3,status,stColor,K.GRAY,math.max(0,cw-100))
         local lh = math.floor((ch-28)/8)
         local list = buildList()
         local hasHit = false

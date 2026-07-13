@@ -1,7 +1,7 @@
 --[[
-    CCOS Desktop v17 — CLEAN REWRITE
+    CCOS Desktop v5 — CLEAN REWRITE
     =================================
-    Modular, no syntax errors guaranteed.
+    Modular window manager. Crash-resilient via the kernel supervisor.
 ]]
 
 local R = _G.ccos_render
@@ -99,134 +99,8 @@ D.dragPreviewX = nil
 D.dragPreviewY = nil
 D._lastDragDraw = 0
 
-local NFP32_KEYS = "0123456789abcdefghijklmnopqrstuv"
-local NFP32_MAP = {}
-for i = 1, #NFP32_KEYS do NFP32_MAP[NFP32_KEYS:sub(i, i)] = i - 1 end
-
-local B64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-local B64_MAP = {}
-for i = 1, #B64_CHARS do B64_MAP[B64_CHARS:sub(i, i)] = i - 1 end
-
-local function base64Bytes(text)
-    local out, i = {}, 1
-    while i <= #text do
-        local c1 = B64_MAP[text:sub(i, i)] or 0
-        local c2 = B64_MAP[text:sub(i + 1, i + 1)] or 0
-        local c3s, c4s = text:sub(i + 2, i + 2), text:sub(i + 3, i + 3)
-        local c3, c4 = B64_MAP[c3s] or 0, B64_MAP[c4s] or 0
-        local n = c1 * 262144 + c2 * 4096 + c3 * 64 + c4
-        out[#out + 1] = math.floor(n / 65536) % 256
-        if c3s ~= "=" and c3s ~= "" then out[#out + 1] = math.floor(n / 256) % 256 end
-        if c4s ~= "=" and c4s ~= "" then out[#out + 1] = n % 256 end
-        i = i + 4
-    end
-    return out
-end
-
-local function fitNfpRow(row, width)
-    for i = #row + 1, width do row[i] = 0 end
-    for i = width + 1, #row do row[i] = nil end
-    return row
-end
-
-local function blankNfpRow(width)
-    local row = {}
-    for i = 1, width do row[i] = 0 end
-    return row
-end
-
-local function decodeLegacyNfpcLine(line, mode)
-    local pixelLen = (mode == 256) and 2 or 1
-    local row, i = {}, 1
-    local decode = mode == 256
-        and function(s) return tonumber(s, 16) or 0 end
-        or function(s) return NFP32_MAP[s:lower()] or 0 end
-    while i <= #line do
-        if line:sub(i, i) == "~" then
-            i = i + 1
-            local ps = line:sub(i, i + pixelLen - 1)
-            i = i + pixelLen
-            local cnt = tonumber(line:sub(i, i + 1), 16) or 1
-            i = i + 2
-            local v = decode(ps)
-            for _ = 1, cnt do row[#row + 1] = v end
-        else
-            row[#row + 1] = decode(line:sub(i, i + pixelLen - 1))
-            i = i + pixelLen
-        end
-    end
-    return row
-end
-
-local function unpackC2NfpRow(payload, mode, width)
-    local bytes = base64Bytes(payload)
-    local row = {}
-    if mode == 256 then
-        for i = 1, math.min(width, #bytes) do row[i] = bytes[i] end
-    else
-        local x = 1
-        for i = 1, #bytes do
-            local b = bytes[i]
-            row[x] = math.floor(b / 16) % 16
-            x = x + 1
-            if x <= width then row[x] = b % 16; x = x + 1 end
-            if x > width then break end
-        end
-    end
-    return fitNfpRow(row, width)
-end
-
-local function decodeC2NfpRow(line, mode, width, prevRow)
-    if line == "=" then return prevRow or blankNfpRow(width) end
-    if line:sub(1, 1) == "!" then return unpackC2NfpRow(line:sub(2), mode, width) end
-    return fitNfpRow(decodeLegacyNfpcLine(line, mode), width)
-end
-
-local function readC3BlobFromFile(f)
-    local marker = f.readLine() or ""
-    if marker:sub(1, 1) == "@" then
-        local count = tonumber(marker:sub(2)) or 0
-        local parts = {}
-        for i = 1, count do parts[i] = f.readLine() or "" end
-        return table.concat(parts)
-    end
-    return marker
-end
-
-local function decodeC3NfpFrame(payload, mode, width, height)
-    local bytes = base64Bytes(payload)
-    local total = width * height
-    local flat, pos, i = {}, 1, 1
-    while pos <= total and i <= #bytes do
-        local cmd = bytes[i] or 0
-        i = i + 1
-        local op = math.floor(cmd / 64)
-        local len = (cmd % 64) + 1
-        if op == 1 then
-            local src = pos - width
-            for _ = 1, len do flat[pos] = flat[src] or 0; pos = pos + 1; src = src + 1; if pos > total then break end end
-        elseif op == 2 then
-            local color = bytes[i] or 0
-            i = i + 1
-            for _ = 1, len do flat[pos] = color; pos = pos + 1; if pos > total then break end end
-        elseif op == 3 then
-            for _ = 1, len do flat[pos] = bytes[i] or 0; i = i + 1; pos = pos + 1; if pos > total then break end end
-        else
-            for _ = 1, len do flat[pos] = 0; pos = pos + 1; if pos > total then break end end
-        end
-    end
-    for p = 1, total do
-        if flat[p] == nil then flat[p] = 0 end
-        if mode ~= 256 then flat[p] = flat[p] % 32 end
-    end
-    local rows, p = {}, 1
-    for y = 1, height do
-        local row = {}
-        for x = 1, width do row[x] = flat[p] or 0; p = p + 1 end
-        rows[y] = row
-    end
-    return rows
-end
+-- Shared image decoder (ccos.image) — single source of truth.
+local image = require and require("ccos.image") or _G.ccos_kernel and _G.ccos_kernel.getModule("ccos.image")
 
 local RU_LOWER = {
     q="й", w="ц", e="у", r="к", t="е", y="н", u="г", i="ш", o="щ", p="з",
@@ -260,62 +134,10 @@ end
 
 local function readNfpIcon(path)
     if not path or not fs.exists(path) or fs.isDir(path) then return nil end
-    local f = fs.open(path, "r")
-    if not f then return nil end
-    local ext = (path:match("%.([^%.]+)$") or ""):lower()
-    local pixels, imgW = {}, 0
-
-    if ext == "nfpc" then
-        local header = f.readLine()
-        if not header or not header:match("^!NFPC") then f.close(); return nil end
-        local _, _, wStr, hStr, modeStr, codec = header:find("^!NFPC%s+(%d+)%s+(%d+)%s+(%d+)%s*(%S*)")
-        local imgH = tonumber(hStr) or 0
-        imgW = tonumber(wStr) or 0
-        local mode = tonumber(modeStr) or 32
-        if codec == "C3" then
-            pixels = decodeC3NfpFrame(readC3BlobFromFile(f), mode, imgW, imgH)
-        elseif codec == "C2" then
-            local prevRow = nil
-            for y = 1, imgH do
-                local line = f.readLine() or ""
-                local row = decodeC2NfpRow(line, mode, imgW, prevRow)
-                pixels[y] = row
-                prevRow = row
-            end
-        else
-            while true do
-                local line = f.readLine()
-                if not line then break end
-                if line ~= "" then
-                    local row = decodeLegacyNfpcLine(line, mode)
-                    pixels[#pixels + 1] = row
-                    imgW = math.max(imgW, #row)
-                end
-            end
-        end
-    else
-        while true do
-            local line = f.readLine()
-            if not line then break end
-            if line ~= "" then
-                local row = {}
-                if ext == "nfp256" then
-                    for i = 1, #line, 2 do
-                        row[#row + 1] = tonumber(line:sub(i, i + 1), 16) or 0
-                    end
-                else
-                    for i = 1, #line do
-                        row[#row + 1] = NFP32_MAP[line:sub(i, i):lower()] or 0
-                    end
-                end
-                pixels[#pixels + 1] = row
-                imgW = math.max(imgW, #row)
-            end
-        end
-    end
-    f.close()
-    if #pixels == 0 or imgW == 0 then return nil end
-    return {pixels = pixels, w = imgW, h = #pixels, path = path}
+    if not image then return nil end
+    local pixels, imgW, imgH = image.loadFile(path)
+    if not pixels or #pixels == 0 or not imgW or imgW == 0 then return nil end
+    return {pixels = pixels, w = imgW, h = imgH or #pixels, path = path}
 end
 
 function D.iconPathsFor(prog)
@@ -436,6 +258,10 @@ function D.loadConfig()
         end
         if cfg.soundEnabled ~= nil then D.soundEnabled = cfg.soundEnabled ~= false end
         if cfg.notificationsEnabled ~= nil then D.notificationsEnabled = cfg.notificationsEnabled ~= false end
+        if cfg.wallpaper and type(cfg.wallpaper) == "string" then
+            D.wallpaperConfigPath = cfg.wallpaper
+        end
+        D.loadWallpaper()
         if cfg.windows then
             for _, cw in ipairs(cfg.windows) do
                 for _, prog in ipairs(D.programs) do
@@ -471,6 +297,7 @@ function D.saveConfig()
             themeName = D.themeName,
             soundEnabled = D.soundEnabled ~= false,
             notificationsEnabled = D.notificationsEnabled ~= false,
+            wallpaper = D.wallpaperConfigPath or D.wallpaperPath,
         }
         for _, w in ipairs(D.windows) do
             if w.visible and not w.modal then
@@ -564,6 +391,75 @@ function D.nextTheme()
     return D.applyTheme(order[idx])
 end
 
+-- ============================================================
+-- WALLPAPER
+-- ============================================================
+D.wallpaper = nil
+D.wallpaperPath = nil
+D.wallpaperPaths = {
+    "/ccos/wallpaper.nfpc",
+    "/ccos/wallpaper.nfp256",
+    "/ccos/wallpaper.nfp",
+    "/disk/wallpaper.nfpc",
+    "/disk/wallpaper.nfp256",
+}
+
+function D.loadWallpaper()
+    local image = _G.ccos_kernel and _G.ccos_kernel.getModule("ccos.image")
+    if not image then return nil end
+    -- Check config override
+    local cfgPath = D.wallpaperConfigPath
+    local tryPaths = {}
+    if cfgPath and cfgPath ~= "" and fs.exists(cfgPath) then
+        tryPaths[#tryPaths + 1] = cfgPath
+    end
+    for _, p in ipairs(D.wallpaperPaths) do tryPaths[#tryPaths + 1] = p end
+    for _, path in ipairs(tryPaths) do
+        if fs.exists(path) and not fs.isDir(path) then
+            local px, w, h = image.loadFile(path)
+            if px and w and h and w > 0 and h > 0 then
+                D.wallpaper = {pixels = px, w = w, h = h}
+                D.wallpaperPath = path
+                return D.wallpaper
+            end
+        end
+    end
+    D.wallpaper = nil
+    return nil
+end
+
+function D.drawWallpaper(by)
+    if not D.wallpaper then
+        R.fillRect(0, 0, R.w, by, K.DESKTOP)
+        return
+    end
+    local wp = D.wallpaper
+    -- Tile or stretch? Stretch to fill desktop area.
+    local scaleX = R.w / wp.w
+    local scaleY = by / wp.h
+    for y = 1, wp.h do
+        local row = wp.pixels[y]
+        if row then
+            local screenY = math.floor((y - 1) * scaleY)
+            local nextY = math.floor(y * scaleY)
+            local drawH = math.max(1, nextY - screenY)
+            for x = 1, wp.w do
+                local color = row[x] or 0
+                local screenX = math.floor((x - 1) * scaleX)
+                local nextX = math.floor(x * scaleX)
+                local drawW = math.max(1, nextX - screenX)
+                R.fillRect(screenX, screenY, drawW, drawH, color)
+            end
+        end
+    end
+end
+
+function D.setWallpaper(path)
+    D.wallpaperConfigPath = path
+    D.loadWallpaper()
+    D.markDirty()
+end
+
 function D.notify(title, message, tone, duration)
     if D.notificationsEnabled == false then return end
     table.insert(D.notifications, {
@@ -646,7 +542,8 @@ function D.callWindow(w, label, handler, ...)
     if not handler then return true end
     local ok, err = pcall(handler, w, ...)
     if not ok then
-        if w then w.errors = (w.errors or 0) + 1 end
+        local kernel = _G.ccos_kernel
+        if kernel then kernel.watchdogTrack(w) end
         D.reportCrash(tostring(label or "Window") .. ": " .. tostring(w and w.title or "?"), err, {window=w})
         return false, err
     end
@@ -655,7 +552,8 @@ end
 
 function D.reportWindowDrawError(w, err, active)
     if w then
-        w.errors = (w.errors or 0) + 1
+        local kernel = _G.ccos_kernel
+        if kernel then kernel.watchdogTrack(w) end
         local now = os.clock()
         local message = tostring(err)
         if w._lastDrawCrashMessage == message and now - (w._lastDrawCrashAt or 0) < 5 then
@@ -844,6 +742,8 @@ function D.destroyWindow(w)
         local ok, err = pcall(w.onClose, w)
         if not ok then D.reportCrash("Close: " .. tostring(w.title), err, {window=w}) end
     end
+    local kernel = _G.ccos_kernel
+    if kernel then kernel.watchdogReset(w) end
     for i,v in ipairs(D.windows) do if v.id==w.id then table.remove(D.windows,i); break end end
     D.activeWin=D.windows[#D.windows]; w.visible=false; D.markDirty()
 end
@@ -918,8 +818,8 @@ end
 function D._drawFull()
     R.beginDraw(); local by=R.h-D.taskbarH
 
-    -- Desktop bg
-    R.fillRect(0,0,R.w,by,K.DESKTOP)
+    -- Desktop bg (wallpaper support)
+    D.drawWallpaper(by)
 
     -- Desktop icons (cached layout)
     if R.w ~= D.lastIconCacheW or R.h ~= D.lastIconCacheH then
@@ -1291,122 +1191,163 @@ function D.drop()
 end
 
 -- ============================================================
--- MAIN LOOP
+-- MAIN LOOP — crash resilient (recovers instead of BSOD+reboot)
 -- ============================================================
 function D.run()
-    local ok, err = pcall(function()
-        R.init(); D.loadPrograms(); 
-        -- Show load errors if any
+    local kernel = _G.ccos_kernel
+
+    -- Boot phase: fatal on failure
+    local bootOk, bootErr = pcall(function()
+        R.init(); D.loadPrograms()
         if D.loadErrors and #D.loadErrors > 0 then
-            for _, err in ipairs(D.loadErrors) do
-                D.showError("Load Error: " .. err.name, err.error)
+            for _, le in ipairs(D.loadErrors) do
+                D.showError("Load Error: " .. le.name, le.error)
             end
         end
-        D.loadConfig(); local running=true; local lastTimer=nil; D.markDirty()
-        while running do
-            D.drawAll()
-            if lastTimer then os.cancelTimer(lastTimer) end
-            lastTimer = os.startTimer(1)
-            local e,a,b,c,d=os.pullEvent()
-            -- Background tasks
-            for _, task in ipairs(D.bgTasks or {}) do
-                local okTask, taskErr = pcall(task, e, a, b, c, d)
-                if not okTask then D.reportCrash("Background task", taskErr) end
-            end
-            if e=="timer" then
-                D.pruneNotifications()
-                local t=os.time and os.time() or 0; local h=math.floor(t); local m=math.floor((t-h)*60); local nc=string.format("%02d:%02d",h,m); if nc~=D.clock then D.clock=nc; D.markClockDirty() end
-            end
-            if e=="mouse_click" then D.mouse.x=b; D.mouse.y=c; D.click(b,c,a)
-            elseif e=="mouse_double_click" then D.mouse.x=b; D.mouse.y=c; local w=D.winAt(b,c); if w then D.bringToFront(w); if w.onDoubleClick then D.callWindow(w, "Double click", w.onDoubleClick, b-w.cx-3, c-w.cy-18) end end
-            elseif e=="mouse_drag" then D.mouse.x=b; D.mouse.y=c; D.drag(b,c)
-            elseif e=="mouse_up" then D.drop()
-            elseif e=="mouse_scroll" then
-                D.mouse.x=b; D.mouse.y=c
-                if D.startMenuOpen then
-                    local mw, mh, my2, sx, innerY, innerH, maxVisible, totalItems, itemH, pad, needsScroll = D._startMenuMetrics()
-                    if needsScroll then
-                        if a < 0 then
-                            D.startMenuScroll = math.max(0, D.startMenuScroll - math.floor(maxVisible/3))
-                        else
-                            D.startMenuScroll = math.min(totalItems - maxVisible, D.startMenuScroll + math.floor(maxVisible/3))
-                        end
-                        D.markDirty()
+        D.loadConfig()
+        D.loadWallpaper()
+    end)
+    if not bootOk then
+        if R and R.bsod then R.bsod("0xDEADCC0S", tostring(bootErr)) end
+        os.pullEvent("key")
+        return
+    end
+
+    D.markDirty()
+    local lastTimer = nil
+
+    -- Event loop wrapped in a restartable pcall: a crash logs + recovers.
+    while true do
+        local loopOk, loopErr = pcall(function()
+            while true do
+                D.drawAll()
+                if lastTimer then os.cancelTimer(lastTimer) end
+                lastTimer = os.startTimer(1)
+                local e,a,b,c,d = os.pullEvent()
+                -- Background tasks (each isolated)
+                for _, task in ipairs(D.bgTasks or {}) do
+                    local okTask, taskErr = pcall(task, e, a, b, c, d)
+                    if not okTask then D.reportCrash("Background task", taskErr) end
+                end
+                if e=="timer" then
+                    -- Let the kernel consume its own timers first
+                    if not (kernel and kernel.handleTimer(a)) then
+                        D.pruneNotifications()
+                        local t=os.time and os.time() or 0
+                        local h=math.floor(t); local m=math.floor((t-h)*60)
+                        local nc=string.format("%02d:%02d",h,m)
+                        if nc~=D.clock then D.clock=nc; D.markClockDirty() end
                     end
-                else
-                    local handled = false
-                    local w = D.winAt(b, c)
-                    if w and w.onScroll then
-                        D.bringToFront(w)
-                        handled = true
-                        D.callWindow(w, "Scroll", w.onScroll, a, b - w.cx - 3, c - w.cy - 18)
-                    end
-                    if not handled then
-                        -- Desktop icon scroll
-                        local by = R.h - D.taskbarH
-                        local totalRows = math.ceil(#D.programs / math.max(1, math.floor((R.w - 10) / 58)))
-                        local visibleRows = math.max(1, math.floor((by - 8) / 50))
-                        if totalRows > visibleRows then
+                elseif e=="mouse_click" then D.mouse.x=b; D.mouse.y=c; D.click(b,c,a)
+                elseif e=="mouse_double_click" then
+                    D.mouse.x=b; D.mouse.y=c; local w=D.winAt(b,c)
+                    if w then D.bringToFront(w)
+                        if w.onDoubleClick then D.callWindow(w, "Double click", w.onDoubleClick, b-w.cx-3, c-w.cy-18) end end
+                elseif e=="mouse_drag" then D.mouse.x=b; D.mouse.y=c; D.drag(b,c)
+                elseif e=="mouse_up" then D.drop()
+                elseif e=="mouse_scroll" then
+                    D.mouse.x=b; D.mouse.y=c
+                    if D.startMenuOpen then
+                        local mw, mh, my2, sx, innerY, innerH, maxVisible, totalItems, itemH, pad, needsScroll = D._startMenuMetrics()
+                        if needsScroll then
                             if a < 0 then
-                                D.iconScrollY = math.max(0, D.iconScrollY - 1)
+                                D.startMenuScroll = math.max(0, D.startMenuScroll - math.floor(maxVisible/3))
                             else
-                                D.iconScrollY = math.min(totalRows - visibleRows, D.iconScrollY + 1)
+                                D.startMenuScroll = math.min(totalItems - maxVisible, D.startMenuScroll + math.floor(maxVisible/3))
                             end
-                            D.rebuildIconCache()
                             D.markDirty()
                         end
+                    else
+                        local handled = false
+                        local w = D.winAt(b, c)
+                        if w and w.onScroll then
+                            D.bringToFront(w); handled = true
+                            D.callWindow(w, "Scroll", w.onScroll, a, b - w.cx - 3, c - w.cy - 18)
+                        end
+                        if not handled then
+                            local by = R.h - D.taskbarH
+                            local totalRows = math.ceil(#D.programs / math.max(1, math.floor((R.w - 10) / 58)))
+                            local visibleRows = math.max(1, math.floor((by - 8) / 50))
+                            if totalRows > visibleRows then
+                                if a < 0 then D.iconScrollY = math.max(0, D.iconScrollY - 1)
+                                else D.iconScrollY = math.min(totalRows - visibleRows, D.iconScrollY + 1) end
+                                D.rebuildIconCache(); D.markDirty()
+                            end
+                        end
+                    end
+                elseif e=="key" then
+                    local consumedKey = false
+                    if isCtrlKey(a) then
+                        D.ctrlDown = true; consumedKey = true
+                    elseif D.ctrlDown and a == keys.space then
+                        D.inputLayout = D.inputLayout == "RU" and "EN" or "RU"
+                        D.skipNextCharAt = os.clock(); D.markDirty(); consumedKey = true
+                    elseif D.ctrlDown and a == keys.q then
+                        -- Ctrl+Q: force-quit the active window (interruption)
+                        if kernel then kernel.forceQuit() end
+                        D.skipNextCharAt = os.clock(); consumedKey = true
+                    elseif D.ctrlDown and a == keys.r then
+                        -- Ctrl+R: rescue (close all windows, reload programs)
+                        if kernel then kernel.rescue("user request") end
+                        D.skipNextCharAt = os.clock(); consumedKey = true
+                    end
+                    if consumedKey then
+                        -- handled by desktop input layer
+                    elseif D.startMenuOpen then
+                        local mw, mh, my, sx, innerY, innerH, maxVisible, totalItems, itemH, pad, needsScroll = D._startMenuMetrics()
+                        if a==keys.up then
+                            D.startMenuSel = math.max(1, D.startMenuSel - 1)
+                            if D.startMenuSel <= D.startMenuScroll + 1 then D.startMenuScroll = math.max(0, D.startMenuSel - 1) end
+                            D.markDirty()
+                        elseif a==keys.down then
+                            D.startMenuSel = math.min(totalItems, D.startMenuSel + 1)
+                            if D.startMenuSel > D.startMenuScroll + maxVisible then D.startMenuScroll = math.min(totalItems - maxVisible, D.startMenuSel - maxVisible) end
+                            D.markDirty()
+                        elseif a==keys.enter then
+                            local idx = D.startMenuSel
+                            D.startMenuOpen=false; D.startMenuScroll=0; D.markDirty()
+                            if idx<=#D.programs then D.safeRun(D.programs[idx].run)
+                            elseif idx==#D.programs+1 then os.reboot()
+                            elseif idx==#D.programs+2 then os.shutdown() end
+                        elseif a==keys.escape then
+                            D.startMenuOpen=false; D.startMenuScroll=0; D.markDirty()
+                        end
+                    elseif D.activeWin and D.activeWin.onKey then
+                        D.callWindow(D.activeWin, "Key", D.activeWin.onKey, a, nil)
+                    end
+                elseif e=="key_up" then
+                    if isCtrlKey(a) then D.ctrlDown = false end
+                elseif e=="char" then
+                    if D.skipNextCharAt and os.clock() - D.skipNextCharAt < 0.15 then
+                        D.skipNextCharAt = nil
+                    elseif not D.startMenuOpen and D.activeWin and D.activeWin.onKey then
+                        D.skipNextCharAt = nil
+                        D.callWindow(D.activeWin, "Char", D.activeWin.onKey, nil, D.translateChar(a))
                     end
                 end
-            elseif e=="key" then
-                local consumedKey = false
-                if isCtrlKey(a) then
-                    D.ctrlDown = true
-                    consumedKey = true
-                elseif D.ctrlDown and a == keys.space then
-                    D.inputLayout = D.inputLayout == "RU" and "EN" or "RU"
-                    D.skipNextCharAt = os.clock()
-                    D.markDirty()
-                    consumedKey = true
-                end
-                if consumedKey then
-                    -- handled by desktop input layer
-                elseif D.startMenuOpen then
-                    local mw, mh, my, sx, innerY, innerH, maxVisible, totalItems, itemH, pad, needsScroll = D._startMenuMetrics()
-                    if a==keys.up then
-                        D.startMenuSel = math.max(1, D.startMenuSel - 1)
-                        if D.startMenuSel <= D.startMenuScroll + 1 then D.startMenuScroll = math.max(0, D.startMenuSel - 1) end
-                        D.markDirty()
-                    elseif a==keys.down then
-                        D.startMenuSel = math.min(totalItems, D.startMenuSel + 1)
-                        if D.startMenuSel > D.startMenuScroll + maxVisible then D.startMenuScroll = math.min(totalItems - maxVisible, D.startMenuSel - maxVisible) end
-                        D.markDirty()
-                    elseif a==keys.enter then
-                        local idx = D.startMenuSel
-                        D.startMenuOpen=false; D.startMenuScroll=0; D.markDirty()
-                        if idx<=#D.programs then D.safeRun(D.programs[idx].run)
-                        elseif idx==#D.programs+1 then os.reboot()
-                        elseif idx==#D.programs+2 then os.shutdown() end
-                    elseif a==keys.escape then
-                        D.startMenuOpen=false; D.startMenuScroll=0; D.markDirty()
-                    end
-                elseif D.activeWin and D.activeWin.onKey then D.callWindow(D.activeWin, "Key", D.activeWin.onKey, a, nil) end
-            elseif e=="key_up" then
-                if isCtrlKey(a) then D.ctrlDown = false end
-            elseif e=="char" then
-                if D.skipNextCharAt and os.clock() - D.skipNextCharAt < 0.15 then
-                    D.skipNextCharAt = nil
-                elseif not D.startMenuOpen and D.activeWin and D.activeWin.onKey then
-                    D.skipNextCharAt = nil
-                    D.callWindow(D.activeWin, "Char", D.activeWin.onKey, nil, D.translateChar(a))
+                -- Periodic watchdog cleanup of dead windows
+                if kernel and D.windows then
+                    local ids = {}
+                    for _, w in ipairs(D.windows) do ids[#ids + 1] = w.id end
+                    kernel.watchdogCleanup(ids)
                 end
             end
+        end)
+        if not loopOk then
+            -- Recover: log, close everything, keep the shell alive.
+            if kernel then
+                kernel.crash("Desktop loop", loopErr, {foreground=true})
+                pcall(kernel.rescue, loopErr)
+            else
+                D.reportCrash("Desktop loop", loopErr)
+            end
+            D.dragWin=nil; D.resizeWin=nil; D.startMenuOpen=false
+            D.startMenuDragY=nil; D.contextMenu=nil; D.dragAppWin=nil
+            D.dragPreviewX=nil; D.dragPreviewY=nil
+            D.bgTasks = {}  -- drop orphaned background tasks from crashed windows
+            D.markDirty()
+            sleep(0.2)
         end
-        R.beginDraw(); R.clear(); R.fillRect(0,0,R.w,R.h,K.BLACK); R.drawText(10,10,"CCOS shutdown.",K.WHITE,K.BLACK); R.endDraw(); sleep(0.3); R.shutdown()
-    end)
-    if not ok then
-        R.bsod("0xDEADCC0S", tostring(err))
-        os.pullEvent("key")
-        os.reboot()
     end
 end
 

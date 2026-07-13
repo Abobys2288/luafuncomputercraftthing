@@ -15,11 +15,11 @@ local FILES = {
     -- Core
     "init.lua",
     "render.lua",
+    "kernel.lua",
+    "image.lua",
     "desktop.lua",
     "api.lua",
     "packages.lua",
-    "kernel.lua",
-    "gui.lua",
     "bootlogo.nfp256",
     -- Icons
     "icons/app.nfp256",
@@ -51,6 +51,7 @@ local FILES = {
     "programs/music/program.lua",
     "programs/fastfetch/program.lua",
     "programs/sites/program.lua",
+    "programs/sitebuilder/program.lua",
     -- Drivers
     "drivers/net.lua",
 }
@@ -188,7 +189,7 @@ local function main()
     box(bx, by, bw, bh, BG, colors.cyan)
     set(BG, colors.cyan)
     term.setCursorPos(bx + 2, by + 1)
-    term.write("  CCOS v3 Installer")
+    term.write("  CCOS v5 Installer")
     set(BG, colors.gray)
     term.setCursorPos(bx + 2, by + 2)
     term.write("  github.com/" .. REPO)

@@ -86,6 +86,19 @@ local function appSettings()
         elseif id == "theme" then
             if D.nextTheme then D.nextTheme() end
             setStatus("Theme: " .. themeLabel(), "ok")
+        elseif id == "wallpaper" then
+            if API and API.chooseFile then
+                API.chooseFile({title="Choose Wallpaper", path="/", extensions={"nfp","nfp256","nfpc"}}, function(path)
+                    if path and path ~= "" then
+                        if D.setWallpaper then D.setWallpaper(path) end
+                        setStatus("Wallpaper: " .. path, "ok")
+                    end
+                end)
+            end
+        elseif id == "clearwall" then
+            if D.setWallpaper then D.setWallpaper(nil) end
+            D.wallpaperConfigPath = nil
+            setStatus("Wallpaper cleared", "ok")
         elseif id == "sound" then
             D.soundEnabled = D.soundEnabled == false
             setStatus("Sound: " .. (D.soundEnabled and "on" or "off"), "ok")
@@ -159,6 +172,8 @@ local function appSettings()
     }
     local lookActions = {
         {id="theme", label="Theme"},
+        {id="wallpaper", label="Wallpaper"},
+        {id="clearwall", label="Clear WP"},
         {id="sound", label="Sound"},
         {id="notify", label="Notify"},
         {id="testnotify", label="Test"},
@@ -184,6 +199,8 @@ local function appSettings()
             drawActionGrid(cx, cy, cw, y, systemActions)
         elseif tab == "appearance" then
             text(cx + 4, cy + y, "Theme: " .. themeLabel(), K.BLACK, K.GRAY, cw - 8); y = y + 12
+            local wp = D.wallpaperPath or (D.wallpaperConfigPath or "none")
+            text(cx + 4, cy + y, "Wallpaper: " .. (D.wallpaper and wp or "none"), K.BLACK, K.GRAY, cw - 8); y = y + 12
             text(cx + 4, cy + y, "Layout: " .. tostring(D.inputLayout or "EN"), K.BLACK, K.GRAY, cw - 8); y = y + 12
             text(cx + 4, cy + y, "Sound: " .. (D.soundEnabled == false and "off" or "on"), K.BLACK, K.GRAY, cw - 8); y = y + 12
             text(cx + 4, cy + y, "Notifications: " .. (D.notificationsEnabled == false and "off" or "on"), K.BLACK, K.GRAY, cw - 8); y = y + 18

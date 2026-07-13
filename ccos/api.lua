@@ -396,4 +396,84 @@ function api.getCrashLogPath()
     return (desktop and desktop.crashLogPath) or "/ccos/logs/crashes.log"
 end
 
+-- ============================================================
+-- KERNEL SERVICES (image, interrupts, timers, crash)
+-- ============================================================
+local function kernel()
+    return _G.ccos_kernel
+end
+
+local function image()
+    local k = kernel()
+    return k and k.getModule("ccos.image")
+end
+
+function api.loadImage(path)
+    local img = image()
+    if not img then return nil, "image library unavailable" end
+    return img.loadFile(path)
+end
+
+function api.loadAnimation(path)
+    local img = image()
+    if not img then return nil, "image library unavailable" end
+    return img.loadAnimation(path)
+end
+
+function api.detectImage(path)
+    local img = image()
+    if not img then return nil end
+    return img.detect(path)
+end
+
+function api.imageModule()
+    return image()
+end
+
+function api.interrupted()
+    local k = kernel()
+    return k and k.interrupted() or false
+end
+
+function api.setInterrupt(flag)
+    local k = kernel()
+    if k then k.setInterrupt(flag) end
+end
+
+function api.try(label, fn, ...)
+    local k = kernel()
+    if k then return k.try(label, fn, ...) end
+    local ok, err = pcall(fn, ...)
+    if not ok then api.showError(label or "Error", tostring(err)) end
+    return ok, err
+end
+
+function api.setTimeout(seconds, fn)
+    local k = kernel()
+    if k then return k.setTimeout(seconds, fn) end
+    return nil
+end
+
+function api.clearTimeout(id)
+    local k = kernel()
+    if k then k.clearTimeout(id) end
+end
+
+function api.forceQuit()
+    local k = kernel()
+    if k then return k.forceQuit() end
+    return false
+end
+
+function api.rescue(reason)
+    local k = kernel()
+    if k then return k.rescue(reason) end
+    return false
+end
+
+function api.crashCount()
+    local k = kernel()
+    return (k and k.crashCount) or 0
+end
+
 return api

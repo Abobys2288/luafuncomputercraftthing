@@ -62,20 +62,27 @@ end
 local function appSites()
     local net = require("ccos.drivers.net")
     local online = net.init()
-    local function lookupSiteServer()
-        if type(net.lookupSiteServer) == "function" then return net.lookupSiteServer() end
-        return (type(net.lookup) == "function" and (net.lookup("siteserver") or net.lookup("server"))) or nil
-    end
-    local serverId = online and lookupSiteServer() or nil
+    local serverId = nil
     local siteName = safeName(os.getComputerLabel() or ("site" .. os.getComputerID()))
     local siteTitle = os.getComputerLabel() or siteName
-    local status = online and (serverId and "Ready" or "No server") or "No modem"
+    local status = online and "Looking for server..." or "No modem"
     local mode = "edit"
     local viewTitle = "Local page"
     local viewLines = {}
     local lines = {}
     local cl, cc, sy = 1, 1, 0
     local lastRegister = 0
+    local busy = false
+
+    -- Async server lookup
+    if online then
+        net.lookupSiteServerAsync(4, function(id)
+            serverId = id
+            status = id and "Ready" or "No server"
+            API.redrawContent(w)
+            if id then publishRegistration(); lastRegister = os.clock() end
+        end)
+    end
 
     if not fs.isDir(PAGE_DIR) then fs.makeDir(PAGE_DIR) end
     if not fs.exists(PAGE_PATH) then
@@ -98,33 +105,6 @@ local function appSites()
         return false
     end
 
-    local function requestSiteResolve(name)
-        if type(net.siteResolve) == "function" then return net.siteResolve(serverId, name) end
-        if type(net.send) ~= "function" or type(net.receive) ~= "function" then return nil end
-        net.send(serverId, {type = "site_resolve", name = name})
-        local _, msg = net.receive(3)
-        if type(msg) == "table" and msg.type == "site_resolve_ok" then return msg.id end
-        return nil
-    end
-
-    local function requestSiteContent(hostId, name)
-        if type(net.siteGet) == "function" then return net.siteGet(hostId, name, "index.txt") end
-        if type(net.send) ~= "function" or type(net.receive) ~= "function" then return nil end
-        net.send(hostId, {type = "site_get", name = name, path = "index.txt"})
-        local _, msg = net.receive(5)
-        if type(msg) == "table" and msg.type == "site_content" then return msg.content, msg.title end
-        return nil
-    end
-
-    local function requestSiteList()
-        if type(net.siteList) == "function" then return net.siteList(serverId) or {} end
-        if type(net.send) ~= "function" or type(net.receive) ~= "function" then return {} end
-        net.send(serverId, {type = "site_list"})
-        local _, msg = net.receive(3)
-        if type(msg) == "table" and msg.type == "site_list_resp" then return msg.sites or {} end
-        return {}
-    end
-
     local function savePage()
         API.writeFile(PAGE_PATH, joinLines(lines))
         status = "Saved " .. PAGE_PATH
@@ -144,43 +124,60 @@ local function appSites()
 
     local function openSite(name)
         if not online then status = "No modem"; API.redrawContent(w); return end
-        serverId = serverId or lookupSiteServer()
         if not serverId then status = "No server"; API.redrawContent(w); return end
+        if busy then return end
+        busy = true
         status = "Resolving " .. name .. "..."
         API.redrawContent(w)
-        local hostId = requestSiteResolve(name)
-        if not hostId then status = "Site not found"; API.redrawContent(w); return end
-        local content, title = requestSiteContent(hostId, name)
-        if content then
-            viewTitle = title or name
-            viewLines = splitLines(content)
-            mode = "view"
-            sy = 0
-            status = "Opened " .. name .. " from " .. hostId
-        else
-            status = "Host did not respond"
-        end
-        API.redrawContent(w)
+        net.siteResolveAsync(serverId, name, function(hostId)
+            if not hostId then
+                status = "Site not found"
+                busy = false
+                API.redrawContent(w)
+                return
+            end
+            status = "Connecting to " .. hostId .. "..."
+            API.redrawContent(w)
+            net.siteGetAsync(hostId, name, "index.txt", function(content, gotTitle)
+                busy = false
+                if content then
+                    viewTitle = gotTitle or name
+                    viewLines = splitLines(content)
+                    mode = "view"
+                    sy = 0
+                    status = "Opened " .. name .. " from " .. hostId
+                else
+                    status = "Host did not respond"
+                end
+                API.redrawContent(w)
+            end)
+        end)
     end
 
     local function listSites()
         if not online then status = "No modem"; API.redrawContent(w); return end
-        serverId = serverId or lookupSiteServer()
         if not serverId then status = "No server"; API.redrawContent(w); return end
-        local sites = requestSiteList()
-        viewLines = {}
-        if #sites == 0 then
-            viewLines = {"No registered sites."}
-        else
-            for _, site in ipairs(sites) do
-                table.insert(viewLines, site.name .. " - " .. (site.title or "") .. " (" .. site.id .. ")")
-            end
-        end
-        viewTitle = "Sites"
-        mode = "view"
-        sy = 0
-        status = #sites .. " site(s)"
+        if busy then return end
+        busy = true
+        status = "Loading site list..."
         API.redrawContent(w)
+        net.siteListAsync(serverId, function(sites)
+            busy = false
+            sites = sites or {}
+            viewLines = {}
+            if #sites == 0 then
+                viewLines = {"No registered sites."}
+            else
+                for _, site in ipairs(sites) do
+                    table.insert(viewLines, site.name .. " - " .. (site.title or "") .. " (" .. site.id .. ")")
+                end
+            end
+            viewTitle = "Sites"
+            mode = "view"
+            sy = 0
+            status = #sites .. " site(s)"
+            API.redrawContent(w)
+        end)
     end
 
     local bgTask = function(e, a, b)

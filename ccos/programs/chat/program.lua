@@ -26,27 +26,42 @@ end
         return
     end
 
-    local serverId = net.lookup("server")
+    local serverId = nil
     local myName = net.hostName
-
-    if not serverId then
-        D.inputDialog("Server", "Enter server ID:", "", function(id)
-            if id then serverId = tonumber(id) end
-        end)
-    end
-
-    if not serverId then
-        D.showError("Chat Error", "No server ID provided.")
-        return
-    end
-
-    net.register(serverId, myName)
-
-    local messages = {"--- Chat started ---", "--- Server: " .. serverId .. " ---"}
+    local messages = {"--- Chat starting ---", "--- Looking for server... ---"}
     local input = ""
     local sy = 0
-    local targetId = serverId
+    local targetId = nil
     local lastHeartbeat = 0
+    local ready = false
+
+    -- Async server lookup (never blocks UI)
+    net.lookupAsync("server", 4, function(id)
+        if not id then
+            table.insert(messages, "--- No server found ---")
+            table.insert(messages, "--- Enter server ID manually ---")
+            D.markDirty()
+            D.inputDialog("Server", "Enter server ID:", "", function(entered)
+                if entered then
+                    serverId = tonumber(entered)
+                    if serverId then
+                        targetId = serverId
+                        ready = true
+                        net.register(serverId, myName)
+                        table.insert(messages, "--- Connected to " .. serverId .. " ---")
+                        D.markDirty()
+                    end
+                end
+            end)
+            return
+        end
+        serverId = id
+        targetId = id
+        ready = true
+        net.register(serverId, myName)
+        table.insert(messages, "--- Server: " .. serverId .. " ---")
+        D.markDirty()
+    end)
 
     local wx, wy, ww, wh = D.fitWin(260, 160)
     local w = D.createWindow("Chat", wx, wy, ww, wh)
@@ -108,7 +123,7 @@ end
         if ch then input=input..ch; D.markContentDirty(w)
         elseif k==keys.backspace then input=popChar(input); D.markContentDirty(w)
         elseif k==keys.enter then
-            if input~="" and targetId then
+            if input~="" and targetId and ready then
                 table.insert(messages,"Me: "..input)
                 net.send(targetId,{type="chat",text=input,from=myName})
                 input=""

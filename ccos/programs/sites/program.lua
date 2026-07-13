@@ -1,5 +1,6 @@
 -- CCOS Program: Sites Browser
 -- Browse simple CCOS text pages hosted by Site Builder computers.
+-- All network operations are async — UI never freezes.
 local D = _G._desktop
 local API = _G.ccos_api
 local R = API and API.getRenderer and API.getRenderer() or _G.ccos_render
@@ -38,12 +39,8 @@ end
 local function appSitesBrowser()
     local net = require("ccos.drivers.net")
     local online = net.init()
-    local function lookupSiteServer()
-        if type(net.lookupSiteServer) == "function" then return net.lookupSiteServer() end
-        return (type(net.lookup) == "function" and (net.lookup("siteserver") or net.lookup("server"))) or nil
-    end
-    local serverId = online and lookupSiteServer() or nil
-    local status = online and (serverId and "Ready" or "No server") or "No modem"
+    local serverId = nil
+    local status = online and "Looking for server..." or "No modem"
     local address = ""
     local title = "Sites"
     local lines = {"Enter a site name or click List."}
@@ -51,6 +48,17 @@ local function appSitesBrowser()
     local siteList = {}
     local sel = 1
     local mode = "page"
+    local busy = false
+
+    -- Async server lookup
+    if online then
+        net.lookupSiteServerAsync(4, function(id)
+            serverId = id
+            status = id and "Ready" or "No server"
+            D.markDirty()
+            if id then listSites() end
+        end)
+    end
 
     local wx, wy, ww, wh = API.fitWindow(310, 190)
     local w = API.window("Sites Browser", wx, wy, ww, wh)
@@ -58,82 +66,69 @@ local function appSitesBrowser()
 
     local function ensureServer()
         if not online then status = "No modem"; return false end
-        serverId = serverId or lookupSiteServer()
         if not serverId then status = "No server"; return false end
         return true
-    end
-
-    local function requestSiteList()
-        if type(net.siteList) == "function" then return net.siteList(serverId) or {} end
-        if type(net.send) ~= "function" or type(net.receive) ~= "function" then return {} end
-        net.send(serverId, {type = "site_list"})
-        local _, msg = net.receive(3)
-        if type(msg) == "table" and msg.type == "site_list_resp" then return msg.sites or {} end
-        return {}
-    end
-
-    local function requestSiteResolve(name)
-        if type(net.siteResolve) == "function" then return net.siteResolve(serverId, name) end
-        if type(net.send) ~= "function" or type(net.receive) ~= "function" then return nil end
-        net.send(serverId, {type = "site_resolve", name = name})
-        local _, msg = net.receive(3)
-        if type(msg) == "table" and msg.type == "site_resolve_ok" then return msg.id end
-        return nil
-    end
-
-    local function requestSiteContent(hostId, name)
-        if type(net.siteGet) == "function" then return net.siteGet(hostId, name, "index.txt") end
-        if type(net.send) ~= "function" or type(net.receive) ~= "function" then return nil end
-        net.send(hostId, {type = "site_get", name = name, path = "index.txt"})
-        local _, msg = net.receive(5)
-        if type(msg) == "table" and msg.type == "site_content" then return msg.content, msg.title end
-        return nil
     end
 
     local function openSite(name)
         name = safeName(name)
         if name == "" then status = "Enter site name"; API.redrawContent(w); return end
         if not ensureServer() then API.redrawContent(w); return end
+        if busy then return end
+        busy = true
         status = "Resolving " .. name .. "..."
         API.redrawContent(w)
-        local hostId = requestSiteResolve(name)
-        if not hostId then
-            status = "Site not found: " .. name
+        net.siteResolveAsync(serverId, name, function(hostId)
+            if not hostId then
+                status = "Site not found: " .. name
+                busy = false
+                API.redrawContent(w)
+                return
+            end
+            status = "Connecting to " .. hostId .. "..."
             API.redrawContent(w)
-            return
-        end
-        local content, gotTitle = requestSiteContent(hostId, name)
-        if content then
-            address = name
-            title = gotTitle or name
-            lines = splitLines(content)
-            sy = 0
-            mode = "page"
-            status = "Opened " .. name .. " from " .. hostId
-        else
-            status = "Host did not respond"
-        end
-        API.redrawContent(w)
+            net.siteGetAsync(hostId, name, "index.txt", function(content, gotTitle)
+                busy = false
+                if content then
+                    address = name
+                    title = gotTitle or name
+                    lines = splitLines(content)
+                    sy = 0
+                    mode = "page"
+                    status = "Opened " .. name .. " from " .. hostId
+                else
+                    status = "Host did not respond"
+                end
+                API.redrawContent(w)
+            end)
+        end)
     end
 
     local function listSites()
         if not ensureServer() then API.redrawContent(w); return end
-        siteList = requestSiteList()
-        table.sort(siteList, function(a, b) return tostring(a.name) < tostring(b.name) end)
-        lines = {}
-        if #siteList == 0 then
-            lines = {"No sites registered."}
-        else
-            for _, site in ipairs(siteList) do
-                table.insert(lines, site.name .. " - " .. (site.title or "") .. " (" .. site.id .. ")")
-            end
-        end
-        mode = "list"
-        title = "Available Sites"
-        sy = 0
-        sel = 1
-        status = #siteList .. " site(s)"
+        if busy then return end
+        busy = true
+        status = "Loading site list..."
         API.redrawContent(w)
+        net.siteListAsync(serverId, function(sites)
+            busy = false
+            siteList = sites or {}
+            table.sort(siteList, function(a, b) return tostring(a.name) < tostring(b.name) end)
+            lines = {}
+            if #siteList == 0 then
+                lines = {"No sites registered."}
+            else
+                for _, site in ipairs(siteList) do
+                    table.insert(lines, site.name .. " - " .. (site.title or "") .. " (" .. site.id .. ")")
+                end
+            end
+            mode = "list"
+            title = "Available Sites"
+            sy = 0
+            sel = 1
+            status = #siteList .. " site(s)"
+            API.redrawContent(w)
+        end)
     end
 
     local function promptOpen()
@@ -146,7 +141,7 @@ local function appSitesBrowser()
         button(cx, cy, 38, "Open")
         if cw >= 86 then button(cx + 42, cy, 38, "List") end
         if cw >= 142 then button(cx + 84, cy, 52, "Refresh") end
-        if cw >= 190 then drawText(cx + 142, cy + 3, status, K.DGRAY, K.GRAY, cw - 146) end
+        if cw >= 190 then drawText(cx + 142, cy + 3, status, busy and K.DBLUE or K.DGRAY, K.GRAY, cw - 146) end
 
         R.drawW95Sunken(cx, cy + 18, math.max(8, cw), 14)
         drawText(cx + 4, cy + 21, address ~= "" and ("site://" .. address) or "site://", K.BLACK, K.GRAY, cw - 8)

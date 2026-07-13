@@ -1,16 +1,11 @@
 -- CCOS Program: Image Viewer
--- Views CCOS .nfp (32-color), .nfp256 (256-color hex), .nfpc (compressed), and .nfpa (animation) images.
+-- Views .nfp, .nfp256, .nfpc, .nfpa images via the shared CCOS image library.
 local API = _G.ccos_api
 local D = _G._desktop
 local R = API and API.getRenderer and API.getRenderer() or _G.ccos_render
 local P = R.PAL
 
 local K = {BLACK=0,WHITE=1,GRAY=2,LGRAY=3,DGRAY=4,DBLUE=19,RED=11,CYAN=7}
-local NFP32_KEYS = "0123456789abcdefghijklmnopqrstuv"
-local NFP32_MAP = {}
-for i = 1, #NFP32_KEYS do
-    NFP32_MAP[NFP32_KEYS:sub(i, i)] = i - 1
-end
 
 local LARGE_FILE_BYTES = 5 * 1024 * 1024
 local HUGE_COMPRESSED_BYTES = 32 * 1024 * 1024
@@ -20,7 +15,6 @@ local SAFE_PREVIEW_ROWS = 96
 
 local function clip(text, w)
     if API and API.clipText then return API.clipText(text, w) end
-    if R.clipText then return R.clipText(text, w) end
     return tostring(text or "")
 end
 
@@ -35,27 +29,6 @@ local function button(x, y, w, text)
     else R.drawButton(x, y, w, 14, false); drawText(x + 4, y + 3, text, K.BLACK, K.GRAY, w - 8) end
 end
 
-local function readLines(path)
-    local f, err = fs.open(path, "r")
-    if not f then return nil, "Cannot open: " .. tostring(err) end
-    local lines = {}
-    while true do
-        local line = f.readLine()
-        if not line then break end
-        table.insert(lines, line)
-    end
-    f.close()
-    return lines
-end
-
-local function readFirstLine(path)
-    local f = fs.open(path, "r")
-    if not f then return nil end
-    local line = f.readLine()
-    f.close()
-    return line
-end
-
 local function safeSize(path)
     local ok, size = pcall(fs.getSize, path)
     return ok and tonumber(size) or 0
@@ -68,668 +41,38 @@ local function formatSize(bytes)
     return string.format("%.2f MB", bytes / (1024 * 1024))
 end
 
-local function parseHeader(line)
-    line = tostring(line or "")
-    if line:match("^!NFPA") then
-        local _, _, w, h, mode, delay, loop, frames, codec = line:find("^!NFPA%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s*(%S*)")
-        if w then
-            return {kind="NFPA", w=tonumber(w) or 0, h=tonumber(h) or 0, mode=tonumber(mode) or 32, delay=tonumber(delay) or 100, loop=tonumber(loop) or 0, frames=tonumber(frames) or 0, codec=codec}
-        end
-    elseif line:match("^!NFPC") then
-        local _, _, w, h, mode, codec = line:find("^!NFPC%s+(%d+)%s+(%d+)%s+(%d+)%s*(%S*)")
-        if w then
-            return {kind="NFPC", w=tonumber(w) or 0, h=tonumber(h) or 0, mode=tonumber(mode) or 32, frames=1, codec=codec}
-        end
-    end
-    return nil
+local function img()
+    return API and API.imageModule and API.imageModule()
 end
 
-local function looksNfp256(line)
-    if not line or #line < 2 or #line % 2 ~= 0 then return false end
-    return line:match("^[0-9a-fA-F]+$") ~= nil
-end
-
-local function parseNfp256(line, stats)
-    local row = {}
-    for i = 1, #line, 2 do
-        local val = tonumber(line:sub(i, i + 1), 16)
-        if val then row[#row + 1] = val else stats.bad = stats.bad + 1 end
-    end
-    return row
-end
-
-local function parseNfp32(line, stats)
-    local row = {}
-    for i = 1, #line do
-        local ch = line:sub(i, i):lower()
-        local val = NFP32_MAP[ch]
-        if val ~= nil then
-            row[#row + 1] = val
-        elseif ch == " " then
-            row[#row + 1] = 0
-        else
-            row[#row + 1] = 0
-            stats.bad = stats.bad + 1
-        end
-    end
-    return row
-end
-
-local B64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-local B64_MAP = {}
-for i = 1, #B64_CHARS do
-    B64_MAP[B64_CHARS:sub(i, i)] = i - 1
-end
-
-local function base64Bytes(text)
-    local out = {}
-    local i = 1
-    while i <= #text do
-        local c1 = B64_MAP[text:sub(i, i)] or 0
-        local c2 = B64_MAP[text:sub(i + 1, i + 1)] or 0
-        local c3s = text:sub(i + 2, i + 2)
-        local c4s = text:sub(i + 3, i + 3)
-        local c3 = B64_MAP[c3s] or 0
-        local c4 = B64_MAP[c4s] or 0
-        local n = c1 * 262144 + c2 * 4096 + c3 * 64 + c4
-        out[#out + 1] = math.floor(n / 65536) % 256
-        if c3s ~= "=" and c3s ~= "" then out[#out + 1] = math.floor(n / 256) % 256 end
-        if c4s ~= "=" and c4s ~= "" then out[#out + 1] = n % 256 end
-        i = i + 4
-    end
-    return out
-end
-
-local function decodeNfpcLegacyLine(line, mode, stats)
-    local pixelLen = (mode == 256) and 2 or 1
-    local row = {}
-    local decode
-    if mode == 256 then
-        decode = function(s)
-            local v = tonumber(s, 16)
-            if v == nil then stats.bad = stats.bad + 1; return 0 end
-            return v
-        end
-    else
-        decode = function(s)
-            local v = NFP32_MAP[s:lower()]
-            if v == nil then stats.bad = stats.bad + 1; return 0 end
-            return v
-        end
-    end
-
-    local i = 1
-    while i <= #line do
-        local ch = line:sub(i, i)
-        if ch == "~" then
-            i = i + 1
-            local pixelStr = line:sub(i, i + pixelLen - 1)
-            i = i + pixelLen
-            local countHex = line:sub(i, i + 1)
-            i = i + 2
-            local count = tonumber(countHex, 16) or 1
-            local val = decode(pixelStr)
-            for _ = 1, count do
-                row[#row + 1] = val
-            end
-        else
-            local pixelStr = line:sub(i, i + pixelLen - 1)
-            row[#row + 1] = decode(pixelStr)
-            i = i + pixelLen
-        end
-    end
-    return row
-end
-
-local function fitRow(row, width)
-    for i = #row + 1, width do row[i] = 0 end
-    for i = width + 1, #row do row[i] = nil end
-    return row
-end
-
-local function blankRow(width)
-    local row = {}
-    for i = 1, width do row[i] = 0 end
-    return row
-end
-
-local function unpackC2Row(payload, mode, width, stats)
-    local bytes = base64Bytes(payload)
-    local row = {}
-    if mode == 256 then
-        for i = 1, math.min(width, #bytes) do
-            row[i] = bytes[i]
-        end
-    else
-        local x = 1
-        for i = 1, #bytes do
-            local b = bytes[i]
-            row[x] = math.floor(b / 16) % 16
-            x = x + 1
-            if x <= width then
-                row[x] = b % 16
-                x = x + 1
-            end
-            if x > width then break end
-        end
-    end
-    if #row < width then stats.bad = stats.bad + 1 end
-    return fitRow(row, width)
-end
-
-local function decodeC2Row(line, mode, width, prevRow, prevFrameRow, stats)
-    if line == "=" then
-        return prevRow or blankRow(width)
-    elseif line == "^" then
-        return prevFrameRow or blankRow(width)
-    elseif line:sub(1, 1) == "!" then
-        return unpackC2Row(line:sub(2), mode, width, stats)
-    end
-    return fitRow(decodeNfpcLegacyLine(line, mode, stats), width)
-end
-
-local function readC3Blob(lines, idx)
-    local line = lines[idx] or ""
-    if line:sub(1, 1) == "@" then
-        local count = tonumber(line:sub(2)) or 0
-        local parts = {}
-        for i = 1, count do
-            parts[i] = lines[idx + i] or ""
-        end
-        return table.concat(parts), idx + count + 1
-    end
-    return line, idx + 1
-end
-
-local function decodeC3FrameBytes(bytes, mode, w, h, prevFlat, stats)
-    local total = w * h
-    local flat = {}
-    local pos, i = 1, 1
-    while pos <= total and i <= #bytes do
-        local cmd = bytes[i] or 0
-        i = i + 1
-        local op = math.floor(cmd / 64)
-        local len = (cmd % 64) + 1
-        if op == 0 then
-            for _ = 1, len do
-                flat[pos] = prevFlat and prevFlat[pos] or 0
-                pos = pos + 1
-                if pos > total then break end
-            end
-        elseif op == 1 then
-            local src = pos - w
-            for _ = 1, len do
-                flat[pos] = flat[src] or 0
-                pos = pos + 1
-                src = src + 1
-                if pos > total then break end
-            end
-        elseif op == 2 then
-            local color = bytes[i] or 0
-            i = i + 1
-            for _ = 1, len do
-                flat[pos] = color
-                pos = pos + 1
-                if pos > total then break end
-            end
-        else
-            for _ = 1, len do
-                flat[pos] = bytes[i] or 0
-                i = i + 1
-                pos = pos + 1
-                if pos > total then break end
+-- Partial read of a large raw image (first N rows) for safe preview.
+local function loadLargeRawPreview(path, ext)
+    local image = img()
+    if not image then return false end
+    local f = fs.open(path, "r")
+    if not f then return false end
+    local rows, maxW, count = {}, 0, 0
+    while count < SAFE_PREVIEW_ROWS do
+        local line = f.readLine()
+        if not line then break end
+        if line ~= "" then
+            local row = (ext == "nfp256") and image.parseNfp256Line(line) or image.parseNfp32Line(line)
+            if #row > 0 then
+                rows[#rows + 1] = row
+                maxW = math.max(maxW, #row)
+                count = count + 1
             end
         end
     end
-    if pos <= total then stats.bad = stats.bad + 1 end
-    for p = 1, total do
-        if flat[p] == nil then flat[p] = 0 end
-        if mode ~= 256 then flat[p] = flat[p] % 32 end
-    end
-
-    local rows = {}
-    local p = 1
-    for y = 1, h do
-        local row = {}
-        for x = 1, w do
-            row[x] = flat[p] or 0
-            p = p + 1
-        end
-        rows[y] = row
-    end
-    return rows, flat
+    f.close()
+    if #rows == 0 or maxW == 0 then return false end
+    return rows, maxW, #rows
 end
 
-local function decodeC3Frame(payload, mode, w, h, prevFlat, stats)
-    return decodeC3FrameBytes(base64Bytes(payload), mode, w, h, prevFlat, stats)
-end
-
-local function decodeC4Frame(payload, mode, w, h, prevFlat, stats)
-    local bytes = base64Bytes(payload)
-    local total = w * h
-    local flat = {}
-    local pos, i = 1, 1
-    while pos <= total and i <= #bytes do
-        local cmd = bytes[i] or 0
-        i = i + 1
-        local op = math.floor(cmd / 64)
-        local len = (cmd % 64) + 1
-        if cmd == 0xFF then
-            local ext = bytes[i] or 0
-            i = i + 1
-            op = math.floor(ext / 64)
-            len = (ext % 64) * 256 + (bytes[i] or 0) + 1
-            i = i + 1
-        end
-        if op == 0 then
-            for _ = 1, len do
-                flat[pos] = prevFlat and prevFlat[pos] or 0
-                pos = pos + 1
-                if pos > total then break end
-            end
-        elseif op == 1 then
-            local src = pos - w
-            for _ = 1, len do
-                flat[pos] = flat[src] or 0
-                pos = pos + 1
-                src = src + 1
-                if pos > total then break end
-            end
-        elseif op == 2 then
-            local color = bytes[i] or 0
-            i = i + 1
-            for _ = 1, len do
-                flat[pos] = color
-                pos = pos + 1
-                if pos > total then break end
-            end
-        else
-            for _ = 1, len do
-                flat[pos] = bytes[i] or 0
-                i = i + 1
-                pos = pos + 1
-                if pos > total then break end
-            end
-        end
-    end
-    if pos <= total then stats.bad = stats.bad + 1 end
-    for p = 1, total do
-        if flat[p] == nil then flat[p] = 0 end
-        if mode ~= 256 then flat[p] = flat[p] % 32 end
-    end
-
-    local rows = {}
-    local p = 1
-    for y = 1, h do
-        local row = {}
-        for x = 1, w do
-            row[x] = flat[p] or 0
-            p = p + 1
-        end
-        rows[y] = row
-    end
-    return rows, flat
-end
-
-local function lzssDecompress(bytes)
-    local out, i = {}, 1
-    while i <= #bytes do
-        local flags = bytes[i] or 0
-        i = i + 1
-        local mask = 1
-        for _ = 1, 8 do
-            if i > #bytes then break end
-            if math.floor(flags / mask) % 2 == 1 then
-                local b1, b2 = bytes[i] or 0, bytes[i + 1] or 0
-                i = i + 2
-                local len = math.floor(b1 / 16) + 3
-                local dist = ((b1 % 16) * 256 + b2) + 1
-                local src = #out - dist + 1
-                for _ = 1, len do
-                    out[#out + 1] = out[src] or 0
-                    src = src + 1
-                end
-            else
-                out[#out + 1] = bytes[i] or 0
-                i = i + 1
-            end
-            mask = mask * 2
-        end
-    end
-    return out
-end
-
-local function readVarUint(bytes, idx)
-    local value, mul = 0, 1
-    while idx <= #bytes do
-        local b = bytes[idx] or 0
-        idx = idx + 1
-        value = value + (b % 128) * mul
-        if b < 128 then break end
-        mul = mul * 128
-    end
-    return value, idx
-end
-
-local function bytesSlice(bytes, idx, len)
-    local out = {}
-    for i = 1, len do
-        out[i] = bytes[idx + i - 1] or 0
-    end
-    return out
-end
-
-local function flatToRows(flat, w, h)
-    local rows = {}
-    local p = 1
-    for y = 1, h do
-        local row = {}
-        for x = 1, w do
-            row[x] = flat[p] or 0
-            p = p + 1
-        end
-        rows[y] = row
-    end
-    return rows
-end
-
-local function copyFlat(prevFlat, total)
-    local flat = {}
-    for i = 1, total do
-        flat[i] = prevFlat and prevFlat[i] or 0
-    end
-    return flat
-end
-
-local function lzwDecompressIndices(bytes, mode, expected, stats)
-    local minCodeSize = (mode == 256) and 8 or 5
-    local clearCode = 2 ^ minCodeSize
-    local eoiCode = clearCode + 1
-    local nextCode = eoiCode + 1
-    local prefixes, suffixes = {}, {}
-    local idx, bitBuffer, bitCount = 1, 0, 0
-    local out = {}
-
-    local function reset()
-        prefixes, suffixes = {}, {}
-        nextCode = eoiCode + 1
-    end
-
-    local function readCode()
-        while bitCount < 12 and idx <= #bytes do
-            bitBuffer = bitBuffer + (bytes[idx] or 0) * (2 ^ bitCount)
-            bitCount = bitCount + 8
-            idx = idx + 1
-        end
-        if bitCount < 12 then return nil end
-        local base = 4096
-        local code = bitBuffer % base
-        bitBuffer = math.floor(bitBuffer / base)
-        bitCount = bitCount - 12
-        return code
-    end
-
-    local function addEntry(prefix, suffix)
-        if nextCode >= 4096 then return end
-        prefixes[nextCode] = prefix
-        suffixes[nextCode] = suffix
-        nextCode = nextCode + 1
-    end
-
-    local function outputCode(code, extra)
-        local stack = {}
-        local cur = code
-        while cur >= clearCode and prefixes[cur] ~= nil do
-            stack[#stack + 1] = suffixes[cur]
-            cur = prefixes[cur]
-        end
-        if cur == nil or cur >= clearCode then
-            if stats then stats.bad = stats.bad + 1 end
-            cur = 0
-        end
-        local first = cur % (mode == 256 and 256 or 32)
-        out[#out + 1] = first
-        for i = #stack, 1, -1 do
-            out[#out + 1] = stack[i]
-        end
-        if extra ~= nil then out[#out + 1] = extra end
-        return first
-    end
-
-    local oldCode, firstChar = nil, nil
-    while #out < expected do
-        local code = readCode()
-        if code == nil then break end
-        if code == clearCode then
-            reset()
-            oldCode, firstChar = nil, nil
-        elseif code == eoiCode then
-            break
-        elseif oldCode == nil then
-            firstChar = outputCode(code)
-            oldCode = code
-        elseif code < nextCode then
-            local currentFirst = outputCode(code)
-            addEntry(oldCode, currentFirst)
-            oldCode, firstChar = code, currentFirst
-        elseif code == nextCode then
-            local currentFirst = outputCode(oldCode, firstChar)
-            addEntry(oldCode, firstChar or 0)
-            oldCode, firstChar = code, currentFirst
-        else
-            if stats then stats.bad = stats.bad + 1 end
-            break
-        end
-    end
-
-    for i = #out + 1, expected do out[i] = 0 end
-    for i = expected + 1, #out do out[i] = nil end
-    return out
-end
-
-local function decodeC5Frames(payload, mode, w, h, frameCount, stats)
-    local stream = lzssDecompress(base64Bytes(payload))
-    local frames, idx, prevFlat = {}, 1, nil
-    for f = 1, frameCount do
-        local len
-        len, idx = readVarUint(stream, idx)
-        local frameBytes = {}
-        for i = 1, len do
-            frameBytes[i] = stream[idx] or 0
-            idx = idx + 1
-        end
-        local rows, flat = decodeC3FrameBytes(frameBytes, mode, w, h, prevFlat, stats)
-        frames[f] = rows
-        prevFlat = flat
-    end
-    return frames
-end
-
-local function decodeC6Frames(payload, mode, w, h, frameCount, stats)
-    local packed = base64Bytes(payload)
-    local method = packed[1] or 0
-    local body = {}
-    for i = 2, #packed do body[#body + 1] = packed[i] end
-    local stream = method == 1 and lzssDecompress(body) or body
-    local total = w * h
-    local frames, idx, prevFlat, prevRows = {}, 1, nil, nil
-
-    for f = 1, frameCount do
-        local kind = stream[idx] or 0
-        idx = idx + 1
-        local flat, rows
-
-        if kind == 0 then
-            if prevFlat then
-                flat = prevFlat
-                rows = prevRows
-            else
-                flat = copyFlat(nil, total)
-                rows = flatToRows(flat, w, h)
-            end
-        else
-            local x, y, rw, rh = 0, 0, w, h
-            if kind == 2 or kind == 4 then
-                x, idx = readVarUint(stream, idx)
-                y, idx = readVarUint(stream, idx)
-                rw, idx = readVarUint(stream, idx)
-                rh, idx = readVarUint(stream, idx)
-            end
-            local payloadLen
-            payloadLen, idx = readVarUint(stream, idx)
-            local frameBytes = bytesSlice(stream, idx, payloadLen)
-            idx = idx + payloadLen
-
-            local expected = math.max(0, rw * rh)
-            local values = (kind == 1 or kind == 2) and lzwDecompressIndices(frameBytes, mode, expected, stats) or frameBytes
-
-            if kind == 1 or kind == 3 then
-                flat = {}
-                for i = 1, total do
-                    local v = values[i] or 0
-                    flat[i] = mode == 256 and v or (v % 32)
-                end
-            else
-                flat = copyFlat(prevFlat, total)
-                local p = 1
-                for yy = 0, rh - 1 do
-                    local base = (y + yy) * w + x + 1
-                    for xx = 0, rw - 1 do
-                        local at = base + xx
-                        if at >= 1 and at <= total then
-                            local v = values[p] or 0
-                            flat[at] = mode == 256 and v or (v % 32)
-                        end
-                        p = p + 1
-                    end
-                end
-            end
-            rows = flatToRows(flat, w, h)
-        end
-
-        frames[f] = rows
-        prevFlat, prevRows = flat, rows
-    end
-    return frames
-end
-
-local function looksNfpc(line)
-    return line and line:match("^!NFPC") ~= nil
-end
-
-local function looksNfpa(line)
-    return line and line:match("^!NFPA") ~= nil
-end
-
-local function parseNfpc(lines, stats)
-    local header = lines[1] or ""
-    local _, _, wStr, hStr, modeStr, codec = header:find("^!NFPC%s+(%d+)%s+(%d+)%s+(%d+)%s*(%S*)")
-    if not modeStr then error("Missing NFPC header") end
-    local mode = tonumber(modeStr)
-    local w = tonumber(wStr) or 0
-    local h = tonumber(hStr) or 0
-
-    local pixels = {}
-    if codec == "C6" then
-        local payload = readC3Blob(lines, 2)
-        local frames = decodeC6Frames(payload, mode, w, h, 1, stats)
-        pixels = frames[1] or {}
-    elseif codec == "C5" then
-        local payload = readC3Blob(lines, 2)
-        local frames = decodeC5Frames(payload, mode, w, h, 1, stats)
-        pixels = frames[1] or {}
-    elseif codec == "C4" then
-        local payload = readC3Blob(lines, 2)
-        pixels = decodeC4Frame(payload, mode, w, h, nil, stats)
-    elseif codec == "C3" then
-        local payload = readC3Blob(lines, 2)
-        pixels = decodeC3Frame(payload, mode, w, h, nil, stats)
-    elseif codec == "C2" then
-        local prevRow = nil
-        for y = 1, h do
-            local row = decodeC2Row(lines[y + 1] or "", mode, w, prevRow, nil, stats)
-            pixels[y] = row
-            prevRow = row
-        end
-    else
-        for lineIdx = 2, #lines do
-            local line = lines[lineIdx]
-            if line ~= "" then
-                pixels[#pixels + 1] = decodeNfpcLegacyLine(line, mode, stats)
-            end
-        end
-    end
-    return pixels, w, h ~= 0 and h or #pixels
-end
-
-local function parseNfpa(lines, stats)
-    local header = lines[1] or ""
-    local _, _, wStr, hStr, modeStr, delayStr, loopStr, framesStr, codec = header:find("^!NFPA%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s*(%S*)")
-    if not framesStr then error("Missing NFPA header") end
-    local mode = tonumber(modeStr)
-    local w = tonumber(wStr) or 0
-    local h = tonumber(hStr)
-    local frameCount = tonumber(framesStr)
-
-    local frames = {}
-    local idx = 2
-    if codec == "C6" then
-        local payload
-        payload, idx = readC3Blob(lines, idx)
-        frames = decodeC6Frames(payload, mode, w, h, frameCount, stats)
-    elseif codec == "C5" then
-        local payload
-        payload, idx = readC3Blob(lines, idx)
-        frames = decodeC5Frames(payload, mode, w, h, frameCount, stats)
-    elseif codec == "C4" then
-        local prevFlat = nil
-        for f = 1, frameCount do
-            local payload
-            payload, idx = readC3Blob(lines, idx)
-            local rows, flat = decodeC4Frame(payload, mode, w, h, prevFlat, stats)
-            frames[f] = rows
-            prevFlat = flat
-        end
-    elseif codec == "C3" then
-        local prevFlat = nil
-        for f = 1, frameCount do
-            local payload
-            payload, idx = readC3Blob(lines, idx)
-            local rows, flat = decodeC3Frame(payload, mode, w, h, prevFlat, stats)
-            frames[f] = rows
-            prevFlat = flat
-        end
-    elseif codec == "C2" then
-        local prevFrame = nil
-        for f = 1, frameCount do
-            local frame = {}
-            local prevRow = nil
-            for y = 1, h do
-                local row = decodeC2Row(lines[idx] or "", mode, w, prevRow, prevFrame and prevFrame[y], stats)
-                idx = idx + 1
-                frame[y] = row
-                prevRow = row
-            end
-            frames[f] = frame
-            prevFrame = frame
-        end
-    else
-        for f = 1, frameCount do
-            local frame = {}
-            for y = 1, h do
-                local line = lines[idx]
-                idx = idx + 1
-                if line and line ~= "" then
-                    frame[y] = decodeNfpcLegacyLine(line, mode, stats)
-                else
-                    frame[y] = {}
-                end
-                if w > 0 then fitRow(frame[y], w) end
-            end
-            frames[f] = frame
-        end
-    end
-    return frames, tonumber(wStr) or 0, tonumber(hStr) or 0, tonumber(delayStr) or 100, tonumber(loopStr) or 0
+local function codecName(header)
+    local c = header and header.codec or ""
+    if c == "" then c = "RLE" end
+    return c
 end
 
 local function appImageViewer(initialPath)
@@ -747,35 +90,28 @@ local function appImageViewer(initialPath)
     -- Animation state
     local animFrames, animFrame, animDelay = {}, 1, 0
     local animTask, animTimer, isAnimation = nil, nil, false
+    local win
 
     local function stopAnimation()
         if animTask then
             for i, t in ipairs(D.bgTasks or {}) do
-                if t == animTask then
-                    table.remove(D.bgTasks, i)
-                    break
-                end
+                if t == animTask then table.remove(D.bgTasks, i); break end
             end
             animTask = nil
         end
-        if animTimer then
-            pcall(os.cancelTimer, animTimer)
-            animTimer = nil
-        end
+        if animTimer then pcall(os.cancelTimer, animTimer); animTimer = nil end
     end
 
     local function startAnimation()
         if not isAnimation or #animFrames <= 1 then return end
         if animTask then return end
-        animTask = function(e, a, b, c, d)
+        animTask = function(e, a)
             if e == "timer" and a == animTimer then
                 animFrame = animFrame + 1
-                if animFrame > #animFrames then
-                    animFrame = 1
-                end
+                if animFrame > #animFrames then animFrame = 1 end
                 pixels = animFrames[animFrame]
                 status = imgW .. "x" .. imgH .. " " .. formatName .. " F" .. animFrame .. "/" .. #animFrames
-                API.redrawContent(win)
+                if win then API.redrawContent(win) end
                 animTimer = os.startTimer(animDelay)
             end
         end
@@ -793,52 +129,17 @@ local function appImageViewer(initialPath)
         formatName = header and header.kind or "Image"
         if header and header.kind == "NFPA" then
             infoLines[#infoLines + 1] = "Animation: " .. header.w .. "x" .. header.h .. " x" .. header.frames
-            infoLines[#infoLines + 1] = "Palette: " .. header.mode .. "  Codec: " .. (header.codec ~= "" and header.codec or "RLE")
+            infoLines[#infoLines + 1] = "Palette: " .. header.mode .. "  Codec: " .. codecName(header)
             infoLines[#infoLines + 1] = "Delay: " .. header.delay .. " ms"
         elseif header and header.kind == "NFPC" then
             infoLines[#infoLines + 1] = "Image: " .. header.w .. "x" .. header.h
-            infoLines[#infoLines + 1] = "Palette: " .. header.mode .. "  Codec: " .. (header.codec ~= "" and header.codec or "RLE")
+            infoLines[#infoLines + 1] = "Palette: " .. header.mode .. "  Codec: " .. codecName(header)
         end
         infoLines[#infoLines + 1] = "File: " .. formatSize(fileSize)
         infoLines[#infoLines + 1] = reason or "Safe preview mode"
         infoLines[#infoLines + 1] = path
         status = (header and (header.kind .. " " .. header.w .. "x" .. header.h) or "Large image") .. " safe preview"
         if API and API.notify then API.notify("Image Viewer", "Opened in safe preview mode", "info", 5) end
-        return true
-    end
-
-    local function loadLargeRawPreview(path, ext)
-        local f = fs.open(path, "r")
-        if not f then return false end
-        local stats = {bad=0}
-        local rows, maxW, count = {}, 0, 0
-        while count < SAFE_PREVIEW_ROWS do
-            local line = f.readLine()
-            if not line then break end
-            if line ~= "" then
-                local row = (ext == "nfp256") and parseNfp256(line, stats) or parseNfp32(line, stats)
-                if #row > 0 then
-                    rows[#rows + 1] = row
-                    maxW = math.max(maxW, #row)
-                    count = count + 1
-                end
-            end
-        end
-        f.close()
-        if #rows == 0 or maxW == 0 then return false end
-        pixels = rows
-        imgW, imgH = maxW, #rows
-        largeMode = true
-        infoLines = {
-            "Large raw image: " .. formatSize(fileSize),
-            "Showing first " .. #rows .. " rows only",
-            "Convert to .nfpc C3 for full viewing",
-            path,
-        }
-        formatName = ext == "nfp256" and "NFP256 preview" or "NFP preview"
-        status = imgW .. "x" .. imgH .. " " .. formatName
-        if stats.bad > 0 then status = status .. " (" .. stats.bad .. " bad chars)" end
-        if API and API.notify then API.notify("Image Viewer", "Large raw image previewed safely", "info", 5) end
         return true
     end
 
@@ -854,9 +155,7 @@ local function appImageViewer(initialPath)
         isAnimation = false
 
         if not path or path == "" then
-            fp = nil
-            status = "No image selected"
-            return false
+            fp = nil; status = "No image selected"; return false
         end
         fp = path
         if not fs.exists(fp) then
@@ -872,8 +171,10 @@ local function appImageViewer(initialPath)
 
         local ext = (fp:match("%.([^%.]+)$") or ""):lower()
         fileSize = safeSize(fp)
-        local first = readFirstLine(fp) or ""
-        local header = parseHeader(first)
+        local header = API.detectImage(fp)
+        local image = img()
+
+        -- Guard: oversized images -> safe preview (no full decode)
         if header then
             local total = (header.w or 0) * (header.h or 0) * math.max(1, header.frames or 1)
             local maxPixels = header.kind == "NFPA" and MAX_ANIM_DECODE_PIXELS or MAX_DECODE_PIXELS
@@ -883,74 +184,59 @@ local function appImageViewer(initialPath)
             if fileSize >= HUGE_COMPRESSED_BYTES then
                 return setInfoOnly(fp, header, "Compressed file is over 32 MB")
             end
-        elseif fileSize >= LARGE_FILE_BYTES then
-            if ext == "nfp" or ext == "nfp256" then
-                if loadLargeRawPreview(fp, ext) then return true end
+        elseif fileSize >= LARGE_FILE_BYTES and (ext == "nfp" or ext == "nfp256") and image then
+            local rows, w, h = loadLargeRawPreview(fp, ext)
+            if rows then
+                pixels = rows; imgW = w; imgH = h; largeMode = true
+                infoLines = {
+                    "Large raw image: " .. formatSize(fileSize),
+                    "Showing first " .. #rows .. " rows only",
+                    "Convert to .nfpc C3 for full viewing",
+                    fp,
+                }
+                formatName = ext == "nfp256" and "NFP256 preview" or "NFP preview"
+                status = imgW .. "x" .. imgH .. " " .. formatName
+                return true
             end
         end
 
-        local lines, err = readLines(fp)
-        if not lines then
-            status = err
-            if not quiet then API.showError("Image Viewer", err) end
+        if not image then
+            status = "Image library unavailable"
+            if not quiet then API.showError("Image Viewer", status) end
             return false
         end
 
-        local is256 = ext == "nfp256"
-        local isNfpc = ext == "nfpc"
-        local isNfpa = ext == "nfpa"
-        if ext ~= "nfp" and ext ~= "nfp256" and ext ~= "nfpc" and ext ~= "nfpa" then
-            for _, line in ipairs(lines) do
-                if line ~= "" then
-                    if looksNfpa(line) then isNfpa = true; break end
-                    if looksNfpc(line) then isNfpc = true; break end
-                    is256 = looksNfp256(line); break
-                end
-            end
-        end
-
-        local stats = {bad=0}
-        if isNfpa then
-            local ok, result, fw, fh, delay, loop = pcall(parseNfpa, lines, stats)
-            if ok and result and #result > 0 then
-                animFrames = result
-                animFrame = 1
+        -- Animation
+        if header and header.kind == "NFPA" then
+            local ok, frames, fw, fh, delay = pcall(image.loadAnimation, fp)
+            if ok and frames and #frames > 0 then
+                animFrames = frames; animFrame = 1
                 pixels = animFrames[1]
-                imgW = fw or 0
-                imgH = fh or #pixels
+                imgW = fw or 0; imgH = fh or #pixels
                 animDelay = (delay or 100) / 1000
                 isAnimation = true
-                formatName = ((lines[1] or ""):find("C6") and "NFPA C6") or ((lines[1] or ""):find("C5") and "NFPA C5") or ((lines[1] or ""):find("C4") and "NFPA C4") or ((lines[1] or ""):find("C3") and "NFPA C3") or ((lines[1] or ""):find("C2") and "NFPA C2" or "NFPA")
+                formatName = "NFPA " .. codecName(header)
                 startAnimation()
             else
-                status = "Invalid NFPA: " .. tostring(result)
-                if not quiet then API.showError("Image Viewer", status) end
-                return false
-            end
-        elseif isNfpc then
-            local ok, result, fw, fh = pcall(parseNfpc, lines, stats)
-            if ok and result then
-                pixels = result
-                imgW = fw or 0
-                imgH = fh or #pixels
-                formatName = ((lines[1] or ""):find("C6") and "NFPC C6") or ((lines[1] or ""):find("C5") and "NFPC C5") or ((lines[1] or ""):find("C4") and "NFPC C4") or ((lines[1] or ""):find("C3") and "NFPC C3") or ((lines[1] or ""):find("C2") and "NFPC C2" or "NFPC")
-            else
-                status = "Invalid NFPC: " .. tostring(result)
+                status = "Invalid NFPA: " .. tostring(frames)
                 if not quiet then API.showError("Image Viewer", status) end
                 return false
             end
         else
-            formatName = is256 and "256-color" or "32-color"
-            for _, line in ipairs(lines) do
-                if line ~= "" then
-                    local row = is256 and parseNfp256(line, stats) or parseNfp32(line, stats)
-                    if #row > 0 then
-                        pixels[#pixels + 1] = row
-                        imgW = math.max(imgW, #row)
-                    end
+            -- Static (NFP / NFP256 / NFPC)
+            local ok, result, w, h = pcall(image.loadFile, fp)
+            if ok and result then
+                pixels = result; imgW = w or 0; imgH = h or #pixels
+                if header and header.kind == "NFPC" then
+                    formatName = "NFPC " .. codecName(header)
+                else
+                    formatName = (header and header.mode == 256) and "256-color" or "32-color"
                 end
+            else
+                status = "Invalid image: " .. tostring(w)
+                if not quiet then API.showError("Image Viewer", status) end
+                return false
             end
-            imgH = #pixels
         end
 
         if imgH == 0 or imgW == 0 then
@@ -960,15 +246,12 @@ local function appImageViewer(initialPath)
         end
 
         status = imgW .. "x" .. imgH .. " " .. formatName
-        if isAnimation then
-            status = status .. " F" .. animFrame .. "/" .. #animFrames
-        end
-        if stats.bad > 0 then status = status .. " (" .. stats.bad .. " bad chars)" end
+        if isAnimation then status = status .. " F" .. animFrame .. "/" .. #animFrames end
         return true
     end
 
     local wx, wy, ww, wh = API.fitWindow(260, 180)
-    local win = API.window("Image Viewer", wx, wy, ww, wh)
+    win = API.window("Image Viewer", wx, wy, ww, wh)
     if not win then return end
 
     if fp then
@@ -1021,9 +304,7 @@ local function appImageViewer(initialPath)
                         x = x + 1
                     else
                         local runEnd = x + 1
-                        while runEnd <= maxX and row[runEnd + ox] == color do
-                            runEnd = runEnd + 1
-                        end
+                        while runEnd <= maxX and row[runEnd + ox] == color do runEnd = runEnd + 1 end
                         R.fillRect(viewX + (x - 1) * scale, screenY, (runEnd - x) * scale, scale, color)
                         x = runEnd
                     end
@@ -1036,7 +317,6 @@ local function appImageViewer(initialPath)
         button(cx, cy, math.min(42, cw), "Open")
         if cw >= 78 then button(cx + 46, cy, 28, "+") end
         if cw >= 110 then button(cx + 78, cy, 28, "-") end
-
         if isAnimation then
             if cw >= 182 then button(cx + 112, cy, 28, "<") end
             if cw >= 214 then button(cx + 144, cy, 28, ">") end
@@ -1127,9 +407,7 @@ local function appImageViewer(initialPath)
         end
     end
 
-    win.onClose = function()
-        stopAnimation()
-    end
+    win.onClose = function() stopAnimation() end
 end
 
 return {name = "Image View", icon = "img", run = appImageViewer}

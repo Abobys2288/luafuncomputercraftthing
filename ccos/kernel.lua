@@ -1,552 +1,280 @@
 --[[
-    CCOS Kernel — Graphics + Mouse
-    ==============================
-    Windows 95-style GUI using CC:Graphics addon.
-    Falls back to text mode if CC:Graphics is not installed.
+    CCOS Kernel — OS core services v5
+    ==================================
+    Working, non-duplicate core. Provides:
+      * Module registry & require() system
+      * Crash supervisor — logs + notifies, NEVER reboots on its own
+      * Watchdog — auto-closes windows that error repeatedly (rogue apps)
+      * Cooperative interrupt flag + force-quit hotkey (Ctrl+Q)
+      * Timer registry for cooperative timeouts
+      * try() wrapper routing errors to the supervisor
+
+    This module does NOT duplicate render.lua's graphics primitives.
+    It is loaded first (before render/desktop) so every later module
+    can use kernel.try / kernel.crash / kernel.require.
 ]]
 
 local kernel = {}
 
--- Detect capabilities
-kernel.hasGraphics = term.setGraphicsMode ~= nil
-kernel.isColor = term.isColor and term.isColor() or false
-
--- W95 palette indices (for graphics mode 2) — 0-based for setPixel
-kernel.PAL = {
-    BLACK = 0, WHITE = 1,
-    GRAY = 2, LIGHT_GRAY = 3,
-    DARK_GRAY = 4,
-    BLUE = 5, DARK_BLUE = 6,
-    CYAN = 7, LIGHT_BLUE = 8,
-    GREEN = 9, DARK_GREEN = 10,
-    RED = 11, DARK_RED = 12,
-    YELLOW = 13, ORANGE = 14,
-    BROWN = 15, PURPLE = 16,
-    PINK = 17,
-    DARK_TITLE = 18,      -- 64,64,64
-    W95_TITLE_BLUE = 19,   -- 0,84,168 active title
-    W95_TITLE_INACTIVE = 20,-- 128,158,200
-    PURE_BLUE = 21,        -- 0,0,255
-    ALMOST_WHITE = 22,     -- 240,240,240
-    NEAR_BLACK = 23,       -- 32,32,32
-    MID_GRAY = 24,         -- 160,160,160
-    W95_BUTTON_FACE = 25,  -- 200,200,200
-    W95_BUTTON_HI = 26,    -- 248,248,248
-    DEEP_NAVY = 27,        -- 0,0,64
-    W95_BTNFACE_DARK = 28, -- 48,48,48
-    DARK_GREEN_BG = 29,    -- 0,128,0 desktop bg
-    W95_DESKTOP = 30,      -- 0,128,128 teal
-    LIGHT_BG = 31,         -- 192,192,192 window bg
-}
-
--- W95 style colors (RGB for palette mode 2)
-kernel.PALETTE = {
-    {0, 0, 0},           -- 0  BLACK
-    {255, 255, 255},     -- 1  WHITE
-    {192, 192, 192},     -- 2  GRAY (W95 window bg)
-    {224, 224, 224},     -- 3  LIGHT_GRAY
-    {128, 128, 128},     -- 4  DARK_GRAY
-    {0, 0, 192},         -- 5  BLUE
-    {0, 0, 128},         -- 6  DARK_BLUE (W95 title bar active)
-    {0, 192, 192},       -- 7  CYAN
-    {128, 224, 255},     -- 8  LIGHT_BLUE
-    {0, 192, 0},         -- 9  GREEN
-    {0, 128, 0},         -- 10 DARK_GREEN
-    {255, 0, 0},         -- 11 RED
-    {128, 0, 0},         -- 12 DARK_RED
-    {255, 255, 0},       -- 13 YELLOW
-    {255, 192, 0},       -- 14 ORANGE
-    {128, 64, 0},        -- 15 BROWN
-    {128, 0, 128},       -- 16 PURPLE
-    {255, 128, 255},     -- 17 PINK
-    {64, 64, 64},        -- 18 DARK_TITLE
-    {0, 84, 168},        -- 19 W95_TITLE_BLUE (active title)
-    {128, 158, 200},     -- 20 W95_TITLE_INACTIVE
-    {0, 0, 255},         -- 21 PURE_BLUE
-    {240, 240, 240},     -- 22 ALMOST_WHITE
-    {32, 32, 32},        -- 23 NEAR_BLACK
-    {160, 160, 160},     -- 24 MID_GRAY
-    {200, 200, 200},     -- 25 W95_BUTTON_FACE
-    {248, 248, 248},     -- 26 W95_BUTTON_HIGHLIGHT
-    {0, 0, 64},          -- 27 DEEP_NAVY
-    {48, 48, 48},        -- 28 W95_BTNFACE_DARK
-    {0, 128, 0},         -- 29 DARK_GREEN_BG
-    {0, 128, 128},       -- 30 W95_DESKTOP (teal)
-    {192, 192, 192},     -- 31 LIGHT_BG
-}
-
-kernel.w, kernel.h = 0, 0
-kernel.display = term
-kernel.mode = 0  -- 0=text, 1=16col, 2=256col
+-- ============================================================
+-- State
+-- ============================================================
+kernel.crashLogPath = "/ccos/logs/crashes.log"
+kernel.crashCount = 0
+kernel._modules = {}
+kernel._timers = {}
+kernel._interrupted = false
+kernel._watchdog = {}      -- [winId] = {errors=, lastAt=, killed=}
+kernel.WATCHDOG_THRESHOLD = 8   -- errors before auto-close
+kernel.WATCHDOG_WINDOW = 6      -- seconds within which errors accumulate
 
 -- ============================================================
--- DISPLAY INIT
+-- Module registry / require
 -- ============================================================
-function kernel.initDisplay()
-    if kernel.hasGraphics then
-        local best = term
-        local bw, bh = term.getSize(1)
-        local sides = {"top","bottom","left","right","front","back"}
-        for _, s in ipairs(sides) do
-            local ok, m = pcall(peripheral.wrap, s)
-            if ok and m and m.setGraphicsMode then
-                pcall(function() m.setTextScale(1) end)
-                local w, h = m.getSize(1)
-                if w * h > bw * bh then
-                    best = m; bw = w; bh = h
+local function resolvePath(name)
+    local path = name:gsub("%.", "/")
+    return {
+        "/" .. path .. ".lua",
+        "/" .. path .. "/init.lua",
+        "/ccos/" .. path .. ".lua",
+        "/ccos/" .. path .. "/init.lua",
+    }
+end
+
+function kernel.require(name)
+    if kernel._modules[name] then return kernel._modules[name] end
+    for _, cpath in ipairs(resolvePath(name)) do
+        if fs.exists(cpath) then
+            local fn = loadfile(cpath)
+            if fn then
+                local ok, mod = pcall(fn)
+                if ok then
+                    kernel._modules[name] = mod
+                    return mod
                 end
-            end
-        end
-        kernel.display = best
-        kernel.setGraphicsMode(2)
-        kernel.applyPalette()
-        kernel.w, kernel.h = kernel.display.getSize(1)
-    else
-        local sides = {"top","bottom","left","right","front","back"}
-        local best = term
-        local bw, bh = term.getSize()
-        for _, s in ipairs(sides) do
-            local ok, m = pcall(peripheral.wrap, s)
-            if ok and m and m.getSize then
-                pcall(function() m.setTextScale(1) end)
-                local w, h = m.getSize()
-                if w * h > bw * bh then
-                    best = m; bw = w; bh = h
-                end
-            end
-        end
-        kernel.display = best
-        kernel.w = bw
-        kernel.h = bh
-    end
-end
-
-function kernel.setGraphicsMode(mode)
-    if not kernel.hasGraphics then return end
-    local ok = pcall(function() kernel.display.setGraphicsMode(mode) end)
-    if ok then
-        kernel.mode = mode
-        if mode > 0 then
-            local w, h = kernel.display.getSize(1)
-            kernel.w = w
-            kernel.h = h
-        end
-    end
-end
-
-function kernel.applyPalette()
-    if not kernel.hasGraphics or kernel.mode ~= 2 then return end
-    for i, color in ipairs(kernel.PALETTE) do
-        pcall(function()
-            kernel.display.setPaletteColor(i - 1, color[1] / 255, color[2] / 255, color[3] / 255)
-        end)
-    end
-end
-
--- ============================================================
--- PIXEL DRAWING (graphics mode)
--- ============================================================
-function kernel.setPixel(x, y, color)
-    if kernel.mode == 0 then return end
-    pcall(function() kernel.display.setPixel(x - 1, y - 1, color) end)
-end
-
-function kernel.drawLine(x1, y1, x2, y2, color)
-    if kernel.mode == 0 then return end
-    local dx = math.abs(x2 - x1)
-    local dy = math.abs(y2 - y1)
-    local sx = x1 < x2 and 1 or -1
-    local sy = y1 < y2 and 1 or -1
-    local err = dx - dy
-    while true do
-        kernel.setPixel(x1, y1, color)
-        if x1 == x2 and y1 == y2 then break end
-        local e2 = 2 * err
-        if e2 > -dy then err = err - dy; x1 = x1 + sx end
-        if e2 < dx then err = err + dx; y1 = y1 + sy end
-    end
-end
-
-function kernel.fillRect(x, y, w, h, color)
-    if kernel.mode == 0 then return end
-    for row = 0, h - 1 do
-        for col = 0, w - 1 do
-            kernel.setPixel(x + col, y + row, color)
-        end
-    end
-end
-
-function kernel.drawRect(x, y, w, h, color)
-    if kernel.mode == 0 then return end
-    kernel.drawLine(x, y, x + w - 1, y, color)
-    kernel.drawLine(x, y + h - 1, x + w - 1, y + h - 1, color)
-    kernel.drawLine(x, y, x, y + h - 1, color)
-    kernel.drawLine(x + w - 1, y, x + w - 1, y + h - 1, color)
-end
-
--- ============================================================
--- W95-STYLE 3D EFFECTS
--- ============================================================
-function kernel.drawW95Raised(x, y, w, h)
-    if kernel.mode == 0 then return end
-    -- Top/left: light
-    kernel.drawLine(x, y, x + w - 1, y, kernel.PAL.LIGHT_GRAY)
-    kernel.drawLine(x, y, x, y + h - 1, kernel.PAL.LIGHT_GRAY)
-    -- Inner light
-    kernel.drawLine(x + 1, y + 1, x + w - 2, y + 1, kernel.PAL.WHITE)
-    kernel.drawLine(x + 1, y + 1, x + 1, y + h - 2, kernel.PAL.WHITE)
-    -- Bottom/right: dark
-    kernel.drawLine(x + w - 1, y, x + w - 1, y + h - 1, kernel.PAL.DARK_GRAY)
-    kernel.drawLine(x, y + h - 1, x + w - 1, y + h - 1, kernel.PAL.DARK_GRAY)
-    -- Inner dark
-    kernel.drawLine(x + w - 2, y + 1, x + w - 2, y + h - 2, kernel.PAL.GRAY)
-    kernel.drawLine(x + 1, y + h - 2, x + w - 2, y + h - 2, kernel.PAL.GRAY)
-end
-
-function kernel.drawW95Sunken(x, y, w, h)
-    if kernel.mode == 0 then return end
-    kernel.drawLine(x, y, x + w - 1, y, kernel.PAL.DARK_GRAY)
-    kernel.drawLine(x, y, x, y + h - 1, kernel.PAL.DARK_GRAY)
-    kernel.drawLine(x + w - 1, y, x + w - 1, y + h - 1, kernel.PAL.WHITE)
-    kernel.drawLine(x, y + h - 1, x + w - 1, y + h - 1, kernel.PAL.WHITE)
-end
-
-function kernel.drawW95Button(x, y, w, h, pressed)
-    if kernel.mode == 0 then return end
-    kernel.fillRect(x + 2, y + 2, w - 4, h - 4, kernel.PAL.GRAY)
-    if pressed then
-        kernel.drawLine(x, y, x + w - 1, y, kernel.PAL.DARK_GRAY)
-        kernel.drawLine(x, y, x, y + h - 1, kernel.PAL.DARK_GRAY)
-        kernel.drawLine(x + 1, y + 1, x + w - 2, y + 1, kernel.PAL.GRAY)
-        kernel.drawLine(x + 1, y + 1, x + 1, y + h - 2, kernel.PAL.GRAY)
-        kernel.drawLine(x + w - 1, y, x + w - 1, y + h - 1, kernel.PAL.LIGHT_GRAY)
-        kernel.drawLine(x, y + h - 1, x + w - 1, y + h - 1, kernel.PAL.LIGHT_GRAY)
-    else
-        kernel.drawW95Raised(x, y, w, h)
-    end
-end
-
-function kernel.drawW95TitleBar(x, y, w, active)
-    if kernel.mode == 0 then return end
-    local color = active and kernel.PAL.DARK_BLUE or kernel.PAL.GRAY
-    kernel.fillRect(x, y, w, 18, color)
-    -- Blue stripe on active
-    if active then
-        for i = 0, w - 1 do
-            if i % 4 < 2 then
-                kernel.setPixel(x + i, y, kernel.PAL.BLUE)
+                error("Module " .. name .. " failed: " .. tostring(mod), 0)
             end
         end
     end
+    error("Module not found: " .. name, 0)
 end
 
-function kernel.drawW95CloseButton(x, y, pressed)
-    if kernel.mode == 0 then return end
-    kernel.drawW95Button(x, y, 16, 14, pressed)
-    -- X symbol
-    local cx, cy = x + 4, y + 3
-    for i = 0, 7 do
-        kernel.setPixel(cx + i, cy + i, kernel.PAL.BLACK)
-        kernel.setPixel(cx + i + 1, cy + i, kernel.PAL.BLACK)
-        kernel.setPixel(cx + 7 - i, cy + i, kernel.PAL.BLACK)
-        kernel.setPixel(cx + 8 - i, cy + i, kernel.PAL.BLACK)
-    end
+function kernel.setModule(name, mod)
+    kernel._modules[name] = mod
 end
 
-function kernel.drawW95MinButton(x, y, pressed)
-    if kernel.mode == 0 then return end
-    kernel.drawW95Button(x, y, 16, 14, pressed)
-    -- Minus symbol
-    kernel.fillRect(x + 4, y + 6, 8, 2, kernel.PAL.BLACK)
+function kernel.getModule(name)
+    return kernel._modules[name]
 end
 
-function kernel.drawW95MaxButton(x, y, pressed)
-    if kernel.mode == 0 then return end
-    kernel.drawW95Button(x, y, 16, 14, pressed)
-    -- Square symbol
-    kernel.drawRect(x + 4, y + 3, 8, 8, kernel.PAL.BLACK)
-    kernel.fillRect(x + 4, y + 3, 8, 1, kernel.PAL.BLACK)
-end
-
--- ============================================================
--- TEXT (pixel-based for graphics mode)
--- ============================================================
-function kernel.drawText(x, y, text, fg, bg)
-    if kernel.mode == 0 then
-        -- Text mode fallback
-        kernel.display.setCursorPos(x, y)
-        if kernel.isColor then
-            if fg then kernel.display.setTextColor(fg) end
-            if bg then kernel.display.setBackgroundColor(bg) end
-        end
-        kernel.display.write(text)
-        if kernel.isColor then
-            kernel.display.setTextColor(colors.white)
-            kernel.display.setBackgroundColor(colors.black)
-        end
+-- Install kernel.require as global require (kernel registry takes priority,
+-- then falls back to the previously installed require for non-CCOS paths).
+function kernel.installRequire()
+    if type(_G.require) ~= "function" then
+        _G.require = kernel.require
     else
-        -- Graphics mode — draw pixel text
-        kernel.drawPixelText(x, y, text, fg or kernel.PAL.WHITE, bg)
-    end
-end
-
--- Simple 5x7 pixel font
-function kernel.utf8Chars(text)
-    text = tostring(text or "")
-    local chars = {}
-    local i = 1
-    while i <= #text do
-        local b = text:byte(i) or 0
-        local len = 1
-        if b >= 240 then len = 4
-        elseif b >= 224 then len = 3
-        elseif b >= 192 then len = 2 end
-        table.insert(chars, text:sub(i, i + len - 1))
-        i = i + len
-    end
-    return chars
-end
-
-kernel.CYR_UPPER = {
-    ["а"]="А", ["б"]="Б", ["в"]="В", ["г"]="Г", ["д"]="Д", ["е"]="Е", ["ё"]="Ё",
-    ["ж"]="Ж", ["з"]="З", ["и"]="И", ["й"]="Й", ["к"]="К", ["л"]="Л", ["м"]="М",
-    ["н"]="Н", ["о"]="О", ["п"]="П", ["р"]="Р", ["с"]="С", ["т"]="Т", ["у"]="У",
-    ["ф"]="Ф", ["х"]="Х", ["ц"]="Ц", ["ч"]="Ч", ["ш"]="Ш", ["щ"]="Щ", ["ъ"]="Ъ",
-    ["ы"]="Ы", ["ь"]="Ь", ["э"]="Э", ["ю"]="Ю", ["я"]="Я",
-}
-
-kernel.FONT = {
-    ["A"] = {14, 17, 17, 31, 17, 17, 17},
-    ["B"] = {30, 17, 17, 30, 17, 17, 30},
-    ["C"] = {14, 17, 16, 16, 16, 17, 14},
-    ["D"] = {30, 17, 17, 17, 17, 17, 30},
-    ["E"] = {31, 16, 16, 30, 16, 16, 31},
-    ["F"] = {31, 16, 16, 30, 16, 16, 16},
-    ["G"] = {14, 17, 16, 23, 17, 17, 14},
-    ["H"] = {17, 17, 17, 31, 17, 17, 17},
-    ["I"] = {14, 4, 4, 4, 4, 4, 14},
-    ["J"] = {7, 2, 2, 2, 2, 18, 12},
-    ["K"] = {17, 18, 20, 24, 20, 18, 17},
-    ["L"] = {16, 16, 16, 16, 16, 16, 31},
-    ["M"] = {17, 27, 21, 21, 17, 17, 17},
-    ["N"] = {17, 17, 25, 21, 19, 17, 17},
-    ["O"] = {14, 17, 17, 17, 17, 17, 14},
-    ["P"] = {30, 17, 17, 30, 16, 16, 16},
-    ["Q"] = {14, 17, 17, 17, 21, 18, 13},
-    ["R"] = {30, 17, 17, 30, 20, 18, 17},
-    ["S"] = {14, 17, 16, 14, 1, 17, 14},
-    ["T"] = {31, 4, 4, 4, 4, 4, 4},
-    ["U"] = {17, 17, 17, 17, 17, 17, 14},
-    ["V"] = {17, 17, 17, 17, 17, 10, 4},
-    ["W"] = {17, 17, 17, 21, 21, 27, 17},
-    ["X"] = {17, 17, 10, 4, 10, 17, 17},
-    ["Y"] = {17, 17, 10, 4, 4, 4, 4},
-    ["Z"] = {31, 1, 2, 4, 8, 16, 31},
-    ["0"] = {14, 17, 19, 21, 25, 17, 14},
-    ["1"] = {4, 12, 4, 4, 4, 4, 14},
-    ["2"] = {14, 17, 1, 6, 8, 16, 31},
-    ["3"] = {14, 17, 1, 6, 1, 17, 14},
-    ["4"] = {2, 6, 10, 18, 31, 2, 2},
-    ["5"] = {31, 16, 30, 1, 1, 17, 14},
-    ["6"] = {14, 16, 16, 30, 17, 17, 14},
-    ["7"] = {31, 1, 2, 4, 8, 8, 8},
-    ["8"] = {14, 17, 17, 14, 17, 17, 14},
-    ["9"] = {14, 17, 17, 15, 1, 1, 14},
-    [" "] = {0, 0, 0, 0, 0, 0, 0},
-    ["."] = {0, 0, 0, 0, 0, 0, 4},
-    [":"] = {0, 4, 0, 0, 0, 4, 0},
-    ["-"] = {0, 0, 0, 31, 0, 0, 0},
-    ["/"] = {1, 2, 2, 4, 8, 8, 16},
-    ["\\"] = {16, 8, 8, 4, 2, 2, 1},
-    ["("] = {2, 4, 8, 8, 8, 4, 2},
-    [")"] = {8, 4, 2, 2, 2, 4, 8},
-    ["["] = {14, 8, 8, 8, 8, 8, 14},
-    ["]"] = {14, 2, 2, 2, 2, 2, 14},
-    ["+"] = {0, 4, 4, 31, 4, 4, 0},
-    ["="] = {0, 0, 31, 0, 31, 0, 0},
-    ["_"] = {0, 0, 0, 0, 0, 0, 31},
-    ["!"] = {4, 4, 4, 4, 4, 0, 4},
-    ["?"] = {14, 17, 1, 6, 4, 0, 4},
-    [","] = {0, 0, 0, 0, 0, 4, 8},
-    [";"] = {0, 4, 0, 0, 0, 4, 8},
-    ["'"] = {4, 4, 8, 0, 0, 0, 0},
-    ['"'] = {10, 10, 20, 0, 0, 0, 0},
-    ["#"] = {10, 10, 31, 10, 31, 10, 10},
-    ["%"] = {25, 26, 2, 4, 8, 11, 19},
-    ["*"] = {0, 21, 14, 31, 14, 21, 0},
-    ["<"] = {2, 4, 8, 16, 8, 4, 2},
-    [">"] = {8, 4, 2, 1, 2, 4, 8},
-    ["|"] = {4, 4, 4, 4, 4, 4, 4},
-    ["@"] = {14, 17, 23, 21, 22, 16, 14},
-    ["$"] = {4, 15, 20, 14, 5, 30, 4},
-    ["&"] = {12, 18, 20, 8, 21, 18, 13},
-    ["^"] = {4, 10, 17, 0, 0, 0, 0},
-    ["~"] = {0, 0, 8, 21, 2, 0, 0},
-    ["`"] = {8, 4, 2, 0, 0, 0, 0},
-    ["{"] = {6, 8, 8, 16, 8, 8, 6},
-    ["}"] = {12, 2, 2, 1, 2, 2, 12},
-    -- Cyrillic
-    ["А"]={14,17,17,31,17,17,17}, ["Б"]={31,16,16,30,17,17,30},
-    ["В"]={30,17,17,30,17,17,30}, ["Г"]={31,16,16,16,16,16,16},
-    ["Д"]={14,17,17,17,17,31,17}, ["Е"]={31,16,16,30,16,16,31},
-    ["Ё"]={10,0,31,16,30,16,31},  ["Ж"]={21,21,14,4,14,21,21},
-    ["З"]={30,1,1,14,1,1,30},    ["И"]={17,19,21,21,21,25,17},
-    ["Й"]={10,4,17,19,21,25,17}, ["К"]={17,18,20,24,20,18,17},
-    ["Л"]={7,9,17,17,17,17,17},  ["М"]={17,27,21,21,17,17,17},
-    ["Н"]={17,17,17,31,17,17,17}, ["О"]={14,17,17,17,17,17,14},
-    ["П"]={31,17,17,17,17,17,17}, ["Р"]={30,17,17,30,16,16,16},
-    ["С"]={14,17,16,16,16,17,14}, ["Т"]={31,4,4,4,4,4,4},
-    ["У"]={17,17,10,4,8,16,14},  ["Ф"]={4,14,21,21,14,4,4},
-    ["Х"]={17,17,10,4,10,17,17}, ["Ц"]={17,17,17,17,17,31,1},
-    ["Ч"]={17,17,17,15,1,1,1},   ["Ш"]={17,17,17,21,21,21,31},
-    ["Щ"]={17,17,17,21,21,31,1}, ["Ъ"]={24,8,8,14,9,9,14},
-    ["Ы"]={17,17,17,25,21,21,25}, ["Ь"]={16,16,16,30,17,17,30},
-    ["Э"]={14,17,1,7,1,17,14},   ["Ю"]={17,18,20,28,20,18,17},
-    ["Я"]={15,17,17,15,5,9,17},
-}
-
-function kernel.fontKey(ch)
-    if not ch or ch == "" then return "?" end
-    if #ch == 1 then return ch:upper() end
-    return kernel.CYR_UPPER[ch] or ch
-end
-
-function kernel.drawPixelText(x, y, text, fg, bg)
-    if kernel.mode == 0 then return end
-    local cx = x
-    for _, raw in ipairs(kernel.utf8Chars(text)) do
-        local ch = kernel.fontKey(raw)
-        local glyph = kernel.FONT[ch] or kernel.FONT["?"]
-        for row = 1, 7 do
-            local bits = glyph[row]
-            for col = 4, 0, -1 do
-                if bit32 then
-                    if bit32.band(bit32.rshift(bits, col), 1) == 1 then
-                        kernel.setPixel(cx + (4 - col), y + row - 1, fg)
-                    elseif bg then
-                        kernel.setPixel(cx + (4 - col), y + row - 1, bg)
-                    end
-                else
-                    -- Fallback without bit32
-                    local mask = 2 ^ col
-                    if math.floor(bits / mask) % 2 == 1 then
-                        kernel.setPixel(cx + (4 - col), y + row - 1, fg)
-                    elseif bg then
-                        kernel.setPixel(cx + (4 - col), y + row - 1, bg)
-                    end
-                end
+        local oldReq = _G.require
+        _G.require = function(n)
+            if kernel._modules[n] then return kernel._modules[n] end
+            local ok, mod = pcall(oldReq, n)
+            if ok and mod then
+                kernel._modules[n] = mod
+                return mod
             end
+            return kernel.require(n)
         end
-        cx = cx + 6
     end
 end
 
 -- ============================================================
--- CLEAR / FLIP
+-- Crash supervisor
 -- ============================================================
-function kernel.clear()
-    if kernel.mode > 0 then
-        kernel.display.clear()
-    else
-        kernel.display.clear()
-        kernel.display.setCursorPos(1, 1)
+local function ensureLogDir()
+    local dir = kernel.crashLogPath:match("(.+)/[^/]+")
+    if not dir or dir == "" or fs.isDir(dir) then return end
+    local build = ""
+    for part in dir:gmatch("[^/]+") do
+        build = build .. "/" .. part
+        if not fs.exists(build) then pcall(fs.makeDir, build) end
     end
 end
 
--- ============================================================
--- MOUSE SUPPORT
--- ============================================================
-kernel.mouse = {x = 0, y = 0, down = false}
-
-function kernel.getMousePos()
-    return kernel.mouse.x, kernel.mouse.y
+function kernel.logCrash(source, err)
+    kernel.crashCount = kernel.crashCount + 1
+    pcall(function()
+        ensureLogDir()
+        local f = fs.open(kernel.crashLogPath, "a")
+        if f then
+            local stamp = "day " .. tostring(os.day and os.day() or "?") ..
+                          " " .. tostring(os.time and os.time() or "?")
+            f.writeLine(stamp .. " | " .. tostring(source or "unknown") ..
+                        " | " .. tostring(err or "unknown error"))
+            f.close()
+        end
+    end)
 end
 
-function kernel.isMouseDown()
-    return kernel.mouse.down
-end
-
-function kernel.handleMouseEvent(event)
-    if event[1] == "mouse_click" then
-        kernel.mouse.x = event[3]
-        kernel.mouse.y = event[4]
-        kernel.mouse.down = true
-        return true
-    elseif event[1] == "mouse_up" then
-        kernel.mouse.down = false
-        return true
-    elseif event[1] == "mouse_drag" then
-        kernel.mouse.x = event[3]
-        kernel.mouse.y = event[4]
-        return true
+-- Central crash handler. NEVER reboots. Logs + notifies + optionally
+-- shows an error dialog via the desktop (if available).
+function kernel.crash(source, err, opts)
+    opts = opts or {}
+    kernel.logCrash(source, err)
+    local title = tostring(opts.title or source or "Application Error")
+    local message = tostring(err or "Unknown error")
+    local desktop = _G.desktop or _G._desktop
+    if desktop then
+        local foreground = opts.foreground
+        if foreground == nil then
+            foreground = desktop.isForegroundWindow and desktop.isForegroundWindow(opts.window)
+        end
+        if foreground and desktop.showError then
+            if desktop._drawing and desktop.queueErrorDialog then
+                desktop.queueErrorDialog(title, message)
+            else
+                desktop.showError(title, message, true)
+            end
+        elseif desktop.notify then
+            desktop.notify("Crash Reporter", tostring(source or "Application") .. " failed", "error", 6)
+        end
     end
-    return false
+    return false, err
 end
 
--- ============================================================
--- FS HELPERS
--- ============================================================
-function kernel.listFiles(path)
-    path = path or "/"
-    local ok, list = pcall(fs.list, path)
-    if ok then return list end
-    return {}
-end
-
-function kernel.fileExists(path)
-    return fs.exists(path)
-end
-
-function kernel.isDir(path)
-    return fs.isDir(path)
-end
-
-function kernel.readFile(path)
-    if not fs.exists(path) then return nil end
-    local f = fs.open(path, "r")
-    if not f then return nil end
-    local content = f.readAll()
-    f.close()
-    return content
-end
-
-function kernel.writeFile(path, content)
-    local f = fs.open(path, "w")
-    if not f then return false end
-    f.write(content)
-    f.close()
+-- pcall wrapper that routes failures to the supervisor.
+function kernel.try(label, fn, ...)
+    if type(fn) ~= "function" then return false, "not a function" end
+    local ok, err = pcall(fn, ...)
+    if not ok then
+        kernel.crash(label or "unknown", err)
+        return false, err
+    end
     return true
 end
 
-function kernel.deleteFile(path)
-    if fs.exists(path) then fs.delete(path); return true end
+-- ============================================================
+-- Watchdog — track per-window errors, auto-close rogue windows
+-- ============================================================
+function kernel.watchdogTrack(window)
+    if not window or not window.id then return false end
+    local now = os.clock()
+    local wd = kernel._watchdog[window.id]
+    if not wd then
+        wd = {errors = 0, lastAt = now, killed = false}
+        kernel._watchdog[window.id] = wd
+    end
+    -- Reset counter if last error was long ago (recovered)
+    if now - wd.lastAt > kernel.WATCHDOG_WINDOW then
+        wd.errors = 0
+    end
+    wd.errors = wd.errors + 1
+    wd.lastAt = now
+    window.errors = (window.errors or 0) + 1
+    if wd.errors >= kernel.WATCHDOG_THRESHOLD and not wd.killed then
+        wd.killed = true
+        kernel.logCrash("Watchdog", "Auto-killed window '" ..
+            tostring(window.title or "?") .. "' after " .. wd.errors .. " errors")
+        local desktop = _G.desktop or _G._desktop
+        if desktop and desktop.destroyWindow then
+            pcall(desktop.destroyWindow, window)
+        end
+        if desktop and desktop.notify then
+            pcall(desktop.notify, "Watchdog",
+                "Closed '" .. tostring(window.title or "?") .. "' (kept crashing)", "error", 6)
+        end
+        return true
+    end
     return false
 end
 
-function kernel.makeDir(path)
-    if not fs.exists(path) then fs.makeDir(path); return true end
+function kernel.watchdogReset(window)
+    if window and window.id then kernel._watchdog[window.id] = nil end
+end
+
+function kernel.watchdogCleanup(activeIds)
+    local seen = {}
+    if activeIds then
+        for _, id in ipairs(activeIds) do seen[id] = true end
+    end
+    for id, _ in pairs(kernel._watchdog) do
+        if not seen[id] then kernel._watchdog[id] = nil end
+    end
+end
+
+-- ============================================================
+-- Cooperative interrupt
+-- ============================================================
+function kernel.setInterrupt(flag)
+    kernel._interrupted = flag == true
+end
+
+function kernel.interrupted()
+    return kernel._interrupted
+end
+
+-- Force-quit the active window (bound to Ctrl+Q by the desktop).
+function kernel.forceQuit()
+    local desktop = _G.desktop or _G._desktop
+    if desktop and desktop.activeWin then
+        local w = desktop.activeWin
+        kernel.logCrash("ForceQuit", "User force-quit '" .. tostring(w.title or "?") .. "'")
+        if desktop.destroyWindow then pcall(desktop.destroyWindow, w) end
+        if desktop.markDirty then pcall(desktop.markDirty) end
+        return true
+    end
     return false
 end
 
-function kernel.getDir(path)
-    if not path or path == "/" then return "/" end
-    local parts = {}
-    for part in path:gmatch("[^/]+") do table.insert(parts, part) end
-    if #parts <= 1 then return "/" end
-    table.remove(parts)
-    return "/" .. table.concat(parts, "/")
+-- Recovery: close all windows, reload programs, keep the shell alive.
+function kernel.rescue(reason)
+    kernel.logCrash("Rescue", tostring(reason or "manual"))
+    local desktop = _G.desktop or _G._desktop
+    if not desktop then return false end
+    if desktop.windows then
+        for i = #desktop.windows, 1, -1 do
+            pcall(function() desktop.destroyWindow(desktop.windows[i]) end)
+        end
+    end
+    if desktop.loadPrograms then pcall(desktop.loadPrograms) end
+    if desktop.markDirty then pcall(desktop.markDirty) end
+    if desktop.notify then
+        pcall(desktop.notify, "CCOS", "Recovered from error — all windows closed", "info", 5)
+    end
+    return true
 end
 
-function kernel.getFileName(path)
-    if not path or path == "/" then return "" end
-    local parts = {}
-    for part in path:gmatch("[^/]+") do table.insert(parts, part) end
-    return parts[#parts] or ""
+-- ============================================================
+-- Timer registry (cooperative timeouts)
+-- ============================================================
+function kernel.setTimeout(seconds, fn)
+    local id = os.startTimer(seconds)
+    kernel._timers[id] = fn
+    return id
 end
 
-function kernel.joinPath(base, name)
-    if base == "/" then return "/" .. name end
-    return base .. "/" .. name
+function kernel.clearTimeout(id)
+    kernel._timers[id] = nil
+    pcall(os.cancelTimer, id)
+end
+
+-- Called by the desktop main loop on every "timer" event. Returns
+-- true if the timer was owned by the kernel.
+function kernel.handleTimer(id)
+    local fn = kernel._timers[id]
+    if fn then
+        kernel._timers[id] = nil
+        kernel.try("Timer callback", fn)
+        return true
+    end
+    return false
+end
+
+-- ============================================================
+-- Initialization
+-- ============================================================
+function kernel.init()
+    kernel.installRequire()
+    kernel.setModule("ccos.kernel", kernel)
+    return kernel
 end
 
 return kernel

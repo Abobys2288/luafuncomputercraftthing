@@ -320,6 +320,13 @@ local function appSpeakerPanel(initialPath)
         setStatus(added > 0 and ("Scanned +" .. added) or "No new .dfpwm")
     end
 
+    local function defaultPickerPath()
+        for _, path in ipairs({"/music", "/disk", "/disks", "/"}) do
+            if path == "/" or (fs.exists(path) and fs.isDir(path)) then return path end
+        end
+        return "/"
+    end
+
     local function stopAudio(keepTitle)
         state = "stopped"
         closeStream()
@@ -512,19 +519,49 @@ local function appSpeakerPanel(initialPath)
         setStatus("Volume " .. tostring(math.floor(volume * 100)) .. "%")
     end
 
-    local function promptAdd()
-        D.inputDialog("Add Track", "DFPWM path, folder or URL:", "/music", function(path)
-            if not path or path == "" then return end
-            path = normalizePath(path)
-            if path and not isRemote(path) and fs.exists(path) and fs.isDir(path) then
-                local added = scanDir(path)
-                if added > 0 and savePlaylist then savePlaylist() end
-                setStatus(added > 0 and ("Added +" .. added) or "No .dfpwm in folder")
+    local function addPickedPath(path)
+        if not path or path == "" then return end
+        path = normalizePath(path)
+        if path and not isRemote(path) and fs.exists(path) and fs.isDir(path) then
+            local added = scanDir(path)
+            if added > 0 and savePlaylist then savePlaylist() end
+            setStatus(added > 0 and ("Added +" .. added) or "No .dfpwm in folder")
+        else
+            local ok, err = addTrack(path)
+            if ok then
+                setStatus("Track added")
             else
-                local ok, err = addTrack(path)
-                setStatus(ok and "Track added" or tostring(err))
+                local idx = indexOfTrack(path)
+                if idx then
+                    sel = idx
+                    setStatus("Already in playlist")
+                else
+                    setStatus(tostring(err))
+                end
             end
+        end
+    end
+
+    local function promptUrl()
+        D.inputDialog("Add Stream", "HTTP/HTTPS URL:", "https://", function(path)
+            if not path or path == "" then return end
+            if not tostring(path):match("^https?://") then
+                setStatus("Only HTTP/HTTPS URLs")
+                return
+            end
+            addPickedPath(path)
         end)
+    end
+
+    local function promptAdd()
+        if API and API.chooseFile then
+            API.chooseFile({title="Add DFPWM", path=defaultPickerPath(), extensions={"dfpwm"}, w=320, h=210}, function(path)
+                addPickedPath(path)
+                if API and API.redrawContent and win then API.redrawContent(win) end
+            end)
+        else
+            D.inputDialog("Add Track", "DFPWM path or folder:", "/music", addPickedPath)
+        end
     end
 
     local function drawMeter(x, y, w, pct, fill)
@@ -580,6 +617,7 @@ local function appSpeakerPanel(initialPath)
         elseif id == "prev" then prevTrack()
         elseif id == "next" then nextTrack()
         elseif id == "add" then promptAdd()
+        elseif id == "url" then promptUrl()
         elseif id == "scan" then scanDefaults()
         elseif id == "clear" then clearList()
         elseif id == "vold" then changeVolume(-0.1)
@@ -649,6 +687,7 @@ local function appSpeakerPanel(initialPath)
             x = x + 4
             ctl("add", "Add", 34)
             ctl("scan", "Scan", 40)
+            if cw >= 440 then ctl("url", "URL", 32) end
         end
 
         local volX = math.max(x + 6, cx + cw - 116)
@@ -690,7 +729,7 @@ local function appSpeakerPanel(initialPath)
             drawText(cx + 4, iy + 1, prefix .. idx .. ". " .. fileName(path) .. size, fg, bg, cw - 8)
         end
 
-        drawText(cx + 4, footerY, "Enter=play  Space=pause  A=add  F=scan  +/- volume", K.DGRAY, K.GRAY, cw - 8)
+        drawText(cx + 4, footerY, "Enter=play  Space=pause  A=add  U=url  F=scan  +/- volume", K.DGRAY, K.GRAY, cw - 8)
     end
 
     local function rowAt(mx, my)
@@ -740,6 +779,7 @@ local function appSpeakerPanel(initialPath)
             elseif keys.escape and k == keys.escape then API.close(win) end
         elseif ch then
             if ch == "a" or ch == "A" then promptAdd()
+            elseif ch == "u" or ch == "U" then promptUrl()
             elseif ch == "f" or ch == "F" then scanDefaults()
             elseif ch == "s" or ch == "S" then stopAudio()
             elseif ch == "n" or ch == "N" then nextTrack()

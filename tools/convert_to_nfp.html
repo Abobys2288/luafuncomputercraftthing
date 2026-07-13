@@ -889,6 +889,7 @@
             <label><input id="codecC4" type="radio" name="codec" value="c4"><span>C4</span></label>
             <label><input id="codecC5" type="radio" name="codec" value="c5"><span>C5</span></label>
             <label><input id="codecC6" type="radio" name="codec" value="c6"><span>C6</span></label>
+            <label><input id="codecC7" type="radio" name="codec" value="c7"><span>C7 (max)</span></label>
           </div>
         </div>
         <label class="switch">
@@ -1848,6 +1849,7 @@ const els = {
   codecC4: document.getElementById("codecC4"),
   codecC5: document.getElementById("codecC5"),
   codecC6: document.getElementById("codecC6"),
+  codecC7: document.getElementById("codecC7"),
   quality: document.getElementById("qualityInput"),
   qualityValue: document.getElementById("qualityValue"),
   qualityField: document.getElementById("qualityField"),
@@ -2817,6 +2819,114 @@ function buildC6NfpaOutput(frameIndices, width, height, format, delayMs, loop) {
   ].join("\n");
 }
 
+// ============================================================
+// C7 codec — maximum compression
+//   Lossless: predictor delta + LZW + LZSS
+//   Lossy: 4x4 block quantization (2 colors + 2-bit index) + LZSS
+//   Animation: inter-frame delta + LZW + LZSS
+// ============================================================
+
+function encodeC7LosslessBytes(indices, width, height, mode, previousFrame) {
+  const total = width * height;
+  const mod = mode === 256 ? 256 : 32;
+  const deltas = new Uint8Array(total);
+  if (previousFrame) {
+    for (let i = 0; i < total; i++) {
+      let d = (indices[i] & (mod - 1)) - (previousFrame[i] & (mod - 1));
+      d = ((d % mod) + mod) % mod;
+      if (d > 127) d -= 256;
+      deltas[i] = (d + 256) % 256;
+    }
+  } else {
+    let prev = 0;
+    for (let i = 0; i < total; i++) {
+      const cur = indices[i] & (mod - 1);
+      let d = cur - prev;
+      if (d > 127) d -= mod;
+      if (d < -128) d += mod;
+      deltas[i] = (d + 256) % 256;
+      prev = cur;
+    }
+  }
+  const lzw = lzwCompressIndices(deltas, 256);
+  const result = [0];
+  for (let i = 0; i < lzw.length; i++) result.push(lzw[i]);
+  return new Uint8Array(result);
+}
+
+function encodeC7LossyBytes(indices, width, height, mode) {
+  const mod = mode === 256 ? 256 : 32;
+  const blockW = Math.ceil(width / 4);
+  const blockH = Math.ceil(height / 4);
+  const out = [1];
+  for (let by = 0; by < blockH; by++) {
+    for (let bx = 0; bx < blockW; bx++) {
+      let minC = 255, maxC = 0;
+      for (let py = 0; py < 4; py++) {
+        for (let px = 0; px < 4; px++) {
+          const fx = bx * 4 + px, fy = by * 4 + py;
+          if (fx >= width || fy >= height) continue;
+          const v = indices[fy * width + fx] & (mod - 1);
+          if (v < minC) minC = v;
+          if (v > maxC) maxC = v;
+        }
+      }
+      out.push(minC, maxC);
+      const idxBytes = [0, 0, 0, 0];
+      for (let py = 0; py < 4; py++) {
+        for (let px = 0; px < 4; px++) {
+          const fx = bx * 4 + px, fy = by * 4 + py;
+          let code = 3;
+          if (fx < width && fy < height) {
+            const v = indices[fy * width + fx] & (mod - 1);
+            if (v === minC) code = 0;
+            else if (v === maxC) code = 1;
+            else code = 2;
+          }
+          const bitIdx = py * 4 + px;
+          const byteIdx = Math.floor(bitIdx / 4);
+          const bitOff = (3 - (bitIdx % 4)) * 2;
+          idxBytes[byteIdx] |= code << bitOff;
+        }
+      }
+      for (let i = 0; i < 4; i++) out.push(idxBytes[i]);
+    }
+  }
+  return new Uint8Array(out);
+}
+
+function encodeC7FrameBytes(indices, width, height, mode, previousFrame, lossy) {
+  if (lossy) return encodeC7LossyBytes(indices, width, height, mode);
+  return encodeC7LosslessBytes(indices, width, height, mode, previousFrame);
+}
+
+function buildC7Payload(frameIndices, width, height, mode, lossy) {
+  const stream = [lossy ? 1 : 0];
+  let previousFrame = null;
+  for (const indices of frameIndices) {
+    const frameBytes = encodeC7FrameBytes(indices, width, height, mode, previousFrame, lossy);
+    writeVarUint(stream, frameBytes.length);
+    for (let i = 0; i < frameBytes.length; i++) stream.push(frameBytes[i]);
+    previousFrame = indices;
+  }
+  return bytesToBase64(lzssCompress(new Uint8Array(stream)));
+}
+
+function buildC7NfpcOutput(indices, width, height, format) {
+  const lossy = selectedCompressionMode() === "lossy";
+  const payload = buildC7Payload([indices], width, height, format.mode, lossy);
+  return ["!NFPC " + width + " " + height + " " + format.mode + " C7", ...splitBase64Lines(payload)].join("\n");
+}
+
+function buildC7NfpaOutput(frameIndices, width, height, format, delayMs, loop) {
+  const lossy = selectedCompressionMode() === "lossy";
+  const payload = buildC7Payload(frameIndices, width, height, format.mode, lossy);
+  return [
+    "!NFPA " + width + " " + height + " " + format.mode + " " + delayMs + " " + loop + " " + frameIndices.length + " C7",
+    ...splitBase64Lines(payload)
+  ].join("\n");
+}
+
 function buildC5Payload(frameIndices, width, height) {
   const stream = [];
   let previousFrame = null;
@@ -2873,6 +2983,7 @@ function buildOutput(indices, width, height, format) {
   if (codec === "c3") return buildC3NfpcOutput(indices, width, height, format);
   if (codec === "c4") return buildC4NfpcOutput(indices, width, height, format);
   if (codec === "c5") return buildC5NfpcOutput(indices, width, height, format);
+  if (codec === "c7") return buildC7NfpcOutput(indices, width, height, format);
 
   const c2Output = [
     "!NFPC " + width + " " + height + " " + mode + " C2",
@@ -2881,8 +2992,9 @@ function buildOutput(indices, width, height, format) {
   const c3Output = buildC3NfpcOutput(indices, width, height, format);
   const c4Output = buildC4NfpcOutput(indices, width, height, format);
   const c5Output = buildC5NfpcOutput(indices, width, height, format);
+  const c7Output = buildC7NfpcOutput(indices, width, height, format);
 
-  return shortestOutput([legacyOutput, c2Output, c3Output, c4Output, c5Output]);
+  return shortestOutput([legacyOutput, c2Output, c3Output, c4Output, c5Output, c7Output]);
 }
 
 function buildNfpaOutput(frameIndices, width, height, format, delayMs, loop) {
@@ -2907,6 +3019,7 @@ function buildNfpaOutput(frameIndices, width, height, format, delayMs, loop) {
   if (codec === "c4") return buildC4NfpaOutput(frameIndices, width, height, format, delayMs, loop);
   if (codec === "c5") return buildC5NfpaOutput(frameIndices, width, height, format, delayMs, loop);
   if (codec === "c6") return buildC6NfpaOutput(frameIndices, width, height, format, delayMs, loop);
+  if (codec === "c7") return buildC7NfpaOutput(frameIndices, width, height, format, delayMs, loop);
 
   const c2Lines = ["!NFPA " + width + " " + height + " " + format.mode + " " + delayMs + " " + loop + " " + frameIndices.length + " C2"];
   let previousFrame = null;
@@ -2919,8 +3032,9 @@ function buildNfpaOutput(frameIndices, width, height, format, delayMs, loop) {
   const c4Output = buildC4NfpaOutput(frameIndices, width, height, format, delayMs, loop);
   const c5Output = buildC5NfpaOutput(frameIndices, width, height, format, delayMs, loop);
   const c6Output = buildC6NfpaOutput(frameIndices, width, height, format, delayMs, loop);
+  const c7Output = buildC7NfpaOutput(frameIndices, width, height, format, delayMs, loop);
 
-  return shortestOutput([legacyOutput, c2Output, c3Output, c4Output, c5Output, c6Output]);
+  return shortestOutput([legacyOutput, c2Output, c3Output, c4Output, c5Output, c6Output, c7Output]);
 }
 
 function drawSourcePreview(img, width, height) {
