@@ -469,8 +469,9 @@ end
 -- ============================================================
 -- C7 codec — high-ratio compression
 --   submethod 0: lossless (predictor delta + LZW + LZSS)
---   submethod 1: lossy 4x4 block (2 palette colors + 2-bit index) + LZW + LZSS
+--   submethod 1: lossy v1 4x4 block (2 palette colors + 2-bit index) + LZW + LZSS
 --   submethod 2: lossless + inter-frame delta (for animations)
+--   submethod 3: lossy v2 4x4 block (4 palette colors + 2-bit index, better quality)
 -- ============================================================
 local function lzwDecompress(bytes, mode, expected, stats)
     return lzwDecompressIndices(bytes, mode, expected, stats)
@@ -515,8 +516,7 @@ local function decodeC7Frame(bytes, mode, w, h, prevFlat, stats)
             end
         end
     elseif submethod == 1 then
-        -- Lossy 4x4 block: each block = 2 colors (2 bytes) + 16 × 2-bit indices (4 bytes)
-        -- Body is already LZSS-decompressed; parse blocks directly
+        -- Lossy 4x4 block (v1): 2 colors (2 bytes) + 16 × 2-bit indices (4 bytes) = 6 bytes/block
         local idx = 1
         local blockW = math.ceil(w / 4)
         local blockH = math.ceil(h / 4)
@@ -526,21 +526,61 @@ local function decodeC7Frame(bytes, mode, w, h, prevFlat, stats)
                 local c0 = stream[idx] or 0
                 local c1 = stream[idx + 1] or 0
                 idx = idx + 2
-                -- 4 bytes = 16 × 2-bit indices
                 local i0 = stream[idx] or 0
                 local i1 = stream[idx + 1] or 0
                 local i2 = stream[idx + 2] or 0
                 local i3 = stream[idx + 3] or 0
                 idx = idx + 4
-                local indices = {i0, i1, i2, i3}
+                local blk = {i0, i1, i2, i3}
                 for py = 0, 3 do
                     for px = 0, 3 do
                         local bitIdx = py * 4 + px
                         local byteIdx = math.floor(bitIdx / 4)
                         local bitOff = (3 - (bitIdx % 4)) * 2
-                        local code = math.floor((indices[byteIdx + 1] or 0) / (2 ^ bitOff)) % 4
+                        local code = math.floor((blk[byteIdx + 1] or 0) / (2 ^ bitOff)) % 4
                         local color = code == 0 and c0 or (code == 1 and c1 or
                             (code == 2 and math.floor((c0 + c1) / 2) or 0))
+                        local fx = bx * 4 + px
+                        local fy = by * 4 + py
+                        if fx < w and fy < h then
+                            flat[fy * w + fx + 1] = color
+                        end
+                    end
+                end
+            end
+        end
+        for p = 1, total do
+            if flat[p] == nil then flat[p] = 0 end
+            if mode ~= 256 then flat[p] = flat[p] % 32 end
+        end
+    elseif submethod == 3 then
+        -- Lossy 4x4 block (v2): 4 colors (4 bytes) + 16 × 2-bit indices (4 bytes) = 8 bytes/block
+        -- Better quality: 4 exact colors per block instead of 2 + average
+        local idx = 1
+        local blockW = math.ceil(w / 4)
+        local blockH = math.ceil(h / 4)
+        for by = 0, blockH - 1 do
+            for bx = 0, blockW - 1 do
+                if idx + 7 > #stream then break end
+                local c0 = stream[idx] or 0
+                local c1 = stream[idx + 1] or 0
+                local c2 = stream[idx + 2] or 0
+                local c3 = stream[idx + 3] or 0
+                idx = idx + 4
+                local i0 = stream[idx] or 0
+                local i1 = stream[idx + 1] or 0
+                local i2 = stream[idx + 2] or 0
+                local i3 = stream[idx + 3] or 0
+                idx = idx + 4
+                local blk = {i0, i1, i2, i3}
+                local colors = {c0, c1, c2, c3}
+                for py = 0, 3 do
+                    for px = 0, 3 do
+                        local bitIdx = py * 4 + px
+                        local byteIdx = math.floor(bitIdx / 4)
+                        local bitOff = (3 - (bitIdx % 4)) * 2
+                        local code = math.floor((blk[byteIdx + 1] or 0) / (2 ^ bitOff)) % 4
+                        local color = colors[code + 1] or 0
                         local fx = bx * 4 + px
                         local fy = by * 4 + py
                         if fx < w and fy < h then

@@ -2906,8 +2906,43 @@ function encodeC7LossyBytes(indices, width, height, mode) {
   return new Uint8Array(out);
 }
 
+function encodeC7LossyV2Bytes(indices, width, height, mode) {
+  const mod = mode === 256 ? 256 : 32;
+  const blockW = Math.ceil(width / 4), blockH = Math.ceil(height / 4);
+  const out = [3]; // submethod 3 (lossy v2: 4 colors)
+  for (let by = 0; by < blockH; by++) {
+    for (let bx = 0; bx < blockW; bx++) {
+      const pixels = [];
+      for (let py = 0; py < 4; py++) for (let px = 0; px < 4; px++) {
+        const fx = bx*4+px, fy = by*4+py;
+        if (fx < width && fy < height) pixels.push(indices[fy*width+fx] & (mod-1));
+      }
+      const freq = new Map();
+      for (const v of pixels) freq.set(v, (freq.get(v) || 0) + 1);
+      const sorted = [...freq.entries()].sort((a, b) => b[1] - a[1]);
+      const colors = [sorted[0]?.[0] ?? 0, sorted[1]?.[0] ?? 0, sorted[2]?.[0] ?? 0, sorted[3]?.[0] ?? 0];
+      out.push(colors[0], colors[1], colors[2], colors[3]);
+      const idxBytes = [0,0,0,0];
+      for (let py = 0; py < 4; py++) for (let px = 0; px < 4; px++) {
+        const fx = bx*4+px, fy = by*4+py;
+        let code = 0;
+        if (fx < width && fy < height) {
+          const v = indices[fy*width+fx] & (mod-1);
+          let bestD = Infinity, bestI = 0;
+          for (let ci = 0; ci < 4; ci++) { const d = Math.abs(v - colors[ci]); if (d < bestD) { bestD = d; bestI = ci; } }
+          code = bestI;
+        }
+        const bitIdx = py*4+px, byteIdx = Math.floor(bitIdx/4), bitOff = (3-(bitIdx%4))*2;
+        idxBytes[byteIdx] |= code << bitOff;
+      }
+      for (let i = 0; i < 4; i++) out.push(idxBytes[i]);
+    }
+  }
+  return new Uint8Array(out);
+}
+
 function encodeC7FrameBytes(indices, width, height, mode, previousFrame, lossy) {
-  if (lossy) return encodeC7LossyBytes(indices, width, height, mode);
+  if (lossy) return encodeC7LossyV2Bytes(indices, width, height, mode);
   return encodeC7LosslessBytes(indices, width, height, mode, previousFrame);
 }
 
@@ -2961,7 +2996,7 @@ function c8EncodeInner(indices, width, height, mode, lossy) {
   candidates.push({ method: 5, payload: lzwCompressIndices(indices, mode) });
   candidates.push({ method: 6, payload: lzssCompress(lzwCompressIndices(indices, mode)) });
   candidates.push({ method: 7, payload: encodeC7LosslessBytes(indices, width, height, mode, null) });
-  if (lossy) candidates.push({ method: 8, payload: encodeC7LossyBytes(indices, width, height, mode) });
+  if (lossy) candidates.push({ method: 8, payload: encodeC7LossyV2Bytes(indices, width, height, mode) });
   let best = candidates[0];
   for (const c of candidates) { if (c.payload.length < best.payload.length) best = c; }
   return best;
