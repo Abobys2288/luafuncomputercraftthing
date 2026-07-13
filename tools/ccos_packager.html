@@ -730,6 +730,10 @@
                   <option value="lossy">Lossy (smaller)</option>
                 </select>
               </label>
+              <label class="field" style="flex-direction:row;align-items:center;gap:6px;">
+                <input id="imgBinary" type="checkbox" checked style="width:auto">
+                <span style="color:var(--vscode-text)">Binary format (raw, ~25% smaller)</span>
+              </label>
             </div>
             <div id="imgStatus" class="status ok" style="display:none"></div>
             <canvas id="imgPreview" style="max-width:300px;border:1px solid var(--vscode-line);border-radius:4px;display:none"></canvas>
@@ -1110,6 +1114,7 @@ fileInput.onchange = () => {
 // Package assets
 // ============================================================
 let packageAssets = [];
+let lastBinary = null;
 const assetList = document.getElementById("assetList");
 const assetEmpty = document.getElementById("assetEmpty");
 
@@ -1339,6 +1344,33 @@ function downloadText(name, text) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 500);
+}
+
+function downloadBinary(name, bytes) {
+  const blob = new Blob([bytes], { type: "application/octet-stream" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 500);
+}
+
+function buildBinaryNfpc(w, h, mode, codecByte, lzssPayload) {
+  const header = [0x89, 0x4E, 0x46, 0x43, 1, w & 255, (w >> 8) & 255, h & 255, (h >> 8) & 255, mode % 256, codecByte, 0];
+  const plen = lzssPayload.length;
+  header.push(plen & 255, (plen >> 8) & 255, (plen >> 16) & 255, (plen >> 24) & 255);
+  return new Uint8Array([...header, ...lzssPayload]);
+}
+
+function buildBinaryNfpa(w, h, mode, codecByte, frameCount, delay, loop, flags, transIdx, lzssPayload) {
+  const header = [0x89, 0x4E, 0x46, 0x41, 1, w & 255, (w >> 8) & 255, h & 255, (h >> 8) & 255, mode % 256, codecByte, flags];
+  if (flags & 1) header.push(transIdx);
+  header.push(frameCount & 255, (frameCount >> 8) & 255, delay & 255, (delay >> 8) & 255, loop);
+  const plen = lzssPayload.length;
+  header.push(plen & 255, (plen >> 8) & 255, (plen >> 16) & 255, (plen >> 24) & 255);
+  return new Uint8Array([...header, ...lzssPayload]);
 }
 
 function copyText(text) { return navigator.clipboard.writeText(text); }
@@ -1734,7 +1766,7 @@ function encodeC8Frame(indices, w, h, mode, prevFrame, allowLossy, transIdx) {
   return best;
 }
 
-function encodeC8(frames, w, h, mode, allowLossy) {
+function encodeC8Bytes(frames, w, h, mode, allowLossy) {
   const transIdx = frames.length > 1 ? findTransIdx(frames, mode) : null;
   const stream = [];
   stream.push(1);
@@ -1748,7 +1780,11 @@ function encodeC8(frames, w, h, mode, allowLossy) {
     for (let i = 0; i < best.payload.length; i++) stream.push(best.payload[i]);
     prev = frame;
   }
-  return bytesToBase64(lzssCompress(new Uint8Array(stream)));
+  return lzssCompress(new Uint8Array(stream));
+}
+
+function encodeC8(frames, w, h, mode, allowLossy) {
+  return bytesToBase64(encodeC8Bytes(frames, w, h, mode, allowLossy));
 }
 
 async function convertImage() {
@@ -1770,15 +1806,17 @@ async function convertImage() {
 
   const isAnim = format === "nfpa";
   const useMode = (format === "nfp") ? 32 : 256;
+  const useBinary = document.getElementById("imgBinary").checked;
 
   if (isAnim && file.type === "image/gif") {
     const frames = await extractGifFrames(file, width, height, useMode);
     if (!frames || frames.length === 0) { showImgStatus("Failed to read GIF.", "err"); updateStatusBar("GIF decode failed", "err"); return; }
     const lossy = quality === "lossy";
-    let payload, codecTag, codecLabel;
+    let codecByte = 8, codecLabel;
+    let rawPayload;
     if (codec === "c8" || codec === "auto") {
-      payload = encodeC8(frames, width, height, useMode, lossy);
-      codecTag = "C8"; codecLabel = "C8 " + (lossy ? "auto-lossy" : "lossless");
+      rawPayload = encodeC8Bytes(frames, width, height, useMode, lossy);
+      codecLabel = "C8 " + (lossy ? "auto-lossy" : "lossless");
     } else {
       const stream = [];
       let prev = null;
@@ -1788,12 +1826,18 @@ async function convertImage() {
         for (let i = 0; i < frameBytes.length; i++) stream.push(frameBytes[i]);
         prev = indices;
       }
-      payload = bytesToBase64(lzssCompress(new Uint8Array(stream)));
-      codecTag = "C7"; codecLabel = "C7";
+      rawPayload = lzssCompress(new Uint8Array(stream));
+      codecByte = 7; codecLabel = "C7";
     }
-    const result = "!NFPA " + width + " " + height + " " + useMode + " 100 0 " + frames.length + " " + codecTag + "\n" + splitBase64Lines(payload).join("\n");
-    outEl.value = result;
-    showImgStatus("Animation: " + frames.length + " frame(s), " + new Blob([result]).size + " bytes (" + codecLabel + ")", "ok");
+    if (useBinary) {
+      lastBinary = buildBinaryNfpa(width, height, useMode, codecByte, frames.length, 100, 0, 0, 0, rawPayload);
+      outEl.value = "[Binary] " + lastBinary.length + " bytes — click Download";
+    } else {
+      const payload = bytesToBase64(rawPayload);
+      outEl.value = "!NFPA " + width + " " + height + " " + useMode + " 100 0 " + frames.length + " C" + codecByte + "\n" + splitBase64Lines(payload).join("\n");
+    }
+    const sizeStr = useBinary ? lastBinary.length + " bytes (binary)" : new Blob([outEl.value]).size + " bytes (text)";
+    showImgStatus("Animation: " + frames.length + " frame(s), " + sizeStr + " (" + codecLabel + ")", "ok");
     updateStatusBar("Animation converted (" + codecLabel + ")", "ok");
     drawPreview(frames[0], width, height, useMode, preview);
     return;
@@ -1823,55 +1867,73 @@ async function convertImage() {
 
   // NFPC — pick codec
   const lossy = quality === "lossy";
-  let result, codecLabel;
+  let result, codecLabel, codecByte = 8, rawPayload = null;
 
   if (codec === "auto" || codec === "c8") {
-    const payload = encodeC8([indices], width, height, useMode, lossy);
-    result = "!NFPC " + width + " " + height + " " + useMode + " C8\n" + splitBase64Lines(payload).join("\n");
-    codecLabel = "C8 " + (lossy ? "auto-lossy" : "lossless");
+    rawPayload = encodeC8Bytes([indices], width, height, useMode, lossy);
+    codecByte = 8; codecLabel = "C8 " + (lossy ? "auto-lossy" : "lossless");
   } else if (codec === "c7") {
     const frameBytes = lossy ? encodeC7Lossy(indices, width, height, useMode) : encodeC7Lossless(indices, width, height, useMode, null);
     const stream = [];
     writeVarUint(stream, frameBytes.length);
     for (let i = 0; i < frameBytes.length; i++) stream.push(frameBytes[i]);
-    const payload = bytesToBase64(lzssCompress(new Uint8Array(stream)));
-    result = "!NFPC " + width + " " + height + " " + useMode + " C7\n" + splitBase64Lines(payload).join("\n");
-    codecLabel = "C7 " + (lossy ? "lossy" : "lossless");
+    rawPayload = lzssCompress(new Uint8Array(stream));
+    codecByte = 7; codecLabel = "C7 " + (lossy ? "lossy" : "lossless");
   } else if (codec === "c3") {
-    const payload = bytesToBase64(encodeC3Frame(indices, width, height, useMode));
-    result = "!NFPC " + width + " " + height + " " + useMode + " C3\n" + splitBase64Lines(payload).join("\n");
-    codecLabel = "C3";
+    rawPayload = encodeC3Frame(indices, width, height, useMode);
+    codecByte = 3; codecLabel = "C3";
   } else if (codec === "c4") {
-    const payload = bytesToBase64(encodeC4Frame(indices, width, height, useMode));
-    result = "!NFPC " + width + " " + height + " " + useMode + " C4\n" + splitBase64Lines(payload).join("\n");
-    codecLabel = "C4";
+    rawPayload = encodeC4Frame(indices, width, height, useMode);
+    codecByte = 4; codecLabel = "C4";
   } else if (codec === "c5") {
-    const payload = encodeC5(indices, width, height, useMode);
-    result = "!NFPC " + width + " " + height + " " + useMode + " C5\n" + splitBase64Lines(payload).join("\n");
-    codecLabel = "C5";
+    const stream = [];
+    const c3 = encodeC3Frame(indices, width, height, useMode);
+    writeVarUint(stream, c3.length);
+    for (let i = 0; i < c3.length; i++) stream.push(c3[i]);
+    rawPayload = lzssCompress(new Uint8Array(stream));
+    codecByte = 5; codecLabel = "C5";
   } else if (codec === "c6") {
-    const payload = encodeC6(indices, width, height, useMode);
-    result = "!NFPC " + width + " " + height + " " + useMode + " C6\n" + splitBase64Lines(payload).join("\n");
-    codecLabel = "C6";
+    const lzw = lzwCompress(indices, useMode);
+    const stream = [1];
+    writeVarUint(stream, lzw.length);
+    for (let i = 0; i < lzw.length; i++) stream.push(lzw[i]);
+    const compressed = lzssCompress(new Uint8Array(stream));
+    const packed = [1];
+    for (let i = 0; i < compressed.length; i++) packed.push(compressed[i]);
+    rawPayload = new Uint8Array(packed);
+    codecByte = 6; codecLabel = "C6";
   } else {
-    // Legacy raw
-    const lines = ["!NFPC " + width + " " + height + " " + useMode];
-    for (let y = 0; y < height; y++) {
-      let line = "";
-      for (let x = 0; x < width; x++) {
-        const v = indices[y * width + x];
-        if (useMode === 256) line += v.toString(16).padStart(2, "0");
-        else line += nfp32Keys[v] || "0";
-      }
-      lines.push(line);
-    }
-    result = lines.join("\n");
-    codecLabel = "legacy";
+    // Legacy raw — no LZSS, just raw indices
+    rawPayload = new Uint8Array(indices);
+    codecByte = 0; codecLabel = "legacy";
   }
 
-  outEl.value = result;
-  const size = new Blob([result]).size;
-  showImgStatus("Converted " + width + "x" + height + " " + format + " " + codecLabel + ", " + size + " bytes", "ok");
+  if (useBinary && codecByte > 0) {
+    lastBinary = buildBinaryNfpc(width, height, useMode, codecByte, rawPayload);
+    outEl.value = "[Binary] " + lastBinary.length + " bytes — click Download";
+    showImgStatus("Converted " + width + "x" + height + " " + codecLabel + ", " + lastBinary.length + " bytes (binary)", "ok");
+  } else {
+    if (codecByte === 0) {
+      // Legacy text (no codec byte for binary)
+      const lines = ["!NFPC " + width + " " + height + " " + useMode];
+      for (let y = 0; y < height; y++) {
+        let line = "";
+        for (let x = 0; x < width; x++) {
+          const v = indices[y * width + x];
+          if (useMode === 256) line += v.toString(16).padStart(2, "0");
+          else line += nfp32Keys[v] || "0";
+        }
+        lines.push(line);
+      }
+      result = lines.join("\n");
+    } else {
+      const payload = bytesToBase64(rawPayload);
+      result = "!NFPC " + width + " " + height + " " + useMode + " C" + codecByte + "\n" + splitBase64Lines(payload).join("\n");
+    }
+    outEl.value = result;
+    const size = new Blob([result]).size;
+    showImgStatus("Converted " + width + "x" + height + " " + codecLabel + ", " + size + " bytes", "ok");
+  }
   updateStatusBar("Image converted (" + codecLabel + ")", "ok");
   drawPreview(indices, width, height, useMode, preview);
 }
@@ -1912,11 +1974,16 @@ async function extractGifFrames(file, width, height, mode) {
 document.getElementById("convertImg").onclick = convertImage;
 document.getElementById("addToPackage").onclick = addToPackage;
 document.getElementById("downloadImg").onclick = () => {
-  const text = document.getElementById("imgOutput").value;
-  if (!text) return;
   const format = document.getElementById("imgFormat").value;
   const ext = format === "nfp" ? "nfp" : format === "nfp256" ? "nfp256" : format === "nfpa" ? "nfpa" : "nfpc";
-  downloadText("image." + ext, text);
+  if (lastBinary) {
+    downloadBinary("image." + ext, lastBinary);
+    updateStatusBar("Downloaded binary (" + lastBinary.length + " bytes)", "ok");
+  } else {
+    const text = document.getElementById("imgOutput").value;
+    if (!text) return;
+    downloadText("image." + ext, text);
+  }
 };
 
 // ============================================================

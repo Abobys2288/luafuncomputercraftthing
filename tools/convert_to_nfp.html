@@ -866,6 +866,11 @@
           <span>Best compression</span>
           <span aria-hidden="true"></span>
         </label>
+        <label id="binarySwitch" class="switch">
+          <input id="binaryInput" type="checkbox" checked>
+          <span>Binary format (raw, ~25% smaller)</span>
+          <span aria-hidden="true"></span>
+        </label>
         <div id="compressionOptions" class="compression-options">
           <div class="field-top">
             <span class="field-label">Compression type</span>
@@ -1840,6 +1845,7 @@ const els = {
   dither: document.getElementById("ditherInput"),
   compact: document.getElementById("compactInput"),
   compactSwitch: document.getElementById("compactSwitch"),
+  binary: document.getElementById("binaryInput"),
   compressionOptions: document.getElementById("compressionOptions"),
   compressionLossless: document.getElementById("compressionLossless"),
   compressionLossy: document.getElementById("compressionLossy"),
@@ -1891,6 +1897,7 @@ let sourceFile = null;
 let sourceKind = "image";
 let sourceFileName = "";
 let outputText = "";
+let outputBinary = null;
 let outputFileName = "converted.nfp";
 let sourceObjectUrl = "";
 let sourceVideoElement = null;
@@ -3032,6 +3039,102 @@ function buildC8NfpaOutput(frameIndices, width, height, format, delayMs, loop) {
   ].join("\n");
 }
 
+// ============================================================
+// Binary format download
+// ============================================================
+function buildBinaryPayload(codec, indices, frameIndices, width, height, mode, delayMs, loop) {
+  let rawPayload;
+  let codecByte;
+  const isAnim = !!frameIndices;
+  const lossy = selectedCompressionMode() === "lossy";
+
+  if (codec === "c8" || codec === "auto") {
+    codecByte = 8;
+    rawPayload = buildC8RawPayload(isAnim ? frameIndices : [indices], width, height, mode, lossy);
+  } else if (codec === "c7") {
+    codecByte = 7;
+    const frames = isAnim ? frameIndices : [indices];
+    const stream = [];
+    let prev = null;
+    for (const f of frames) {
+      const fb = encodeC7FrameBytes(f, width, height, mode, prev, lossy);
+      writeVarUint(stream, fb.length);
+      for (let i = 0; i < fb.length; i++) stream.push(fb[i]);
+      prev = f;
+    }
+    rawPayload = lzssCompress(new Uint8Array(stream));
+  } else if (codec === "c6") {
+    codecByte = 6;
+    rawPayload = buildC6PayloadBytes(isAnim ? frameIndices : [indices], width, height, mode);
+  } else if (codec === "c5") {
+    codecByte = 5;
+    rawPayload = buildC5PayloadBytes(isAnim ? frameIndices : [indices], width, height);
+  } else if (codec === "c4") {
+    codecByte = 4;
+    rawPayload = encodeC4Bytes(indices, width, height, null);
+  } else if (codec === "c3") {
+    codecByte = 3;
+    rawPayload = encodeC3Bytes(indices, width, height, null);
+  } else {
+    return null;
+  }
+
+  const magic = isAnim ? [0x89, 0x4E, 0x46, 0x41] : [0x89, 0x4E, 0x46, 0x43];
+  const header = [...magic, 1, width & 255, (width >> 8) & 255, height & 255, (height >> 8) & 255, mode % 256, codecByte, 0];
+  if (isAnim) {
+    const fc = frameIndices.length;
+    header.push(fc & 255, (fc >> 8) & 255, (delayMs || 100) & 255, ((delayMs || 100) >> 8) & 255, loop || 0);
+  }
+  const plen = rawPayload.length;
+  header.push(plen & 255, (plen >> 8) & 255, (plen >> 16) & 255, (plen >> 24) & 255);
+  return new Uint8Array([...header, ...rawPayload]);
+}
+
+function buildC8RawPayload(frameIndices, width, height, mode, lossy) {
+  const transIdx = frameIndices.length > 1 ? c8FindTransIdx(frameIndices, mode) : null;
+  const stream = [];
+  stream.push(1);
+  stream.push(transIdx != null ? 1 : 0);
+  if (transIdx != null) stream.push(transIdx);
+  let prev = null;
+  for (const frame of frameIndices) {
+    const best = c8EncodeFrame(frame, width, height, mode, prev, lossy, transIdx);
+    stream.push(best.method);
+    writeVarUint(stream, best.payload.length);
+    for (let i = 0; i < best.payload.length; i++) stream.push(best.payload[i]);
+    prev = frame;
+  }
+  return lzssCompress(new Uint8Array(stream));
+}
+
+function buildC6PayloadBytes(frameIndices, width, height, mode) {
+  const stream = [];
+  let prev = null;
+  for (const indices of frameIndices) {
+    appendC6Frame(stream, indices, width, height, mode, prev);
+    prev = indices;
+  }
+  const frameStream = new Uint8Array(stream);
+  const lzss = lzssCompress(frameStream);
+  const useLzss = lzss.length < frameStream.length;
+  const body = new Uint8Array((useLzss ? lzss.length : frameStream.length) + 1);
+  body[0] = useLzss ? 1 : 0;
+  body.set(useLzss ? lzss : frameStream, 1);
+  return body;
+}
+
+function buildC5PayloadBytes(frameIndices, width, height) {
+  const stream = [];
+  let prev = null;
+  for (const indices of frameIndices) {
+    const fb = encodeC3Bytes(indices, width, height, prev);
+    writeVarUint(stream, fb.length);
+    for (let i = 0; i < fb.length; i++) stream.push(fb[i]);
+    prev = indices;
+  }
+  return lzssCompress(new Uint8Array(stream));
+}
+
 function buildC5Payload(frameIndices, width, height) {
   const stream = [];
   let previousFrame = null;
@@ -3279,6 +3382,7 @@ function updateMetrics(width, height, mode, text, format, frameCount = 1) {
 function clearGeneratedResult() {
   stopResultAnimation();
   outputText = "";
+  outputBinary = null;
   els.output.value = "";
   els.copy.disabled = true;
   els.download.disabled = true;
@@ -3903,6 +4007,10 @@ async function convert() {
     const quality = compressionQuality();
     let generatedText = "";
     let actuallyUsedLossy = false;
+    let finalIndices = null;
+    let finalFrameIndices = null;
+    let finalDelayMs = 100;
+    let finalLoop = 0;
     if (format.animated) {
       const fps = Math.round(clampNumber(els.fps.value, 1, 60, 10));
       const loop = Math.round(clampNumber(els.loop.value, 0, 65535, 0));
@@ -3963,6 +4071,10 @@ async function convert() {
         actuallyUsedLossy = false;
       }
 
+      finalFrameIndices = frameIndices;
+      finalDelayMs = delayMs;
+      finalLoop = loop;
+
       els.output.value = generatedText;
       startResultAnimation(previewFrames, width, height, delayMs);
       updateMetrics(width, height, format.mode, generatedText, format, frameIndices.length);
@@ -3979,15 +4091,18 @@ async function convert() {
           generatedText = lossyOutput;
           preview = previewFromIndices(lossyResult.indices, width, height, format.mode);
           actuallyUsedLossy = true;
+          finalIndices = lossyResult.indices;
         } else {
           generatedText = losslessOutput;
           preview = quantized.preview;
           actuallyUsedLossy = false;
+          finalIndices = quantized.indices;
         }
       } else {
         generatedText = losslessOutput;
         preview = quantized.preview;
         actuallyUsedLossy = false;
+        finalIndices = quantized.indices;
       }
 
       els.output.value = generatedText;
@@ -3996,6 +4111,16 @@ async function convert() {
     }
 
     outputText = generatedText;
+    outputBinary = null;
+    if (els.binary && els.binary.checked && format.compressed) {
+      try {
+        if (finalFrameIndices) {
+          outputBinary = buildBinaryPayload(selectedCodec(), null, finalFrameIndices, width, height, format.mode, finalDelayMs, finalLoop);
+        } else if (finalIndices) {
+          outputBinary = buildBinaryPayload(selectedCodec(), finalIndices, null, width, height, format.mode, 0, 0);
+        }
+      } catch (e) { outputBinary = null; }
+    }
     updateOutputName(format);
     els.copy.disabled = false;
     els.download.disabled = false;
@@ -4033,6 +4158,19 @@ async function copyOutput() {
 }
 
 function downloadOutput() {
+  if (outputBinary && els.binary && els.binary.checked) {
+    const blob = new Blob([outputBinary], { type: "application/octet-stream" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = outputFileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 500);
+    setStatus("Downloaded " + outputFileName + " (binary, " + outputBinary.length + " bytes)", "good");
+    showToast("Downloaded " + outputFileName + " (binary)", "good");
+    return;
+  }
   const text = els.output.value;
   if (!text) return;
   const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
@@ -4064,6 +4202,7 @@ function resetAll() {
   sourceFileName = "";
   sourceKind = "image";
   outputText = "";
+  outputBinary = null;
   cleanupSourceVideoElement();
   cleanupSourceObjectUrl();
   clearGeneratedResult();
@@ -4198,6 +4337,7 @@ for (const input of document.querySelectorAll("input[name='format']")) {
 
 els.output.addEventListener("input", () => {
   outputText = els.output.value;
+  outputBinary = null;
   const hasText = outputText.length > 0;
   els.copy.disabled = !hasText;
   els.download.disabled = !hasText;

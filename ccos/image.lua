@@ -244,8 +244,12 @@ local function decodeC3Frame(payload, mode, w, h, prevFlat, stats)
     return decodeC3FrameBytes(image.base64Bytes(payload), mode, w, h, prevFlat, stats)
 end
 
+local function decodeC4FrameFromBytes(bytes, mode, w, h, prevFlat, stats)
+    return decodeRleFrame(bytes, mode, w, h, prevFlat, stats, true)
+end
+
 local function decodeC4Frame(payload, mode, w, h, prevFlat, stats)
-    return decodeRleFrame(image.base64Bytes(payload), mode, w, h, prevFlat, stats, true)
+    return decodeC4FrameFromBytes(image.base64Bytes(payload), mode, w, h, prevFlat, stats)
 end
 
 -- ============================================================
@@ -378,8 +382,8 @@ end
 -- ============================================================
 -- C5 frames (LZSS stream of C3 frames)
 -- ============================================================
-local function decodeC5Frames(payload, mode, w, h, frameCount, stats)
-    local stream = lzssDecompress(image.base64Bytes(payload))
+local function decodeC5FramesFromBytes(bytes, mode, w, h, frameCount, stats)
+    local stream = lzssDecompress(bytes)
     local frames, idx, prevFlat = {}, 1, nil
     for f = 1, frameCount do
         local len
@@ -393,14 +397,17 @@ local function decodeC5Frames(payload, mode, w, h, frameCount, stats)
     return frames
 end
 
+local function decodeC5Frames(payload, mode, w, h, frameCount, stats)
+    return decodeC5FramesFromBytes(image.base64Bytes(payload), mode, w, h, frameCount, stats)
+end
+
 -- ============================================================
 -- C6 frames (region + LZW, optional LZSS wrapping)
 -- ============================================================
-local function decodeC6Frames(payload, mode, w, h, frameCount, stats)
-    local packed = image.base64Bytes(payload)
-    local method = packed[1] or 0
+local function decodeC6FramesFromBytes(bytes, mode, w, h, frameCount, stats)
+    local method = bytes[1] or 0
     local body = {}
-    for i = 2, #packed do body[#body + 1] = packed[i] end
+    for i = 2, #bytes do body[#body + 1] = bytes[i] end
     local stream = method == 1 and lzssDecompress(body) or body
     local total = w * h
     local frames, idx, prevFlat, prevRows = {}, 1, nil, nil
@@ -453,6 +460,10 @@ local function decodeC6Frames(payload, mode, w, h, frameCount, stats)
         prevFlat, prevRows = flat, rows
     end
     return frames
+end
+
+local function decodeC6Frames(payload, mode, w, h, frameCount, stats)
+    return decodeC6FramesFromBytes(image.base64Bytes(payload), mode, w, h, frameCount, stats)
 end
 
 -- ============================================================
@@ -551,9 +562,8 @@ local function decodeC7Frame(bytes, mode, w, h, prevFlat, stats)
     return flatToRows(flat, w, h), flat
 end
 
-local function decodeC7Frames(payload, mode, w, h, frameCount, stats)
-    local stream = lzssDecompress(image.base64Bytes(payload))
-    -- Each frame is prefixed by varUint length; frameBytes includes submethod as first byte
+local function decodeC7FramesFromBytes(bytes, mode, w, h, frameCount, stats)
+    local stream = lzssDecompress(bytes)
     local frames, idx, prevFlat = {}, 1, nil
     for f = 1, frameCount do
         local len
@@ -565,6 +575,10 @@ local function decodeC7Frames(payload, mode, w, h, frameCount, stats)
         prevFlat = flat
     end
     return frames
+end
+
+local function decodeC7Frames(payload, mode, w, h, frameCount, stats)
+    return decodeC7FramesFromBytes(image.base64Bytes(payload), mode, w, h, frameCount, stats)
 end
 
 -- ============================================================
@@ -667,8 +681,8 @@ local function decodeC8Frame(method, payload, mode, w, h, prevFlat, transIdx, st
     return rows, flat
 end
 
-local function decodeC8Frames(payload, mode, w, h, frameCount, stats)
-    local stream = lzssDecompress(image.base64Bytes(payload))
+local function decodeC8FramesFromBytes(bytes, mode, w, h, frameCount, stats)
+    local stream = lzssDecompress(bytes)
     local idx = 1
     local version = stream[idx] or 1; idx = idx + 1
     local flags = stream[idx] or 0; idx = idx + 1
@@ -690,6 +704,115 @@ local function decodeC8Frames(payload, mode, w, h, frameCount, stats)
     return frames
 end
 
+local function decodeC8Frames(payload, mode, w, h, frameCount, stats)
+    return decodeC8FramesFromBytes(image.base64Bytes(payload), mode, w, h, frameCount, stats)
+end
+
+-- ============================================================
+-- Binary format (.nfpc / .nfpa binary)
+--   Magic: 0x89 'N' 'F' 'C' (static)  /  0x89 'N' 'F' 'A' (animation)
+--   Header: version(1) w(2 LE) h(2 LE) mode(1) codec(1) flags(1)
+--           [transIdx(1) if flags&1]
+--           NFPA only: frameCount(2 LE) delay(2 LE) loop(1)
+--           payloadLen(4 LE)
+--   Body: raw LZSS-compressed bytes (no base64, ~33% smaller)
+-- ============================================================
+local BIN_MAGIC_STATIC  = string.char(0x89, 0x4E, 0x46, 0x43)  -- \x89NFC
+local BIN_MAGIC_ANIM    = string.char(0x89, 0x4E, 0x46, 0x41)  -- \x89NFA
+
+local function strToBytes(s)
+    local t = {}
+    for i = 1, #s do t[i] = s:byte(i) end
+    return t
+end
+
+local function decodeBinaryStatic(bytes, codecByte, mode, w, h, stats)
+    if codecByte == 8 then return decodeC8FramesFromBytes(bytes, mode, w, h, 1, stats)[1] or {}
+    elseif codecByte == 7 then return decodeC7FramesFromBytes(bytes, mode, w, h, 1, stats)[1] or {}
+    elseif codecByte == 6 then return decodeC6FramesFromBytes(bytes, mode, w, h, 1, stats)[1] or {}
+    elseif codecByte == 5 then return decodeC5FramesFromBytes(bytes, mode, w, h, 1, stats)[1] or {}
+    elseif codecByte == 4 then return decodeC4FrameFromBytes(bytes, mode, w, h, nil, stats)
+    elseif codecByte == 3 then return decodeC3FrameBytes(bytes, mode, w, h, nil, stats)
+    end
+    return {}
+end
+
+local function decodeBinaryAnim(bytes, codecByte, mode, w, h, frameCount, stats)
+    if codecByte == 8 then return decodeC8FramesFromBytes(bytes, mode, w, h, frameCount, stats)
+    elseif codecByte == 7 then return decodeC7FramesFromBytes(bytes, mode, w, h, frameCount, stats)
+    elseif codecByte == 6 then return decodeC6FramesFromBytes(bytes, mode, w, h, frameCount, stats)
+    elseif codecByte == 5 then return decodeC5FramesFromBytes(bytes, mode, w, h, frameCount, stats)
+    end
+    return {}
+end
+
+local function readBinaryHeader(data)
+    if #data < 11 then return nil end
+    local magic = data:sub(1, 4)
+    local isAnim, isStatic = magic == BIN_MAGIC_ANIM, magic == BIN_MAGIC_STATIC
+    if not isAnim and not isStatic then return nil end
+    local pos = 5
+    local version = data:byte(pos); pos = pos + 1
+    local w = data:byte(pos) + data:byte(pos + 1) * 256; pos = pos + 2
+    local h = data:byte(pos) + data:byte(pos + 1) * 256; pos = pos + 2
+    local mode = data:byte(pos); pos = pos + 1
+    if mode == 0 then mode = 256 end
+    local codecByte = data:byte(pos); pos = pos + 1
+    local flags = data:byte(pos); pos = pos + 1
+    local transIdx = nil
+    if (flags % 2) == 1 then transIdx = data:byte(pos); pos = pos + 1 end
+    local frameCount, delay, loop = 1, 100, 0
+    if isAnim then
+        frameCount = data:byte(pos) + data:byte(pos + 1) * 256; pos = pos + 2
+        delay = data:byte(pos) + data:byte(pos + 1) * 256; pos = pos + 2
+        loop = data:byte(pos); pos = pos + 1
+    end
+    if pos + 4 > #data then return nil end
+    local payloadLen = data:byte(pos) + data:byte(pos + 1) * 256 + data:byte(pos + 2) * 65536 + data:byte(pos + 3) * 16777216
+    pos = pos + 4
+    local payload = data:sub(pos, pos + payloadLen - 1)
+    if #payload < payloadLen then return nil end
+    return {
+        isAnim = isAnim, w = w, h = h, mode = mode, codec = codecByte,
+        flags = flags, transIdx = transIdx,
+        frameCount = frameCount, delay = delay, loop = loop,
+        bytes = strToBytes(payload),
+    }
+end
+
+function image.isBinary(path)
+    if not path or not fs.exists(path) or fs.isDir(path) then return false end
+    local f = fs.open(path, "rb")
+    if not f then return false end
+    local magic = f.read(4)
+    f.close()
+    return magic == BIN_MAGIC_STATIC or magic == BIN_MAGIC_ANIM
+end
+
+function image.loadBinaryFile(path)
+    local f = fs.open(path, "rb")
+    if not f then return nil, "Cannot open" end
+    local data = f.readAll()
+    f.close()
+    local hdr = readBinaryHeader(data)
+    if not hdr or hdr.isAnim then return nil, "Not a binary NFPC" end
+    local stats = {bad = 0}
+    local pixels = decodeBinaryStatic(hdr.bytes, hdr.codec, hdr.mode, hdr.w, hdr.h, stats)
+    return pixels, hdr.w, hdr.h
+end
+
+function image.loadBinaryAnimation(path)
+    local f = fs.open(path, "rb")
+    if not f then return nil, "Cannot open" end
+    local data = f.readAll()
+    f.close()
+    local hdr = readBinaryHeader(data)
+    if not hdr or not hdr.isAnim then return nil, "Not a binary NFPA" end
+    local stats = {bad = 0}
+    local frames = decodeBinaryAnim(hdr.bytes, hdr.codec, hdr.mode, hdr.w, hdr.h, hdr.frameCount, stats)
+    return frames, hdr.w, hdr.h, hdr.delay, hdr.loop
+end
+
 function image.parseHeader(line)
     line = tostring(line or "")
     if line:match("^!NFPA") then
@@ -709,6 +832,24 @@ end
 
 function image.detect(path)
     if not path or not fs.exists(path) or fs.isDir(path) then return nil end
+    -- Try binary first
+    local bf = fs.open(path, "rb")
+    if bf then
+        local magic = bf.read(4)
+        bf.close()
+        if magic == BIN_MAGIC_STATIC or magic == BIN_MAGIC_ANIM then
+            local f2 = fs.open(path, "rb")
+            local data = f2.readAll()
+            f2.close()
+            local hdr = readBinaryHeader(data)
+            if hdr then
+                return {kind = hdr.isAnim and "NFPA" or "NFPC", w = hdr.w, h = hdr.h,
+                        mode = hdr.mode, frames = hdr.frameCount, codec = "C" .. hdr.codec,
+                        binary = true}
+            end
+        end
+    end
+    -- Text format
     local f = fs.open(path, "r")
     if not f then return nil end
     local first = f.readLine()
@@ -856,6 +997,13 @@ end
 function image.loadFile(path)
     if not path or not fs.exists(path) then return nil, "File not found" end
     if fs.isDir(path) then return nil, "Path is a directory" end
+    -- Try binary format first
+    if image.isBinary(path) then
+        local ok, px, w, h = pcall(image.loadBinaryFile, path)
+        if ok and px then return px, w, h end
+        return nil, "Invalid binary NFPC: " .. tostring(w)
+    end
+    -- Text format
     local lines = image.readLines(path)
     if not lines then return nil, "Cannot read file" end
     local first = lines[1] or ""
@@ -890,6 +1038,13 @@ end
 function image.loadAnimation(path)
     if not path or not fs.exists(path) then return nil, "File not found" end
     if fs.isDir(path) then return nil, "Path is a directory" end
+    -- Try binary format first
+    if image.isBinary(path) then
+        local ok, frames, w, h, delay, loop = pcall(image.loadBinaryAnimation, path)
+        if ok and frames and #frames > 0 then return frames, w, h, delay or 100, loop or 0 end
+        return nil, "Invalid binary NFPA: " .. tostring(frames)
+    end
+    -- Text format
     local lines = image.readLines(path)
     if not lines then return nil, "Cannot read file" end
     if not (lines[1] or ""):match("^!NFPA") then return nil, "Not an animation" end
